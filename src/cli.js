@@ -1072,13 +1072,19 @@ function createOutput(stream) {
     const maxConversationRow = Math.max(0, rows - promptAreaRows);
 
     if (conversationRow >= maxConversationRow) {
-      stream.write('\n');
-      readline.moveCursor(stream, -columns, 0);
-      conversationRow = maxConversationRow;
-      conversationColumn = 0;
+      stream.write(text);
+      const plainText = text.replace(ANSI_ESCAPE_REGEX, '');
+      const newLines = (plainText.match(/\n/g) || []).length;
+      conversationRow = maxConversationRow + newLines;
+      const lastLine = plainText.split('\n').pop();
+      conversationColumn = calculateDisplayWidth(lastLine);
+      return;
     }
 
-    readline.cursorTo(stream, conversationColumn, conversationRow);
+    if (conversationColumn > 0) {
+      readline.cursorTo(stream, conversationColumn, conversationRow);
+    }
+
     stream.write(text);
 
     const plainText = text.replace(ANSI_ESCAPE_REGEX, '');
@@ -1104,6 +1110,14 @@ function createOutput(stream) {
     conversationColumn = col;
 
     readline.cursorTo(stream, 0, rows >= 4 ? rows - 2 : Math.max(0, conversationRow));
+  }
+
+  function calculateDisplayWidth(str) {
+    let width = 0;
+    for (const char of String(str || '')) {
+      width += getDisplayWidth(char);
+    }
+    return width;
   }
 
   function scrollConversationRegion(maxConversationRow) {
