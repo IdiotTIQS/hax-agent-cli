@@ -500,6 +500,9 @@ function createRequestOptions(request = {}) {
 }
 
 function parsePositiveNumber(value, fallback) {
+  if (value === Infinity || value === Number.POSITIVE_INFINITY) {
+    return Infinity;
+  }
   const number = Number(value);
   return Number.isFinite(number) && number > 0 ? number : fallback;
 }

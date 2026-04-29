@@ -348,6 +348,8 @@ async function handleChatMessage(content, { output, session }) {
   renderer.startWaiting();
 
   try {
+    let toolLimitReached = false;
+
     for await (const chunk of session.provider.stream({
       messages: session.messages,
       toolRegistry: session.toolRegistry,
@@ -373,7 +375,40 @@ async function handleChatMessage(content, { output, session }) {
       } else if (chunk.type === 'tool_result') {
         renderer.finishTool(chunk);
       } else if (chunk.type === 'tool_limit') {
-        renderer.notice(`Tool turn limit reached after ${chunk.maxToolTurns} turns. Ask me to continue.`);
+        toolLimitReached = true;
+        renderer.notice(`Tool turn limit reached after ${chunk.maxToolTurns} turns. Continuing automatically...`);
+      }
+    }
+
+    if (toolLimitReached && !session.responseInterrupted) {
+      renderer.notice('Continuing with the next batch of tool calls...');
+      for await (const chunk of session.provider.stream({
+        messages: session.messages,
+        toolRegistry: session.toolRegistry,
+        signal: abortController.signal,
+      })) {
+        if (session.responseInterrupted) {
+          break;
+        }
+
+        if (chunk.type === 'text') {
+          assistantText += chunk.delta;
+          renderer.writeText(chunk.delta);
+          if (process.env.HAX_AGENT_TEST_INTERRUPT_AFTER_TEXT === '1') {
+            session.responseInterrupted = true;
+            abortController.abort();
+            renderer.interrupt();
+            break;
+          }
+        } else if (chunk.type === 'thinking') {
+          renderer.thinking(chunk);
+        } else if (chunk.type === 'tool_start') {
+          renderer.startTool(chunk);
+        } else if (chunk.type === 'tool_result') {
+          renderer.finishTool(chunk);
+        } else if (chunk.type === 'tool_limit') {
+          renderer.notice('Tool turn limit reached again. Ask me to continue if you need more.');
+        }
       }
     }
   } catch (error) {
