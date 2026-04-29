@@ -215,6 +215,11 @@ function initializeShellScreen(output) {
   if (output.isInteractive()) {
     output.clear();
     output.resetConversationCursor();
+    const rows = process.stdout.rows || 0;
+    if (rows > 4) {
+      process.stdout.write(`\x1b[1;${rows - 3}r`);
+    }
+    process.stdout.write('\x1b[1;1H');
   }
 }
 
@@ -224,28 +229,25 @@ function promptShell(rl, output, session) {
   if (output.isInteractive()) {
     const columns = process.stdout.columns || 80;
     const rows = process.stdout.rows || 24;
+
     const statusLine = formatPromptLine(columns, formatShellStatus(session));
     const bottomLine = formatPromptLine(columns);
 
-    // Go to last row, clear bottom 3 rows, draw prompt frame
-    process.stdout.write(`\x1b[${rows};1H\x1b[K`);
-    process.stdout.write(`\x1b[${rows - 1};1H\x1b[K${bottomLine}`);
     process.stdout.write(`\x1b[${rows - 2};1H\x1b[K${statusLine}`);
-
-    // Move cursor to last row, column 5 (after "You ▸ ")
-    process.stdout.write(`\x1b[${rows};5H`);
+    process.stdout.write(`\x1b[${rows - 1};1H\x1b[K${bottomLine}`);
+    process.stdout.write(`\x1b[${rows};1H\x1b[K`);
   }
 
-  rl.prompt(true);
+  rl.prompt();
 }
 
 function clearPromptFrame(output) {
   if (output.isInteractive()) {
     const rows = process.stdout.rows || 0;
-    // Clear bottom 3 rows so content can show through
     for (let r = rows - 2; r <= rows; r++) {
       process.stdout.write(`\x1b[${r};1H\x1b[K`);
     }
+    process.stdout.write(`\x1b[${rows - 3};1H`);
   }
 }
 
