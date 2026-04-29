@@ -1,0 +1,28 @@
+{
+  "name": "hax-agent-cli",
+  "version": "0.1.0",
+  "description": "A minimal Claude-like agent CLI for coordinating authentication module refactors.",
+  "main": "src/index.js",
+  "bin": {
+    "hax-agent": "./src/cli.js"
+  },
+  "scripts": {
+    "start": "node src/cli.js",
+    "auth:team": "node src/cli.js team auth-refactor",
+    "test": "node --test"
+  },
+  "keywords": [
+    "agent",
+    "cli",
+    "auth",
+    "refactor"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@anthropic-ai/sdk": "latest"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
