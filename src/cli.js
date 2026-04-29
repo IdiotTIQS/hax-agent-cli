@@ -224,14 +224,10 @@ function promptShell(rl, output, session) {
   if (output.isInteractive()) {
     const columns = process.stdout.columns || 80;
     const statusLine = formatPromptLine(columns, formatShellStatus(session));
-    const bottomLine = formatPromptLine(columns);
-
-    process.stdout.write('\n');
     process.stdout.write(`${statusLine}\n`);
-    process.stdout.write(`${bottomLine}\n`);
   }
 
-  rl.prompt(true);
+  rl.prompt();
 }
 
 function clearPromptFrame(output) {
@@ -555,17 +551,11 @@ function createResponseRenderer(output) {
 
     stopSpinner();
 
-    const rows = process.stdout.rows || 0;
-    if (rows < 4) {
-      return;
-    }
-
-    // Write spinner at the last row (input line area)
-    process.stdout.write(`\x1b[${rows};1H\x1b[K${spinnerFrames[spinnerIndex]} ${label}`);
+    output.write(`${spinnerFrames[spinnerIndex]} ${label}`);
 
     spinnerTimer = setInterval(() => {
       spinnerIndex = (spinnerIndex + 1) % spinnerFrames.length;
-      process.stdout.write(`\x1b[${rows};1H\x1b[K${spinnerFrames[spinnerIndex]} ${label}`);
+      process.stdout.write(`\r${spinnerFrames[spinnerIndex]} ${label}`);
     }, 120);
   }
 
@@ -1069,21 +1059,14 @@ function createOutput(stream) {
 
       if (onStopSpinner) onStopSpinner();
 
-      // Clear the last row (spinner/input area) using ANSI cursor positioning
-      const rows = stream.rows || 0;
-      if (rows > 3) {
-        process.stdout.write(`\x1b[${rows};1H\x1b[K`);
-      }
+      process.stdout.write('\r\x1B[K');
     },
     writeTransient(text) {
       if (!this.isInteractive()) {
         return;
       }
 
-      const rows = stream.rows || 0;
-      if (rows > 3) {
-        process.stdout.write(`\x1b[${rows};1H\x1b[K${text}`);
-      }
+      process.stdout.write(`\r${text}`);
     },
     isInteractive() {
       return Boolean(stream.isTTY && process.stdin.isTTY);
