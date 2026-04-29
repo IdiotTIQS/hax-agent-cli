@@ -1166,12 +1166,61 @@ const ANSI = {
 function renderInlineSimple(text) {
   if (!text) return '';
 
-  return text
-    .replace(/`([^`]+)`/g, `${ANSI.code}$1${ANSI.reset}`)
-    .replace(/\*\*\*(.+?)\*\*\*/g, `${ANSI.bold}${ANSI.italic}$1${ANSI.reset}`)
-    .replace(/\*\*(.+?)\*\*/g, `${ANSI.bold}$1${ANSI.reset}`)
-    .replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, `${ANSI.italic}$1${ANSI.reset}`)
-    .replace(/\[(.+?)\]\(.+?\)/g, `${ANSI.underline}$1${ANSI.reset}`);
+  let result = text;
+  let cursor = 0;
+  let output = '';
+
+  while (cursor < result.length) {
+    const remaining = result.slice(cursor);
+
+    const boldMatch = remaining.match(/^\*\*(.+?)\*\*/);
+    if (boldMatch && boldMatch.index === 0 && boldMatch[1].length > 0) {
+      output += `${ANSI.bold}${boldMatch[1]}${ANSI.reset}`;
+      cursor += boldMatch[0].length;
+      continue;
+    }
+
+    const italicMatch = remaining.match(/^\*(.+?)\*/);
+    if (italicMatch && italicMatch.index === 0 && italicMatch[1].length > 0 && !remaining.startsWith('**')) {
+      output += `${ANSI.italic}${italicMatch[1]}${ANSI.reset}`;
+      cursor += italicMatch[0].length;
+      continue;
+    }
+
+    const codeMatch = remaining.match(/^`([^`]+)`/);
+    if (codeMatch && codeMatch.index === 0) {
+      output += `${ANSI.code}${codeMatch[1]}${ANSI.reset}`;
+      cursor += codeMatch[0].length;
+      continue;
+    }
+
+    const linkMatch = remaining.match(/^\[(.+?)\]\(.+?\)/);
+    if (linkMatch && linkMatch.index === 0) {
+      output += `${ANSI.underline}${linkMatch[1]}${ANSI.reset}`;
+      cursor += linkMatch[0].length;
+      continue;
+    }
+
+    if (result[cursor] === '*' || result[cursor] === '`' || result[cursor] === '[') {
+      output += result[cursor];
+      cursor += 1;
+      continue;
+    }
+
+    const nextSpecial = result.slice(cursor).search(/[*`\[]/);
+    if (nextSpecial === -1) {
+      output += result.slice(cursor);
+      break;
+    } else if (nextSpecial > 0) {
+      output += result.slice(cursor, cursor + nextSpecial);
+      cursor += nextSpecial;
+    } else {
+      output += result[cursor];
+      cursor += 1;
+    }
+  }
+
+  return output;
 }
 
 main(process.argv.slice(2)).catch((error) => {
