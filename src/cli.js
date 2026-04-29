@@ -215,57 +215,33 @@ function initializeShellScreen(output) {
   if (output.isInteractive()) {
     output.clear();
     output.resetConversationCursor();
-    setupScrollRegion();
   }
-}
-
-function setupScrollRegion() {
-  const rows = process.stdout.rows || 0;
-  if (rows < 4) return;
-  // Set scroll region: rows 1 to (rows-3), leaving bottom 3 lines for prompt
-  // CSI[1;top;bottom r sets the scroll margins (1-indexed)
-  process.stdout.write(`\x1b[1;${rows - 3}r`);
-}
-
-function resetScrollRegion() {
-  // Reset to full screen scrolling
-  process.stdout.write('\x1b[r');
 }
 
 function promptShell(rl, output, session) {
-  if (!output.isInteractive()) {
-    rl.setPrompt('You: ');
-    rl.prompt();
-    return;
+  rl.setPrompt(output.isInteractive() ? 'You ▸ ' : 'You: ');
+
+  if (output.isInteractive()) {
+    const rows = process.stdout.rows || 0;
+    const columns = process.stdout.columns || 80;
+    const statusLine = formatPromptLine(columns, formatShellStatus(session));
+    const bottomLine = formatPromptLine(columns);
+
+    output.writeLine('');
+    output.writeLine(statusLine);
+    output.writeLine(bottomLine);
+    output.writeLine('');
   }
 
-  rl.setPrompt('You ▸ ');
-  const rows = process.stdout.rows || 0;
-  if (rows >= 4) {
-    // Draw status line
-    const statusLine = formatPromptLine(process.stdout.columns || 80, formatShellStatus(session));
-    const bottomLine = formatPromptLine(process.stdout.columns || 80);
-
-    process.stdout.write(`\x1b[${rows - 2};1H`); // Go to row rows-2
-    process.stdout.write('\x1b[K'); // Clear line
-    process.stdout.write(statusLine);
-
-    process.stdout.write(`\x1b[${rows - 1};1H`); // Go to row rows-1
-    process.stdout.write('\x1b[K');
-    process.stdout.write(bottomLine);
-
-    process.stdout.write(`\x1b[${rows};1H`); // Go to last row for input
-    process.stdout.write('\x1b[K');
-  }
   rl.prompt(true);
 }
 
 function clearPromptFrame(output) {
-  // no-op: content flows naturally within scroll region
+  // no-op
 }
 
 function renderPromptFrame(output, session) {
-  // no-op: handled by promptShell
+  // no-op
 }
 
 function formatPromptLine(columns, label = '') {
