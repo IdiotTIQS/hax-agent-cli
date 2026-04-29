@@ -1072,6 +1072,7 @@ function createOutput(stream) {
     const maxConversationRow = Math.max(0, rows - promptAreaRows);
 
     if (conversationRow >= maxConversationRow) {
+      stopSpinner();
       stream.write(text);
       const plainText = text.replace(ANSI_ESCAPE_REGEX, '');
       const newLines = (plainText.match(/\n/g) || []).length;
