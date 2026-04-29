@@ -93,6 +93,15 @@ class AnthropicProvider extends ChatProvider {
         yield createTextChunk(event.delta.text);
       }
     }
+
+    const response = typeof stream.finalMessage === "function" ? await stream.finalMessage() : null;
+    if (response?.usage) {
+      yield {
+        type: "usage",
+        inputTokens: response.usage.input_tokens || 0,
+        outputTokens: response.usage.output_tokens || 0,
+      };
+    }
   }
 
   async *streamToolLoop(request = {}) {

@@ -90,6 +90,12 @@ class MockProvider extends ChatProvider {
 
       yield createTextChunk(chunk);
     }
+
+    yield {
+      type: "usage",
+      inputTokens: 1200,
+      outputTokens: chunks.length * 50,
+    };
   }
 }
 
