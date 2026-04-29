@@ -215,11 +215,6 @@ function initializeShellScreen(output) {
   if (output.isInteractive()) {
     output.clear();
     output.resetConversationCursor();
-    const rows = process.stdout.rows || 0;
-    if (rows > 4) {
-      process.stdout.write(`\x1b[1;${rows - 3}r`);
-    }
-    process.stdout.write('\x1b[1;1H');
   }
 }
 
@@ -228,27 +223,19 @@ function promptShell(rl, output, session) {
 
   if (output.isInteractive()) {
     const columns = process.stdout.columns || 80;
-    const rows = process.stdout.rows || 24;
-
     const statusLine = formatPromptLine(columns, formatShellStatus(session));
     const bottomLine = formatPromptLine(columns);
 
-    process.stdout.write(`\x1b[${rows - 2};1H\x1b[K${statusLine}`);
-    process.stdout.write(`\x1b[${rows - 1};1H\x1b[K${bottomLine}`);
-    process.stdout.write(`\x1b[${rows};1H\x1b[K`);
+    process.stdout.write('\n');
+    process.stdout.write(`${statusLine}\n`);
+    process.stdout.write(`${bottomLine}\n`);
   }
 
-  rl.prompt();
+  rl.prompt(true);
 }
 
 function clearPromptFrame(output) {
-  if (output.isInteractive()) {
-    const rows = process.stdout.rows || 0;
-    for (let r = rows - 2; r <= rows; r++) {
-      process.stdout.write(`\x1b[${r};1H\x1b[K`);
-    }
-    process.stdout.write(`\x1b[${rows - 3};1H`);
-  }
+  // no-op
 }
 
 function renderPromptFrame(output, session) {
