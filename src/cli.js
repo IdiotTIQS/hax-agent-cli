@@ -587,8 +587,6 @@ function createResponseRenderer(output) {
   let markdownFlushTimer = null;
   let lastRenderedLength = 0;
 
-  const markdownRenderer = createMarkdownRenderer(output);
-
   function writeAssistantPrefix() {
     if (!assistantStarted) {
       clearTransient();
@@ -656,10 +654,11 @@ function createResponseRenderer(output) {
 
       markdownFlushTimer = setTimeout(() => {
         if (markdownBuffer.length > lastRenderedLength) {
-          markdownRenderer.render(markdownBuffer, lastRenderedLength);
+          const newText = markdownBuffer.slice(lastRenderedLength);
+          output.write(renderInlineMarkdown(newText));
           lastRenderedLength = markdownBuffer.length;
         }
-      }, 50);
+      }, 30);
 
       lineOpen = true;
     },
@@ -1173,121 +1172,94 @@ const ANSI = {
   boldText: '\x1B[1;37m',
 };
 
-function createMarkdownRenderer(output) {
-  let pendingFullRender = false;
-  const columns = process.stdout.columns || 80;
+function renderInlineMarkdown(text) {
+  if (!text) return '';
 
-  function renderInline(text) {
-    if (!text) return '';
+  let result = '';
+  let inCodeBlock = false;
+  let codeBuffer = '';
+  let codeLang = '';
+  let codeStart = 0;
 
-    return text
-      .replace(/```(\w*)\n([\s\S]*?)```/g, (_m, lang, code) => {
-        const langLabel = lang ? ` ${lang} ` : '';
-        const paddedCode = code.trimEnd()
-          .split('\n')
-          .map((line) => `${ANSI.code}${line}${ANSI.reset}`)
-          .join('\n');
-        return `\n${ANSI.dim}┌─${langLabel}${'─'.repeat(Math.max(0, columns - langLabel.length - 4))}┐${ANSI.reset}\n${paddedCode}\n${ANSI.dim}└${'─'.repeat(columns - 2)}┘${ANSI.reset}\n`;
-      })
-      .replace(/`([^`]+)`/g, `${ANSI.code}$1${ANSI.reset}`)
-      .replace(/\*\*\*(.+?)\*\*\*/g, `${ANSI.bold}${ANSI.italic}$1${ANSI.reset}`)
-      .replace(/\*\*(.+?)\*\*/g, `${ANSI.bold}$1${ANSI.reset}`)
-      .replace(/\*(.+?)\*/g, `${ANSI.italic}$1${ANSI.reset}`)
-      .replace(/\[(.+?)\]\((.+?)\)/g, `${ANSI.link}$1${ANSI.reset}`);
-  }
+  const lines = text.split('\n');
 
-  function renderBlock(text) {
-    const lines = text.split('\n');
-    const result = [];
-    let inCodeBlock = false;
-    let codeBlockLines = [];
-    let codeBlockLang = '';
-
-    for (const line of lines) {
-      if (line.startsWith('```')) {
-        if (inCodeBlock) {
-          const paddedCode = codeBlockLines
-            .map((l) => `${ANSI.code}${l}${ANSI.reset}`)
-            .join('\n');
-          const langLabel = codeBlockLang ? ` ${codeBlockLang} ` : '';
-          result.push(`${ANSI.dim}┌─${langLabel}${'─'.repeat(Math.max(0, columns - langLabel.length - 4))}┐${ANSI.reset}`);
-          result.push(paddedCode);
-          result.push(`${ANSI.dim}└${'─'.repeat(columns - 2)}┘${ANSI.reset}`);
-          codeBlockLines = [];
-          codeBlockLang = '';
-          inCodeBlock = false;
-        } else {
-          inCodeBlock = true;
-          codeBlockLang = line.slice(3).trim();
-        }
-        continue;
-      }
-
-      if (inCodeBlock) {
-        codeBlockLines.push(line);
-        continue;
-      }
-
-      if (/^#{1,6}\s/.test(line)) {
-        const level = line.match(/^(#+)/)[1].length;
-        const content = line.replace(/^#+\s/, '');
-        const prefix = level === 1 ? `${ANSI.heading}${'─'.repeat(columns)}\n` : '';
-        result.push(`${prefix}${ANSI.heading}${'#'.repeat(level)} ${renderInline(content)}${ANSI.reset}`);
-        if (level === 1) result.push(`${ANSI.heading}${'─'.repeat(columns)}${ANSI.reset}`);
-        continue;
-      }
-
-      if (/^\s*[-*+]\s/.test(line)) {
-        const content = line.replace(/^\s*[-*+]\s/, '');
-        result.push(`  ${ANSI.list}•${ANSI.reset} ${renderInline(content)}`);
-        continue;
-      }
-
-      if (/^\s*\d+\.\s/.test(line)) {
-        const content = line.replace(/^\s*\d+\.\s/, '');
-        const num = line.match(/(\d+)\./)[1];
-        result.push(`  ${ANSI.list}${num}.${ANSI.reset} ${renderInline(content)}`);
-        continue;
-      }
-
-      if (/^---+$/.test(line) || /^\*\*\*+$/.test(line)) {
-        result.push(`${ANSI.hr}${'─'.repeat(columns)}${ANSI.reset}`);
-        continue;
-      }
-
-      if (line.trim() === '') {
-        result.push('');
-        continue;
-      }
-
-      result.push(renderInline(line));
-    }
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
 
     if (inCodeBlock) {
-      const paddedCode = codeBlockLines
-        .map((l) => `${ANSI.code}${l}${ANSI.reset}`)
-        .join('\n');
-      const langLabel = codeBlockLang ? ` ${codeBlockLang} ` : '';
-      result.push(`${ANSI.dim}┌─${langLabel}${'─'.repeat(Math.max(0, columns - langLabel.length - 4))}┐${ANSI.reset}`);
-      result.push(paddedCode);
-      result.push(`${ANSI.dim}└${'─'.repeat(columns - 2)}┘${ANSI.reset}`);
+      if (line.startsWith('```')) {
+        const formatted = renderCodeBlock(codeBuffer, codeLang);
+        result += (codeStart > 0 ? '\n' : '') + formatted;
+        codeBuffer = '';
+        codeLang = '';
+        codeStart = 0;
+        inCodeBlock = false;
+      } else {
+        if (codeBuffer.length > 0) codeBuffer += '\n';
+        codeBuffer += line;
+      }
+      continue;
     }
 
-    return result.join('\n');
+    if (line.startsWith('```')) {
+      codeLang = line.slice(3).trim();
+      codeStart = i;
+      inCodeBlock = true;
+      continue;
+    }
+
+    if (/^#{1,3}\s/.test(line)) {
+      const level = line.match(/^(#+)/)[1].length;
+      const content = line.replace(/^#+\s/, '');
+      result += (i > 0 ? '\n' : '') + `${ANSI.heading}${'#'.repeat(level)} ${renderInlineSimple(content)}${ANSI.reset}`;
+      continue;
+    }
+
+    if (/^\s*[-*+]\s/.test(line)) {
+      const content = line.replace(/^\s*[-*+]\s/, '');
+      result += (i > 0 ? '\n' : '') + `  ${ANSI.list}•${ANSI.reset} ${renderInlineSimple(content)}`;
+      continue;
+    }
+
+    if (/^\s*\d+\.\s/.test(line)) {
+      const content = line.replace(/^\s*\d+\.\s/, '');
+      const num = line.match(/(\d+)\./)[1];
+      result += (i > 0 ? '\n' : '') + `  ${ANSI.list}${num}.${ANSI.reset} ${renderInlineSimple(content)}`;
+      continue;
+    }
+
+    if (/^---+$/.test(line) || /^\*\*\*+$/.test(line)) {
+      result += (i > 0 ? '\n' : '') + `${ANSI.hr}──────────────────────────────────────────────────────────────────────────────${ANSI.reset}`;
+      continue;
+    }
+
+    result += (i > 0 ? '\n' : '') + renderInlineSimple(line);
   }
 
-  return {
-    render(fullText, fromPosition = 0) {
-      const newText = fullText.slice(fromPosition);
-      if (newText) {
-        output.write(renderInline(newText));
-      }
-    },
-    renderFull(text) {
-      const rendered = renderBlock(text);
-      output.write(rendered);
-    },
-  };
+  if (inCodeBlock) {
+    result += (codeStart > 0 ? '\n' : '') + renderCodeBlock(codeBuffer, codeLang);
+  }
+
+  return result;
+}
+
+function renderCodeBlock(code, lang) {
+  const columns = process.stdout.columns || 80;
+  const langLabel = lang ? ` ${lang} ` : '';
+  const borderLen = Math.max(10, columns - 4);
+  const topBorder = `${ANSI.dim}┌─${langLabel}${'─'.repeat(borderLen - langLabel.length - 2)}┐${ANSI.reset}`;
+  const bottomBorder = `${ANSI.dim}└${'─'.repeat(borderLen)}┘${ANSI.reset}`;
+  const codeLines = code.split('\n').map((l) => `${ANSI.code}${l}${ANSI.reset}`).join('\n');
+  return `${topBorder}\n${codeLines}\n${bottomBorder}`;
+}
+
+function renderInlineSimple(text) {
+  return text
+    .replace(/`([^`]+)`/g, `${ANSI.code}$1${ANSI.reset}`)
+    .replace(/\*\*\*(.+?)\*\*\*/g, `${ANSI.bold}${ANSI.italic}$1${ANSI.reset}`)
+    .replace(/\*\*(.+?)\*\*/g, `${ANSI.bold}$1${ANSI.reset}`)
+    .replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, `${ANSI.italic}$1${ANSI.reset}`)
+    .replace(/\[(.+?)\]\(.+?\)/g, `${ANSI.underline}$1${ANSI.reset}`);
 }
 
 main(process.argv.slice(2)).catch((error) => {
