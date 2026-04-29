@@ -567,10 +567,18 @@ function createResponseRenderer(output) {
     }
 
     stopSpinner();
-    output.writeTransient(`${spinnerFrames[spinnerIndex]} ${label}`);
+
+    const rows = process.stdout.rows || 0;
+    if (rows < 4) {
+      return;
+    }
+
+    // Write spinner at the last row (input line area)
+    process.stdout.write(`\x1b[${rows};1H\x1b[K${spinnerFrames[spinnerIndex]} ${label}`);
+
     spinnerTimer = setInterval(() => {
       spinnerIndex = (spinnerIndex + 1) % spinnerFrames.length;
-      output.writeTransient(`${spinnerFrames[spinnerIndex]} ${label}`);
+      process.stdout.write(`\x1b[${rows};1H\x1b[K${spinnerFrames[spinnerIndex]} ${label}`);
     }, 120);
   }
 
@@ -1072,17 +1080,23 @@ function createOutput(stream) {
         return;
       }
 
-      readline.clearLine(stream, 0);
-      readline.cursorTo(stream, 0);
+      stopSpinner();
+
+      // Clear the last row (spinner area)
+      const rows = stream.rows || 0;
+      if (rows > 3) {
+        process.stdout.write(`\x1b[${rows};1H\x1b[K`);
+      }
     },
     writeTransient(text) {
       if (!this.isInteractive()) {
         return;
       }
 
-      readline.clearLine(stream, 0);
-      readline.cursorTo(stream, 0);
-      stream.write(text);
+      const rows = stream.rows || 0;
+      if (rows > 3) {
+        process.stdout.write(`\x1b[${rows};1H\x1b[K${text}`);
+      }
     },
     isInteractive() {
       return Boolean(stream.isTTY && process.stdin.isTTY);
