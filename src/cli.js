@@ -240,12 +240,16 @@ function reservePromptArea(output) {
   const stream = process.stdout;
   const rows = stream.rows || 0;
 
-  if (rows < 4) {
+  if (rows < 6) {
     return;
   }
 
-  readline.cursorTo(stream, 0, rows - 4);
-  stream.write('\n\n\n');
+  // Move cursor to start of prompt area (3 rows from bottom for status bar + input)
+  readline.cursorTo(stream, 0, rows - 3);
+  // Write a separator line and blank space to reserve the area
+  stream.write(`\n${'─'.repeat(stream.columns || 80)}\n\n`);
+  // Move cursor back to just above the prompt area
+  readline.cursorTo(stream, 0, rows - 3);
 }
 
 function renderPromptFrame(output, session) {
@@ -255,23 +259,31 @@ function renderPromptFrame(output, session) {
 
   const stream = process.stdout;
   const rows = stream.rows || 0;
-  const topLine = formatPromptLine(stream.columns || 80, formatShellStatus(session));
-  const bottomLine = formatPromptLine(stream.columns || 80);
 
-  if (rows < 4) {
-    output.writeLine(topLine);
+  if (rows < 6) {
+    output.writeLine(formatPromptLine(stream.columns || 80, formatShellStatus(session)));
     return;
   }
 
+  const topLine = formatPromptLine(stream.columns || 80, formatShellStatus(session));
+  const bottomLine = formatPromptLine(stream.columns || 80);
+
+  // Write status line at rows-3
   readline.cursorTo(stream, 0, rows - 3);
   readline.clearLine(stream, 0);
   stream.write(topLine);
+
+  // Write separator at rows-2
   readline.cursorTo(stream, 0, rows - 2);
-  readline.clearLine(stream, 0);
-  readline.cursorTo(stream, 0, rows - 1);
   readline.clearLine(stream, 0);
   stream.write(bottomLine);
-  readline.cursorTo(stream, 0, rows - 2);
+
+  // Clear input line area
+  readline.cursorTo(stream, 0, rows - 1);
+  readline.clearLine(stream, 0);
+
+  // Position cursor for readline input (last line)
+  readline.cursorTo(stream, 4, rows - 1);
 }
 
 function clearPromptFrame(output) {
@@ -282,16 +294,18 @@ function clearPromptFrame(output) {
   const stream = process.stdout;
   const rows = stream.rows || 0;
 
-  if (rows < 4) {
+  if (rows < 6) {
     output.clearTransient();
     return;
   }
 
+  // Clear the prompt area lines
   for (const row of [rows - 3, rows - 2, rows - 1]) {
     readline.cursorTo(stream, 0, row);
     readline.clearLine(stream, 0);
   }
 
+  // Move cursor to just above where prompt was
   readline.cursorTo(stream, 0, rows - 4);
 }
 
@@ -1061,54 +1075,18 @@ function createOutput(stream) {
   const ANSI_ESCAPE_REGEX = /\x1B\[[0-?]*[ -/]*[@-~]/g;
 
   function writeToConversation(text) {
-    if (!stream.isTTY || !process.stdin.isTTY) {
-      stream.write(text);
-      return;
-    }
-
-    const rows = stream.rows || 0;
-    const columns = stream.columns || 0;
-    const promptAreaRows = 4;
-    const maxConversationRow = Math.max(0, rows - promptAreaRows);
-
-    if (conversationRow >= maxConversationRow) {
-      stopSpinner();
-      stream.write(text);
-      const plainText = text.replace(ANSI_ESCAPE_REGEX, '');
-      const newLines = (plainText.match(/\n/g) || []).length;
-      conversationRow = maxConversationRow + newLines;
-      const lastLine = plainText.split('\n').pop();
-      conversationColumn = calculateDisplayWidth(lastLine);
-      return;
-    }
-
-    if (conversationColumn > 0) {
-      readline.cursorTo(stream, conversationColumn, conversationRow);
-    }
-
     stream.write(text);
 
     const plainText = text.replace(ANSI_ESCAPE_REGEX, '');
-    let col = conversationColumn;
-    let row = conversationRow;
+    const lines = plainText.split('\n');
+    const newLines = lines.length - 1;
 
-    for (const char of plainText) {
-      if (char === '\n') {
-        row += 1;
-        col = 0;
-        continue;
-      }
-
-      col += getDisplayWidth(char);
-
-      if (col >= columns) {
-        row += 1;
-        col = col % columns;
-      }
+    if (newLines > 0) {
+      const lastLine = lines[lines.length - 1];
+      conversationColumn = calculateDisplayWidth(lastLine);
     }
 
-    conversationRow = row;
-    conversationColumn = col;
+    conversationRow += newLines;
   }
 
   function calculateDisplayWidth(str) {
