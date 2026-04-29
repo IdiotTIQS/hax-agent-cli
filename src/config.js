@@ -5,7 +5,7 @@ const path = require('path');
 const DEFAULT_SETTINGS = Object.freeze({
   agent: {
     name: 'hax-agent',
-    model: 'claude-opus-4-7',
+    model: 'claude-sonnet-4-20250514',
     apiKey: undefined,
     apiUrl: undefined,
     maxTurns: 20,

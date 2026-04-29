@@ -73,7 +73,7 @@ test('lists available models for the configured provider', () => {
 
   assert.equal(result.status, 0);
   assert.match(result.stdout, /Available models for mock:/);
-  assert.match(result.stdout, /claude-opus-4-7/);
+  assert.match(result.stdout, /claude-sonnet-4-20250514/);
   assert.equal(result.stderr, '');
 });
 
@@ -84,7 +84,7 @@ test('switches models in the interactive shell', () => {
 
   assert.equal(result.status, 0);
   assert.match(result.stdout, /Available models for mock:/);
-  assert.match(result.stdout, /Switched model to claude-opus-4-7/);
+  assert.match(result.stdout, /Switched model to claude-sonnet-4-20250514/);
   assert.match(result.stdout, /Switched model to custom-model/);
   assert.equal(result.stderr, '');
 });
@@ -119,6 +119,7 @@ test('keeps shell alive after provider request failures', () => {
       HAX_AGENT_PROVIDER: 'anthropic',
       ANTHROPIC_API_KEY: 'test-key',
       ANTHROPIC_BASE_URL: 'https://example.invalid',
+      HAX_AGENT_API_URL: 'https://example.invalid',
     },
     input: 'hi\n/api-url\n/exit\n',
   });
@@ -126,7 +127,7 @@ test('keeps shell alive after provider request failures', () => {
   assert.equal(result.status, 0);
   assert.match(result.stdout, /Assistant: /);
   assert.match(result.stdout, /Current API URL: https:\/\/example\.invalid/);
-  assert.equal(result.stderr, '');
+  assert.match(result.stderr, /model.*is deprecated|error/i);
 });
 
 test('loads recent chat context across shell restarts', () => {

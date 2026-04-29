@@ -1056,6 +1056,8 @@ function createOutput(stream) {
   let conversationRow = 0;
   let conversationColumn = 0;
 
+  const ANSI_ESCAPE_REGEX = /\x1B\[[0-?]*[ -/]*[@-~]/g;
+
   function writeToConversation(text) {
     if (!stream.isTTY || !process.stdin.isTTY) {
       stream.write(text);
@@ -1068,32 +1070,37 @@ function createOutput(stream) {
 
     readline.cursorTo(stream, conversationColumn, conversationRow);
 
-    for (const char of String(text)) {
+    stream.write(text);
+
+    const plainText = text.replace(ANSI_ESCAPE_REGEX, '');
+    let col = conversationColumn;
+    let row = conversationRow;
+
+    for (const char of plainText) {
       if (char === '\n') {
-        if (conversationRow >= maxConversationRow) {
-          scrollConversationRegion(maxConversationRow);
+        if (row >= maxConversationRow) {
+          row = maxConversationRow;
         } else {
-          stream.write(char);
-          conversationRow += 1;
+          row += 1;
         }
-        conversationColumn = 0;
-        readline.cursorTo(stream, conversationColumn, conversationRow);
+        col = 0;
         continue;
       }
 
-      stream.write(char);
-      conversationColumn += getDisplayWidth(char);
+      col += getDisplayWidth(char);
 
-      if (conversationColumn >= columns) {
-        if (conversationRow >= maxConversationRow) {
-          scrollConversationRegion(maxConversationRow);
+      if (col >= columns) {
+        if (row >= maxConversationRow) {
+          row = maxConversationRow;
         } else {
-          conversationRow += 1;
+          row += 1;
         }
-        conversationColumn = conversationColumn % columns;
-        readline.cursorTo(stream, conversationColumn, conversationRow);
+        col = col % columns;
       }
     }
+
+    conversationRow = row;
+    conversationColumn = col;
 
     readline.cursorTo(stream, 0, rows >= 4 ? rows - 2 : conversationRow);
   }

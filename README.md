@@ -1,4 +1,3 @@
-123123111
 # Hax Agent CLI
 
 Hax Agent CLI 是一个轻量级、Claude-like 的本地 Agent 命令行工具，用于在终端中发起对话、切换模型、调用本地文件工具，并生成认证模块重构的多 Agent 协作计划。
@@ -62,7 +61,7 @@ hax-agent
 ```text
 /api-url https://api.anthropic.com
 /api-key your_api_key_here
-/model claude-opus-4-7
+/model claude-sonnet-4-20250514
 ```
 
 也可以通过环境变量配置：
@@ -70,7 +69,7 @@ hax-agent
 ```bash
 export HAX_AGENT_PROVIDER=anthropic
 export ANTHROPIC_API_KEY=your_api_key_here
-export HAX_AGENT_MODEL=claude-opus-4-7
+export HAX_AGENT_MODEL=claude-sonnet-4-20250514
 npm start
 ```
 
@@ -141,7 +140,7 @@ npm test                   # node --test
 {
   "agent": {
     "provider": "anthropic",
-    "model": "claude-opus-4-7",
+    "model": "claude-sonnet-4-20250514",
     "apiKey": "your_api_key_here",
     "apiUrl": "https://api.anthropic.com",
     "temperature": 0.2
