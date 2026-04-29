@@ -1,7 +1,7 @@
 {
   "name": "hax-agent-cli",
-  "version": "0.1.0",
-  "description": "A minimal Claude-like agent CLI for coordinating authentication module refactors.",
+  "version": "1.0.0",
+  "description": "A professional AI coding assistant with Claude-like CLI experience. Explore codebases, read/write files, execute shell commands, and coordinate agent teams.",
   "main": "src/index.js",
   "bin": {
     "hax-agent": "./src/cli.js"
@@ -11,13 +11,30 @@
     "auth:team": "node src/cli.js team auth-refactor",
     "test": "node --test"
   },
+  "files": [
+    "src/**/*.js",
+    "test/**/*.js"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/IdiotTIQS/hax-agent-cli.git"
+  },
+  "bugs": {
+    "url": "https://github.com/IdiotTIQS/hax-agent-cli/issues"
+  },
+  "homepage": "https://github.com/IdiotTIQS/hax-agent-cli#readme",
   "keywords": [
+    "ai",
     "agent",
     "cli",
-    "auth",
-    "refactor"
+    "coding-assistant",
+    "claude",
+    "code-refactor",
+    "code-exploration",
+    "shell",
+    "anthropic"
   ],
-  "author": "",
+  "author": "IdiotTIQS",
   "license": "MIT",
   "dependencies": {
     "@anthropic-ai/sdk": "latest"
