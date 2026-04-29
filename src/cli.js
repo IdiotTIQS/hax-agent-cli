@@ -551,11 +551,11 @@ function createResponseRenderer(output) {
 
     stopSpinner();
 
-    output.write(`${spinnerFrames[spinnerIndex]} ${label}`);
+    process.stdout.write(`\r\x1B[K${spinnerFrames[spinnerIndex]} ${label}`);
 
     spinnerTimer = setInterval(() => {
       spinnerIndex = (spinnerIndex + 1) % spinnerFrames.length;
-      process.stdout.write(`\r${spinnerFrames[spinnerIndex]} ${label}`);
+      process.stdout.write(`\r\x1B[K${spinnerFrames[spinnerIndex]} ${label}`);
     }, 120);
   }
 
@@ -569,7 +569,7 @@ function createResponseRenderer(output) {
   function clearTransient() {
     stopSpinner();
     if (useDynamicTerminal) {
-      output.clearTransient();
+      process.stdout.write('\r\x1B[K');
     }
   }
 
@@ -588,6 +588,7 @@ function createResponseRenderer(output) {
   return {
     startWaiting() {
       if (useDynamicTerminal) {
+        process.stdout.write('\n');
         startSpinner('Assistant is thinking...');
       } else {
         writeAssistantPrefix();
