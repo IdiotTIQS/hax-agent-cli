@@ -583,9 +583,6 @@ function createResponseRenderer(output) {
   let assistantStarted = false;
   let textStarted = false;
   let lineOpen = false;
-  let markdownBuffer = '';
-  let markdownFlushTimer = null;
-  let lastRenderedLength = 0;
 
   function writeAssistantPrefix() {
     if (!assistantStarted) {
@@ -646,20 +643,7 @@ function createResponseRenderer(output) {
     writeText(delta) {
       writeAssistantPrefix();
       textStarted = true;
-      markdownBuffer += delta;
-
-      if (markdownFlushTimer) {
-        clearTimeout(markdownFlushTimer);
-      }
-
-      markdownFlushTimer = setTimeout(() => {
-        if (markdownBuffer.length > lastRenderedLength) {
-          const newText = markdownBuffer.slice(lastRenderedLength);
-          output.write(renderInlineMarkdown(newText));
-          lastRenderedLength = markdownBuffer.length;
-        }
-      }, 30);
-
+      output.write(renderInlineSimple(delta));
       lineOpen = true;
     },
     thinking(chunk) {
@@ -1179,88 +1163,9 @@ const ANSI = {
   boldText: '\x1B[1;37m',
 };
 
-function renderInlineMarkdown(text) {
+function renderInlineSimple(text) {
   if (!text) return '';
 
-  let result = '';
-  let inCodeBlock = false;
-  let codeBuffer = '';
-  let codeLang = '';
-  let codeStart = 0;
-
-  const lines = text.split('\n');
-
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-
-    if (inCodeBlock) {
-      if (line.startsWith('```')) {
-        const formatted = renderCodeBlock(codeBuffer, codeLang);
-        result += (codeStart > 0 ? '\n' : '') + formatted;
-        codeBuffer = '';
-        codeLang = '';
-        codeStart = 0;
-        inCodeBlock = false;
-      } else {
-        if (codeBuffer.length > 0) codeBuffer += '\n';
-        codeBuffer += line;
-      }
-      continue;
-    }
-
-    if (line.startsWith('```')) {
-      codeLang = line.slice(3).trim();
-      codeStart = i;
-      inCodeBlock = true;
-      continue;
-    }
-
-    if (/^#{1,3}\s/.test(line)) {
-      const level = line.match(/^(#+)/)[1].length;
-      const content = line.replace(/^#+\s/, '');
-      result += (i > 0 ? '\n' : '') + `${ANSI.heading}${'#'.repeat(level)} ${renderInlineSimple(content)}${ANSI.reset}`;
-      continue;
-    }
-
-    if (/^\s*[-*+]\s/.test(line)) {
-      const content = line.replace(/^\s*[-*+]\s/, '');
-      result += (i > 0 ? '\n' : '') + `  ${ANSI.list}•${ANSI.reset} ${renderInlineSimple(content)}`;
-      continue;
-    }
-
-    if (/^\s*\d+\.\s/.test(line)) {
-      const content = line.replace(/^\s*\d+\.\s/, '');
-      const num = line.match(/(\d+)\./)[1];
-      result += (i > 0 ? '\n' : '') + `  ${ANSI.list}${num}.${ANSI.reset} ${renderInlineSimple(content)}`;
-      continue;
-    }
-
-    if (/^---+$/.test(line) || /^\*\*\*+$/.test(line)) {
-      result += (i > 0 ? '\n' : '') + `${ANSI.hr}──────────────────────────────────────────────────────────────────────────────${ANSI.reset}`;
-      continue;
-    }
-
-    result += (i > 0 ? '\n' : '') + renderInlineSimple(line);
-  }
-
-  if (inCodeBlock) {
-    result += (codeStart > 0 ? '\n' : '') + renderCodeBlock(codeBuffer, codeLang);
-  }
-
-  return result;
-}
-
-function renderCodeBlock(code, lang) {
-  const columns = process.stdout.columns || 80;
-  const langLabel = lang ? ` ${lang} ` : '';
-  const borderLen = Math.max(10, columns - 4);
-  const topBorder = `${ANSI.dim}┌─${langLabel}${'─'.repeat(borderLen - langLabel.length - 2)}┐${ANSI.reset}`;
-  const bottomBorder = `${ANSI.dim}└${'─'.repeat(borderLen)}┘${ANSI.reset}`;
-  const codeLines = code.split('\n').map((l) => `${ANSI.code}${l}${ANSI.reset}`).join('\n');
-  return `${topBorder}\n${codeLines}\n${bottomBorder}`;
-}
-
-function renderInlineSimple(text) {
   return text
     .replace(/`([^`]+)`/g, `${ANSI.code}$1${ANSI.reset}`)
     .replace(/\*\*\*(.+?)\*\*\*/g, `${ANSI.bold}${ANSI.italic}$1${ANSI.reset}`)
