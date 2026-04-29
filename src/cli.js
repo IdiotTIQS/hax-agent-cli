@@ -583,6 +583,11 @@ function createResponseRenderer(output) {
   let assistantStarted = false;
   let textStarted = false;
   let lineOpen = false;
+  let markdownBuffer = '';
+  let markdownFlushTimer = null;
+  let lastRenderedLength = 0;
+
+  const markdownRenderer = createMarkdownRenderer(output);
 
   function writeAssistantPrefix() {
     if (!assistantStarted) {
@@ -643,7 +648,19 @@ function createResponseRenderer(output) {
     writeText(delta) {
       writeAssistantPrefix();
       textStarted = true;
-      output.write(delta);
+      markdownBuffer += delta;
+
+      if (markdownFlushTimer) {
+        clearTimeout(markdownFlushTimer);
+      }
+
+      markdownFlushTimer = setTimeout(() => {
+        if (markdownBuffer.length > lastRenderedLength) {
+          markdownRenderer.render(markdownBuffer, lastRenderedLength);
+          lastRenderedLength = markdownBuffer.length;
+        }
+      }, 50);
+
       lineOpen = true;
     },
     thinking(chunk) {
@@ -1139,6 +1156,138 @@ function createOutput(stream) {
 
 function showHelp() {
   console.log(`hax-agent\n\nUsage:\n  hax-agent\n  hax-agent chat\n  hax-agent help\n  hax-agent models\n  hax-agent team auth-refactor\n\nCommands:\n  chat                  ${commands.chat.description}\n  help                  ${commands.help.description}\n  models                ${commands.models.description}\n  team auth-refactor    Create agents and parallel tasks for auth refactoring\n\nInteractive slash commands:\n  /help /exit /clear /tools /agents /models /model <model-id> /api-url <base-url> /api-key <key>`);
+}
+
+// ANSI color codes for terminal rendering
+const ANSI = {
+  reset: '\x1B[0m',
+  bold: '\x1B[1m',
+  dim: '\x1B[2m',
+  italic: '\x1B[3m',
+  underline: '\x1B[4m',
+  code: '\x1B[38;5;141m',
+  heading: '\x1B[1;36m',
+  link: '\x1B[4;34m',
+  list: '\x1B[33m',
+  hr: '\x1B[90m',
+  boldText: '\x1B[1;37m',
+};
+
+function createMarkdownRenderer(output) {
+  let pendingFullRender = false;
+  const columns = process.stdout.columns || 80;
+
+  function renderInline(text) {
+    if (!text) return '';
+
+    return text
+      .replace(/```(\w*)\n([\s\S]*?)```/g, (_m, lang, code) => {
+        const langLabel = lang ? ` ${lang} ` : '';
+        const paddedCode = code.trimEnd()
+          .split('\n')
+          .map((line) => `${ANSI.code}${line}${ANSI.reset}`)
+          .join('\n');
+        return `\n${ANSI.dim}┌─${langLabel}${'─'.repeat(Math.max(0, columns - langLabel.length - 4))}┐${ANSI.reset}\n${paddedCode}\n${ANSI.dim}└${'─'.repeat(columns - 2)}┘${ANSI.reset}\n`;
+      })
+      .replace(/`([^`]+)`/g, `${ANSI.code}$1${ANSI.reset}`)
+      .replace(/\*\*\*(.+?)\*\*\*/g, `${ANSI.bold}${ANSI.italic}$1${ANSI.reset}`)
+      .replace(/\*\*(.+?)\*\*/g, `${ANSI.bold}$1${ANSI.reset}`)
+      .replace(/\*(.+?)\*/g, `${ANSI.italic}$1${ANSI.reset}`)
+      .replace(/\[(.+?)\]\((.+?)\)/g, `${ANSI.link}$1${ANSI.reset}`);
+  }
+
+  function renderBlock(text) {
+    const lines = text.split('\n');
+    const result = [];
+    let inCodeBlock = false;
+    let codeBlockLines = [];
+    let codeBlockLang = '';
+
+    for (const line of lines) {
+      if (line.startsWith('```')) {
+        if (inCodeBlock) {
+          const paddedCode = codeBlockLines
+            .map((l) => `${ANSI.code}${l}${ANSI.reset}`)
+            .join('\n');
+          const langLabel = codeBlockLang ? ` ${codeBlockLang} ` : '';
+          result.push(`${ANSI.dim}┌─${langLabel}${'─'.repeat(Math.max(0, columns - langLabel.length - 4))}┐${ANSI.reset}`);
+          result.push(paddedCode);
+          result.push(`${ANSI.dim}└${'─'.repeat(columns - 2)}┘${ANSI.reset}`);
+          codeBlockLines = [];
+          codeBlockLang = '';
+          inCodeBlock = false;
+        } else {
+          inCodeBlock = true;
+          codeBlockLang = line.slice(3).trim();
+        }
+        continue;
+      }
+
+      if (inCodeBlock) {
+        codeBlockLines.push(line);
+        continue;
+      }
+
+      if (/^#{1,6}\s/.test(line)) {
+        const level = line.match(/^(#+)/)[1].length;
+        const content = line.replace(/^#+\s/, '');
+        const prefix = level === 1 ? `${ANSI.heading}${'─'.repeat(columns)}\n` : '';
+        result.push(`${prefix}${ANSI.heading}${'#'.repeat(level)} ${renderInline(content)}${ANSI.reset}`);
+        if (level === 1) result.push(`${ANSI.heading}${'─'.repeat(columns)}${ANSI.reset}`);
+        continue;
+      }
+
+      if (/^\s*[-*+]\s/.test(line)) {
+        const content = line.replace(/^\s*[-*+]\s/, '');
+        result.push(`  ${ANSI.list}•${ANSI.reset} ${renderInline(content)}`);
+        continue;
+      }
+
+      if (/^\s*\d+\.\s/.test(line)) {
+        const content = line.replace(/^\s*\d+\.\s/, '');
+        const num = line.match(/(\d+)\./)[1];
+        result.push(`  ${ANSI.list}${num}.${ANSI.reset} ${renderInline(content)}`);
+        continue;
+      }
+
+      if (/^---+$/.test(line) || /^\*\*\*+$/.test(line)) {
+        result.push(`${ANSI.hr}${'─'.repeat(columns)}${ANSI.reset}`);
+        continue;
+      }
+
+      if (line.trim() === '') {
+        result.push('');
+        continue;
+      }
+
+      result.push(renderInline(line));
+    }
+
+    if (inCodeBlock) {
+      const paddedCode = codeBlockLines
+        .map((l) => `${ANSI.code}${l}${ANSI.reset}`)
+        .join('\n');
+      const langLabel = codeBlockLang ? ` ${codeBlockLang} ` : '';
+      result.push(`${ANSI.dim}┌─${langLabel}${'─'.repeat(Math.max(0, columns - langLabel.length - 4))}┐${ANSI.reset}`);
+      result.push(paddedCode);
+      result.push(`${ANSI.dim}└${'─'.repeat(columns - 2)}┘${ANSI.reset}`);
+    }
+
+    return result.join('\n');
+  }
+
+  return {
+    render(fullText, fromPosition = 0) {
+      const newText = fullText.slice(fromPosition);
+      if (newText) {
+        output.write(renderInline(newText));
+      }
+    },
+    renderFull(text) {
+      const rendered = renderBlock(text);
+      output.write(rendered);
+    },
+  };
 }
 
 main(process.argv.slice(2)).catch((error) => {

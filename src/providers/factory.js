@@ -11,7 +11,7 @@ const PROVIDERS = {
 };
 
 function createProvider(config = {}, env = process.env) {
-  const providerName = normalizeProviderName(config.provider || env.HAX_AGENT_PROVIDER || env.AI_PROVIDER || "mock");
+  const providerName = normalizeProviderName(config.provider || env.HAX_AGENT_PROVIDER || env.AI_PROVIDER || resolveProviderFromConfig(config, env));
   const Provider = PROVIDERS[providerName];
 
   if (!Provider) {
@@ -47,6 +47,17 @@ function registerProvider(name, Provider) {
 
 function normalizeProviderName(name) {
   return String(name || "").trim().toLowerCase();
+}
+
+function resolveProviderFromConfig(config, env) {
+  const hasApiKey = config.apiKey || env.ANTHROPIC_API_KEY;
+  const hasApiUrl = config.apiUrl || env.HAX_AGENT_API_URL || env.ANTHROPIC_BASE_URL;
+
+  if (hasApiKey) {
+    return hasApiUrl ? 'anthropic' : 'anthropic';
+  }
+
+  return 'mock';
 }
 
 function parseDelay(delayMs) {
