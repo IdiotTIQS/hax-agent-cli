@@ -681,19 +681,158 @@ function createResponseRenderer(output) {
 function formatToolStart(chunk) {
   const displayInput = chunk.displayInput || summarizeToolInput(chunk.name, chunk.input);
   const label = toToolLabel(chunk.name);
-  return displayInput ? `[tool] ${label}(${displayInput})` : `[tool] ${label}`;
+  const attemptLabel = chunk.attempt && chunk.attempt > 1 ? ` (attempt ${chunk.attempt})` : '';
+  if (!displayInput) return `[tool] ${label}${attemptLabel}`;
+  return `[tool] ${label}${attemptLabel}(${displayInput})`;
 }
 
 function formatToolResult(chunk) {
   const duration = formatDuration(chunk.durationMs);
+  const lines = [];
+  const name = chunk.name;
+  const input = chunk.input || {};
 
   if (chunk.isError) {
     const code = chunk.errorCode && chunk.errorCode !== 'TOOL_ERROR' ? `${chunk.errorCode}: ` : '';
     const message = chunk.error ? `${code}${chunk.error}` : `${code}tool failed`;
-    return `  Failed${duration}: ${message}`;
+    const errorDetail = formatToolErrorDetail(name, input, message);
+    lines.push(`  ✗ Failed${duration}`);
+    lines.push(...errorDetail.split('\n').map((line) => `    ${line}`));
+    return lines.join('\n');
   }
 
-  return `  Done${duration}`;
+  const detail = formatToolSuccessDetail(chunk);
+
+  lines.push(`  ✓ Done${duration}`);
+  if (detail) {
+    lines.push(...detail.split('\n').map((line) => `    ${line}`));
+  }
+
+  return lines.join('\n');
+}
+
+function formatToolSuccessDetail(chunk) {
+  const data = chunk.data || {};
+  const name = chunk.name;
+
+  if (name === 'file.read') {
+    const lineCount = (data.content || '').split('\n').length;
+    return `${toDisplayPath(data.path)} · ${formatBytes(data.bytes)} · ${lineCount} ${pluralize('line', lineCount)}`;
+  }
+
+  if (name === 'file.write') {
+    const action = data.overwritten ? 'Updated' : 'Created';
+    const change = data.change;
+    if (change && change.operation === 'update') {
+      const parts = [];
+      if (change.added > 0) parts.push(`+${change.added}`);
+      if (change.removed > 0) parts.push(`-${change.removed}`);
+      return `${action} ${toDisplayPath(data.path)} · ${formatBytes(data.bytes)} (${parts.join(', ')})`;
+    }
+    return `${action} ${toDisplayPath(data.path)} · ${formatBytes(data.bytes)}`;
+  }
+
+  if (name === 'file.glob') {
+    const matchCount = Array.isArray(data.matches) ? data.matches.length : 0;
+    const truncated = data.truncated ? ' (truncated)' : '';
+    return `${matchCount} ${pluralize('file', matchCount)} matched${truncated}`;
+  }
+
+  if (name === 'file.search') {
+    const matchCount = Array.isArray(data.matches) ? data.matches.length : 0;
+    const fileCount = new Set(Array.isArray(data.matches) ? data.matches.map((m) => m.path) : []).size;
+    const truncated = data.truncated ? ' (truncated)' : '';
+    return `${matchCount} ${pluralize('match', matchCount)} in ${fileCount} ${pluralize('file', fileCount)}${truncated}`;
+  }
+
+  if (name === 'shell.run') {
+    const parts = [];
+    if (data.exitCode !== null && data.exitCode !== undefined) {
+      parts.push(`exit ${data.exitCode}`);
+    }
+    if (data.signal) {
+      parts.push(`signal ${data.signal}`);
+    }
+    if (data.timedOut) {
+      parts.push('timed out');
+    }
+    const status = parts.length > 0 ? ` (${parts.join(', ')})` : '';
+    if (data.stdout) {
+      const output = data.stdout.trim();
+      if (output.length > 0) {
+        const preview = output.length > 200 ? `${output.slice(0, 197)}...` : output;
+        return `exit ${data.exitCode || 0}${status}\n    └─ stdout: ${preview}`;
+      }
+    }
+    if (data.stderr) {
+      const errOut = data.stderr.trim();
+      if (errOut.length > 0) {
+        const preview = errOut.length > 200 ? `${errOut.slice(0, 197)}...` : errOut;
+        return `exit ${data.exitCode || 0}${status}\n    └─ stderr: ${preview}`;
+      }
+    }
+    return `completed${status}`;
+  }
+
+  return '';
+}
+
+function formatBytes(bytes) {
+  if (!Number.isFinite(bytes) || bytes === 0) return '0 B';
+  const units = ['B', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(1024));
+  const value = bytes / Math.pow(1024, i);
+  return `${i === 0 ? value : value.toFixed(1)} ${units[i]}`;
+}
+
+function toDisplayPath(filePath) {
+  return normalizeSlashes(String(filePath || ''));
+}
+
+function normalizeSlashes(value) {
+  return value.replace(/\//g, '\\');
+}
+
+function formatToolErrorDetail(name, input, message) {
+  const lines = [];
+
+  if (name === 'file.read') {
+    const displayPath = input.path ? toDisplayPath(input.path) : '(no path provided)';
+    lines.push(`└─ FileRead(${displayPath}) → ${message}`);
+    if (!input.path) {
+      lines.push('  Hint: provide a valid file path relative to the workspace root');
+    }
+    return lines.join('\n');
+  }
+
+  if (name === 'file.write') {
+    const displayPath = input.path ? toDisplayPath(input.path) : '(no path provided)';
+    lines.push(`└─ FileWrite(${displayPath}) → ${message}`);
+    if (!input.path) {
+      lines.push('  Hint: provide a valid file path');
+    }
+    return lines.join('\n');
+  }
+
+  if (name === 'file.glob') {
+    const pattern = input.pattern || '(default: **)';
+    lines.push(`└─ FileGlob(pattern: ${pattern}) → ${message}`);
+    return lines.join('\n');
+  }
+
+  if (name === 'file.search') {
+    const query = input.query || '(empty)';
+    lines.push(`└─ FileSearch(query: "${query}") → ${message}`);
+    return lines.join('\n');
+  }
+
+  if (name === 'shell.run') {
+    const cmd = input.command || '(no command)';
+    lines.push(`└─ ShellRun(${cmd}) → ${message}`);
+    return lines.join('\n');
+  }
+
+  return `└─ ${message}`;
 }
 
 function formatFileModificationNotice(chunk) {
