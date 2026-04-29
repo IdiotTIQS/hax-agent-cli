@@ -1075,14 +1075,14 @@ function createOutput(stream) {
       conversationRow = 0;
       conversationColumn = 0;
     },
-    clearTransient() {
+    clearTransient(onStopSpinner) {
       if (!this.isInteractive()) {
         return;
       }
 
-      stopSpinner();
+      if (onStopSpinner) onStopSpinner();
 
-      // Clear the last row (spinner area)
+      // Clear the last row (spinner/input area) using ANSI cursor positioning
       const rows = stream.rows || 0;
       if (rows > 3) {
         process.stdout.write(`\x1b[${rows};1H\x1b[K`);
