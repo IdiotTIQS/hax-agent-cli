@@ -8,7 +8,7 @@ const { createAuthRefactorTeam } = require('./teams/auth-refactor');
 const { formatTeamPlan } = require('./formatters/team-plan');
 const { createLocalToolRegistry } = require('./tools');
 
-const VERSION = '1.0.0';
+const VERSION = '1.0.1';
 
 const ANSI = {
   reset: '\x1B[0m',
