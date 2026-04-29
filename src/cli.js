@@ -8,7 +8,7 @@ const { createAuthRefactorTeam } = require('./teams/auth-refactor');
 const { formatTeamPlan } = require('./formatters/team-plan');
 const { createLocalToolRegistry } = require('./tools');
 
-const VERSION = '0.2.0';
+const VERSION = '1.0.0';
 
 const ANSI = {
   reset: '\x1B[0m',
@@ -118,10 +118,10 @@ const SPINNER_VERBS = [
 
 const CLAUDE_BANNER = [
   '',
-  `${THEME.accent}     ╭──────────────────────────────────────────╮${ANSI.reset}`,
-  `${THEME.accent}     │${ANSI.reset}  ${THEME.bold}ʜᴀx ᴀɢᴇɴᴛ${ANSI.reset}  ${THEME.dim}v${VERSION}${ANSI.reset}                    ${THEME.accent}│${ANSI.reset}`,
-  `${THEME.accent}     │${ANSI.reset}  ${THEME.dim}AI-powered coding assistant${ANSI.reset}            ${THEME.accent}│${ANSI.reset}`,
-  `${THEME.accent}     ╰──────────────────────────────────────────╯${ANSI.reset}`,
+  `${THEME.accent}   ╭${'─'.repeat(40)}╮${ANSI.reset}`,
+  `${THEME.accent}   │${ANSI.reset}    ${THEME.bold}HAX AGENT v${VERSION}${ANSI.reset}                    ${THEME.accent}│${ANSI.reset}`,
+  `${THEME.accent}   │${ANSI.reset}  ${THEME.dim}AI-powered coding assistant${ANSI.reset}           ${THEME.accent}│${ANSI.reset}`,
+  `${THEME.accent}   ╰${'─'.repeat(40)}╯${ANSI.reset}`,
   '',
 ];
 
