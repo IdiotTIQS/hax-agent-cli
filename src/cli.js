@@ -583,6 +583,7 @@ function createResponseRenderer(output) {
   let assistantStarted = false;
   let textStarted = false;
   let lineOpen = false;
+  let lineBuffer = '';
 
   function writeAssistantPrefix() {
     if (!assistantStarted) {
@@ -590,7 +591,14 @@ function createResponseRenderer(output) {
       output.write('\nAssistant: ');
       assistantStarted = true;
       lineOpen = true;
+      lineBuffer = '';
     }
+  }
+
+  function flushLineBuffer() {
+    if (lineBuffer.length === 0) return;
+    output.write(renderInlineSimple(lineBuffer));
+    lineBuffer = '';
   }
 
   function startSpinner(label) {
@@ -643,7 +651,14 @@ function createResponseRenderer(output) {
     writeText(delta) {
       writeAssistantPrefix();
       textStarted = true;
-      output.write(renderInlineSimple(delta));
+      lineBuffer += delta;
+
+      const parts = lineBuffer.split('\n');
+      for (let i = 0; i < parts.length - 1; i++) {
+        output.write(renderInlineSimple(parts[i]));
+        output.write('\n');
+      }
+      lineBuffer = parts[parts.length - 1];
       lineOpen = true;
     },
     thinking(chunk) {
@@ -697,17 +712,20 @@ function createResponseRenderer(output) {
         output.writeLine('\nAssistant:');
         return;
       }
-      if (textStarted && lineOpen) {
+      flushLineBuffer();
+      if (lineOpen) {
         output.writeLine('');
         lineOpen = false;
       }
     },
     fail(message) {
       clearTransient();
+      flushLineBuffer();
       output.writeLine(message);
     },
     interrupt() {
       clearTransient();
+      flushLineBuffer();
       output.writeLine('\nInterrupted response.');
     },
   };
