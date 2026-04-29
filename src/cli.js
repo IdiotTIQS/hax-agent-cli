@@ -215,7 +215,21 @@ function initializeShellScreen(output) {
   if (output.isInteractive()) {
     output.clear();
     output.resetConversationCursor();
+    setupScrollRegion();
   }
+}
+
+function setupScrollRegion() {
+  const rows = process.stdout.rows || 0;
+  if (rows < 4) return;
+  // Set scroll region: rows 1 to (rows-3), leaving bottom 3 lines for prompt
+  // CSI[1;top;bottom r sets the scroll margins (1-indexed)
+  process.stdout.write(`\x1b[1;${rows - 3}r`);
+}
+
+function resetScrollRegion() {
+  // Reset to full screen scrolling
+  process.stdout.write('\x1b[r');
 }
 
 function promptShell(rl, output, session) {
@@ -226,31 +240,32 @@ function promptShell(rl, output, session) {
   }
 
   rl.setPrompt('You ▸ ');
+  const rows = process.stdout.rows || 0;
+  if (rows >= 4) {
+    // Draw status line
+    const statusLine = formatPromptLine(process.stdout.columns || 80, formatShellStatus(session));
+    const bottomLine = formatPromptLine(process.stdout.columns || 80);
+
+    process.stdout.write(`\x1b[${rows - 2};1H`); // Go to row rows-2
+    process.stdout.write('\x1b[K'); // Clear line
+    process.stdout.write(statusLine);
+
+    process.stdout.write(`\x1b[${rows - 1};1H`); // Go to row rows-1
+    process.stdout.write('\x1b[K');
+    process.stdout.write(bottomLine);
+
+    process.stdout.write(`\x1b[${rows};1H`); // Go to last row for input
+    process.stdout.write('\x1b[K');
+  }
   rl.prompt(true);
 }
 
 function clearPromptFrame(output) {
-  // No-op: using standard readline flow
+  // no-op: content flows naturally within scroll region
 }
 
 function renderPromptFrame(output, session) {
-  if (!output.isInteractive()) {
-    return;
-  }
-
-  const stream = process.stdout;
-  const statusLine = formatPromptLine(stream.columns || 80, formatShellStatus(session));
-  const bottomLine = formatPromptLine(stream.columns || 80);
-
-  readline.cursorTo(stream, 0, stream.rows || 0 - 3);
-  readline.clearLine(stream, 0);
-  stream.write(statusLine);
-  readline.cursorTo(stream, 0, stream.rows || 0 - 2);
-  readline.clearLine(stream, 0);
-  stream.write(bottomLine);
-  readline.cursorTo(stream, 0, stream.rows || 0 - 1);
-  readline.clearLine(stream, 0);
-  readline.cursorTo(stream, 0, stream.rows || 0 - 2);
+  // no-op: handled by promptShell
 }
 
 function formatPromptLine(columns, label = '') {
