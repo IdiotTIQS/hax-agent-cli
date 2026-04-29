@@ -1109,8 +1109,6 @@ function createOutput(stream) {
 
     conversationRow = row;
     conversationColumn = col;
-
-    readline.cursorTo(stream, 0, rows >= 4 ? rows - 2 : Math.max(0, conversationRow));
   }
 
   function calculateDisplayWidth(str) {
