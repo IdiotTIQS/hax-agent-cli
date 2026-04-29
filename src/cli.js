@@ -1067,11 +1067,18 @@ function createOutput(stream) {
     }
 
     const rows = stream.rows || 0;
-    const columns = stream.columns || 80;
-    const maxConversationRow = Math.max(0, rows - 5);
+    const columns = stream.columns || 0;
+    const promptAreaRows = 4;
+    const maxConversationRow = Math.max(0, rows - promptAreaRows);
+
+    if (conversationRow >= maxConversationRow) {
+      stream.write('\n');
+      readline.moveCursor(stream, -columns, 0);
+      conversationRow = maxConversationRow;
+      conversationColumn = 0;
+    }
 
     readline.cursorTo(stream, conversationColumn, conversationRow);
-
     stream.write(text);
 
     const plainText = text.replace(ANSI_ESCAPE_REGEX, '');
@@ -1080,11 +1087,7 @@ function createOutput(stream) {
 
     for (const char of plainText) {
       if (char === '\n') {
-        if (row >= maxConversationRow) {
-          row = maxConversationRow;
-        } else {
-          row += 1;
-        }
+        row += 1;
         col = 0;
         continue;
       }
@@ -1092,11 +1095,7 @@ function createOutput(stream) {
       col += getDisplayWidth(char);
 
       if (col >= columns) {
-        if (row >= maxConversationRow) {
-          row = maxConversationRow;
-        } else {
-          row += 1;
-        }
+        row += 1;
         col = col % columns;
       }
     }
@@ -1104,7 +1103,7 @@ function createOutput(stream) {
     conversationRow = row;
     conversationColumn = col;
 
-    readline.cursorTo(stream, 0, rows >= 4 ? rows - 2 : conversationRow);
+    readline.cursorTo(stream, 0, rows >= 4 ? rows - 2 : Math.max(0, conversationRow));
   }
 
   function scrollConversationRegion(maxConversationRow) {
