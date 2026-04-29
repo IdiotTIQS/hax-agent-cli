@@ -215,7 +215,6 @@ function initializeShellScreen(output) {
   if (output.isInteractive()) {
     output.clear();
     output.resetConversationCursor();
-    reservePromptArea(output);
   }
 }
 
@@ -227,29 +226,11 @@ function promptShell(rl, output, session) {
   }
 
   rl.setPrompt('You ▸ ');
-  reservePromptArea(output);
-  renderPromptFrame(output, session);
   rl.prompt(true);
 }
 
-function reservePromptArea(output) {
-  if (!output.isInteractive()) {
-    return;
-  }
-
-  const stream = process.stdout;
-  const rows = stream.rows || 0;
-
-  if (rows < 6) {
-    return;
-  }
-
-  // Move cursor to start of prompt area (3 rows from bottom for status bar + input)
-  readline.cursorTo(stream, 0, rows - 3);
-  // Write a separator line and blank space to reserve the area
-  stream.write(`\n${'─'.repeat(stream.columns || 80)}\n\n`);
-  // Move cursor back to just above the prompt area
-  readline.cursorTo(stream, 0, rows - 3);
+function clearPromptFrame(output) {
+  // No-op: using standard readline flow
 }
 
 function renderPromptFrame(output, session) {
@@ -258,55 +239,18 @@ function renderPromptFrame(output, session) {
   }
 
   const stream = process.stdout;
-  const rows = stream.rows || 0;
-
-  if (rows < 6) {
-    output.writeLine(formatPromptLine(stream.columns || 80, formatShellStatus(session)));
-    return;
-  }
-
-  const topLine = formatPromptLine(stream.columns || 80, formatShellStatus(session));
+  const statusLine = formatPromptLine(stream.columns || 80, formatShellStatus(session));
   const bottomLine = formatPromptLine(stream.columns || 80);
 
-  // Write status line at rows-3
-  readline.cursorTo(stream, 0, rows - 3);
+  readline.cursorTo(stream, 0, stream.rows || 0 - 3);
   readline.clearLine(stream, 0);
-  stream.write(topLine);
-
-  // Write separator at rows-2
-  readline.cursorTo(stream, 0, rows - 2);
+  stream.write(statusLine);
+  readline.cursorTo(stream, 0, stream.rows || 0 - 2);
   readline.clearLine(stream, 0);
   stream.write(bottomLine);
-
-  // Clear input line area
-  readline.cursorTo(stream, 0, rows - 1);
+  readline.cursorTo(stream, 0, stream.rows || 0 - 1);
   readline.clearLine(stream, 0);
-
-  // Position cursor for readline input (last line)
-  readline.cursorTo(stream, 4, rows - 1);
-}
-
-function clearPromptFrame(output) {
-  if (!output.isInteractive()) {
-    return;
-  }
-
-  const stream = process.stdout;
-  const rows = stream.rows || 0;
-
-  if (rows < 6) {
-    output.clearTransient();
-    return;
-  }
-
-  // Clear the prompt area lines
-  for (const row of [rows - 3, rows - 2, rows - 1]) {
-    readline.cursorTo(stream, 0, row);
-    readline.clearLine(stream, 0);
-  }
-
-  // Move cursor to just above where prompt was
-  readline.cursorTo(stream, 0, rows - 4);
+  readline.cursorTo(stream, 0, stream.rows || 0 - 2);
 }
 
 function formatPromptLine(columns, label = '') {
