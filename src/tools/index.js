@@ -807,7 +807,10 @@ function normalizeSlashes(value) {
 }
 
 function normalizeCommandName(command) {
-  return path.basename(command).replace(/\.exe$/i, '').toLocaleLowerCase();
+  const trimmed = command.trim();
+  const hasPathSeparator = trimmed.includes('/') || trimmed.includes('\\');
+  const base = hasPathSeparator ? trimmed : trimmed.split(/\s+/)[0];
+  return path.basename(base).replace(/\.exe$/i, '').toLocaleLowerCase();
 }
 
 function escapeRegExp(value) {
