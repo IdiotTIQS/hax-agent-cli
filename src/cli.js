@@ -14,7 +14,7 @@ const { registerAgentTeamTools } = require('./teams/tools');
 const { loadAllSkills, createSkillifySkill, recordSkillUsage } = require('./skills');
 const { buildSkillSystemPrompt, matchSkillByIntent, getSkillsForSession } = require('./skills/intent-matcher');
 
-const VERSION = '1.2.0';
+const VERSION = '1.3.0';
 
 const ANSI = {
   reset: '\x1B[0m',

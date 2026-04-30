@@ -2,9 +2,10 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
+const http = require('node:http');
 const test = require('node:test');
 const { AnthropicProvider, MockProvider } = require('../src/providers');
-const { ToolRegistry, createLocalToolRegistry } = require('../src/tools');
+const { ToolRegistry, createLocalToolRegistry, createWebFetchTool, createWebSearchTool, createFileEditTool, createReadDirectoryTool, ToolExecutionError } = require('../src/tools');
 
 test('mock provider explains local mock mode conversationally', async () => {
   const provider = new MockProvider({ model: 'mock-a' });
@@ -413,6 +414,324 @@ test('anthropic provider reports when streaming tool turns are exhausted', async
     reason: 'max_tool_turns',
     maxToolTurns: 1,
   });
+});
+
+test('web fetch tool validates URL scheme', async () => {
+  const tool = createWebFetchTool();
+
+  try {
+    await tool.execute({ url: 'ftp://example.com' });
+    assert.fail('should have thrown');
+  } catch (error) {
+    assert.equal(error.code, 'INVALID_URL');
+  }
+});
+
+test('web fetch tool validates URL is not empty', async () => {
+  const tool = createWebFetchTool();
+
+  try {
+    await tool.execute({ url: '' });
+    assert.fail('should have thrown');
+  } catch (error) {
+    assert.equal(error.code, 'INVALID_ARGUMENT');
+  }
+});
+
+test('web fetch tool fetches from a local server', async () => {
+  const server = http.createServer((_req, res) => {
+    res.setHeader('Content-Type', 'text/html');
+    res.end('<html><body><h1>Hello</h1><p>World</p></body></html>');
+  });
+
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const { port } = server.address();
+
+  try {
+    const tool = createWebFetchTool();
+    const result = await tool.execute({ url: `http://127.0.0.1:${port}` });
+
+    assert.equal(result.url, `http://127.0.0.1:${port}/`);
+    assert.equal(result.truncated, false);
+    assert.match(result.content, /Hello/);
+    assert.match(result.content, /World/);
+  } finally {
+    server.close();
+  }
+});
+
+test('web fetch tool converts HTML to plain text', async () => {
+  const server = http.createServer((_req, res) => {
+    res.setHeader('Content-Type', 'text/html');
+    res.end('<div><h1>Title</h1><p>Line one</p><p>Line two</p></div>');
+  });
+
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const { port } = server.address();
+
+  try {
+    const tool = createWebFetchTool();
+    const result = await tool.execute({ url: `http://127.0.0.1:${port}` });
+
+    assert.match(result.content, /Title/);
+    assert.match(result.content, /Line one/);
+    assert.match(result.content, /Line two/);
+    assert.doesNotMatch(result.content, /<[^>]+>/);
+  } finally {
+    server.close();
+  }
+});
+
+test('web fetch tool truncates large responses', async () => {
+  const bigContent = '<html><body>' + 'x'.repeat(1000) + '</body></html>';
+  const server = http.createServer((_req, res) => {
+    res.setHeader('Content-Type', 'text/html');
+    res.end(bigContent);
+  });
+
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const { port } = server.address();
+
+  try {
+    const tool = createWebFetchTool();
+    const result = await tool.execute({ url: `http://127.0.0.1:${port}`, maxBodyBytes: 200 });
+
+    assert.equal(result.truncated, true);
+    assert.ok(result.content.length <= 200);
+  } finally {
+    server.close();
+  }
+});
+
+test('web fetch tool follows redirects', async () => {
+  const server = http.createServer((req, res) => {
+    if (req.url === '/old') {
+      res.writeHead(302, { Location: `http://127.0.0.1:${server.address().port}/new` });
+      res.end();
+    } else {
+      res.setHeader('Content-Type', 'text/html');
+      res.end('<html><body>Final page</body></html>');
+    }
+  });
+
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const { port } = server.address();
+
+  try {
+    const tool = createWebFetchTool();
+    const result = await tool.execute({ url: `http://127.0.0.1:${port}/old` });
+
+    assert.match(result.content, /Final page/);
+  } finally {
+    server.close();
+  }
+});
+
+test('web fetch tool reports HTTP errors', async () => {
+  const server = http.createServer((_req, res) => {
+    res.writeHead(404);
+    res.end('Not Found');
+  });
+
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const { port } = server.address();
+
+  try {
+    const tool = createWebFetchTool();
+    try {
+      await tool.execute({ url: `http://127.0.0.1:${port}` });
+      assert.fail('should have thrown');
+    } catch (error) {
+      assert.equal(error.code, 'HTTP_ERROR');
+      assert.match(error.message, /404/);
+    }
+  } finally {
+    server.close();
+  }
+});
+
+test('web fetch tool is registered in local tool registry', () => {
+  const registry = createLocalToolRegistry({ root: process.cwd() });
+  const tools = registry.list();
+  const webFetch = tools.find((t) => t.name === 'web.fetch');
+
+  assert.ok(webFetch);
+  assert.match(webFetch.description, /Fetch/);
+  assert.ok(webFetch.inputSchema.required.includes('url'));
+});
+
+test('web search tool validates query', async () => {
+  const tool = createWebSearchTool();
+
+  try {
+    await tool.execute({ query: '' });
+    assert.fail('should have thrown');
+  } catch (error) {
+    assert.equal(error.code, 'INVALID_ARGUMENT');
+  }
+});
+
+test('web search tool is registered in local tool registry', () => {
+  const registry = createLocalToolRegistry({ root: process.cwd() });
+  const tools = registry.list();
+  const webSearch = tools.find((t) => t.name === 'web.search');
+
+  assert.ok(webSearch);
+  assert.match(webSearch.description, /search/i);
+  assert.ok(webSearch.inputSchema.required.includes('query'));
+});
+
+test('file edit tool replaces existing text in file', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'hax-agent-edit-'));
+  const filePath = path.join(root, 'test.txt');
+  await fs.writeFile(filePath, 'Hello World\nSecond line\nThird line\n');
+
+  const tool = createFileEditTool();
+  const result = await tool.execute({
+    path: filePath,
+    oldStr: 'Second line',
+    newStr: 'Replaced line',
+  }, { root });
+
+  assert.equal(result.changed, true);
+  assert.equal(result.applied, true);
+  assert.equal(result.oldLines, 1);
+  assert.equal(result.newLines, 1);
+
+  const content = await fs.readFile(filePath, 'utf8');
+  assert.equal(content, 'Hello World\nReplaced line\nThird line\n');
+});
+
+test('file edit tool throws when text not found', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'hax-agent-edit-'));
+  const filePath = path.join(root, 'test.txt');
+  await fs.writeFile(filePath, 'Hello World\n');
+
+  const tool = createFileEditTool();
+
+  try {
+    await tool.execute({
+      path: filePath,
+      oldStr: 'NonExistentText',
+      newStr: 'Replacement',
+    }, { root });
+    assert.fail('should have thrown');
+  } catch (error) {
+    assert.equal(error.code, 'TEXT_NOT_FOUND');
+  }
+});
+
+test('file edit tool throws on ambiguous text', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'hax-agent-edit-'));
+  const filePath = path.join(root, 'test.txt');
+  await fs.writeFile(filePath, 'line A\nline B\nline A\n');
+
+  const tool = createFileEditTool();
+
+  try {
+    await tool.execute({
+      path: filePath,
+      oldStr: 'line A\n',
+      newStr: 'replaced\n',
+    }, { root });
+    assert.fail('should have thrown');
+  } catch (error) {
+    assert.equal(error.code, 'AMBIGUOUS_TEXT');
+  }
+});
+
+test('file edit tool supports dry run', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'hax-agent-edit-'));
+  const filePath = path.join(root, 'test.txt');
+  const originalContent = 'Hello World\nOriginal line\n';
+  await fs.writeFile(filePath, originalContent);
+
+  const tool = createFileEditTool();
+  const result = await tool.execute({
+    path: filePath,
+    oldStr: 'Original line\n',
+    newStr: 'New line\n',
+    dryRun: true,
+  }, { root });
+
+  assert.equal(result.changed, true);
+  assert.equal(result.applied, false);
+  assert.ok(result.diff.includes('- Original line'));
+  assert.ok(result.diff.includes('+ New line'));
+
+  const content = await fs.readFile(filePath, 'utf8');
+  assert.equal(content, originalContent);
+});
+
+test('file edit tool is registered in local tool registry', () => {
+  const registry = createLocalToolRegistry({ root: process.cwd() });
+  const tools = registry.list();
+  const fileEdit = tools.find((t) => t.name === 'file.edit');
+
+  assert.ok(fileEdit);
+  assert.match(fileEdit.description, /edit/i);
+  assert.ok(fileEdit.inputSchema.required.includes('oldStr'));
+  assert.ok(fileEdit.inputSchema.required.includes('newStr'));
+});
+
+test('read directory tool lists directory contents', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'hax-agent-readdir-'));
+  await fs.writeFile(path.join(root, 'file1.txt'), 'content1');
+  await fs.writeFile(path.join(root, 'file2.js'), 'content2');
+  await fs.mkdir(path.join(root, 'subdir'));
+  await fs.writeFile(path.join(root, 'subdir', 'nested.txt'), 'nested');
+
+  const tool = createReadDirectoryTool();
+  const result = await tool.execute({ path: root }, { root });
+
+  assert.equal(result.path, '.');
+  assert.ok(result.entries.length >= 3);
+  assert.ok(result.entries.some((e) => e.name === 'file1.txt' && e.type === 'file'));
+  assert.ok(result.entries.some((e) => e.name === 'subdir' && e.type === 'directory'));
+});
+
+test('read directory tool excludes hidden files by default', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'hax-agent-readdir-'));
+  await fs.writeFile(path.join(root, 'visible.txt'), 'content');
+  await fs.writeFile(path.join(root, '.hidden'), 'hidden');
+
+  const tool = createReadDirectoryTool();
+  const result = await tool.execute({ path: root }, { root });
+
+  assert.ok(result.entries.every((e) => !e.name.startsWith('.')));
+});
+
+test('read directory tool includes hidden files when requested', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'hax-agent-readdir-'));
+  await fs.writeFile(path.join(root, 'visible.txt'), 'content');
+  await fs.writeFile(path.join(root, '.hidden'), 'hidden');
+
+  const tool = createReadDirectoryTool();
+  const result = await tool.execute({ path: root, includeHidden: true }, { root });
+
+  assert.ok(result.entries.some((e) => e.name === '.hidden'));
+});
+
+test('read directory tool throws for non-existent directory', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'hax-agent-readdir-'));
+  const tool = createReadDirectoryTool();
+
+  try {
+    await tool.execute({ path: path.join(root, 'nonexistent') }, { root });
+    assert.fail('should have thrown');
+  } catch (error) {
+    assert.equal(error.code, 'PATH_NOT_FOUND');
+  }
+});
+
+test('read directory tool is registered in local tool registry', () => {
+  const registry = createLocalToolRegistry({ root: process.cwd() });
+  const tools = registry.list();
+  const readDir = tools.find((t) => t.name === 'file.readDirectory');
+
+  assert.ok(readDir);
+  assert.match(readDir.description, /directory/i);
+  assert.ok(readDir.inputSchema.required.includes('path'));
 });
 
 function createMessageStream(events, finalMessage) {

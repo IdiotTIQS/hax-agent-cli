@@ -1,6 +1,9 @@
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
+const https = require('node:https');
+const http = require('node:http');
+const { URL } = require('node:url');
 
 const DEFAULT_MAX_FILE_BYTES = 1024 * 1024;
 const DEFAULT_MAX_RESULTS = 1000;
@@ -103,7 +106,11 @@ function createLocalToolRegistry(options = {}) {
     .register(createWriteFileTool())
     .register(createGlobTool())
     .register(createSearchTool())
-    .register(createShellTool(shellPolicy));
+    .register(createShellTool(shellPolicy))
+    .register(createWebFetchTool())
+    .register(createWebSearchTool())
+    .register(createFileEditTool())
+    .register(createReadDirectoryTool());
 
   return registry;
 }
@@ -384,6 +391,518 @@ function createShellTool(policy) {
       });
     },
   };
+}
+
+function createWebFetchTool() {
+  const DEFAULT_TIMEOUT_MS = 30_000;
+  const DEFAULT_MAX_BODY_BYTES = 2 * 1024 * 1024;
+
+  return {
+    name: 'web.fetch',
+    description: 'Fetch the content of a URL and convert HTML to plain text. Only supports HTTP and HTTPS URLs.',
+    inputSchema: {
+      type: 'object',
+      required: ['url'],
+      properties: {
+        url: { type: 'string', description: 'The URL to fetch. Must start with http:// or https://' },
+        method: { type: 'string', description: 'HTTP method (GET or POST)', default: 'GET' },
+        maxBodyBytes: { type: 'number', description: 'Maximum response body size in bytes', default: DEFAULT_MAX_BODY_BYTES },
+        timeoutMs: { type: 'number', description: 'Request timeout in milliseconds', default: DEFAULT_TIMEOUT_MS },
+      },
+    },
+    async execute(args) {
+      const url = requireString(args.url, 'url');
+      const method = args.method === undefined ? 'GET' : requireString(args.method, 'method');
+      const maxBodyBytes = readPositiveInteger(args.maxBodyBytes, DEFAULT_MAX_BODY_BYTES, 'maxBodyBytes');
+      const timeoutMs = readPositiveInteger(args.timeoutMs, DEFAULT_TIMEOUT_MS, 'timeoutMs');
+
+      const parsedUrl = parseAndValidateUrl(url);
+      const client = parsedUrl.protocol === 'https:' ? https : http;
+
+      const body = await fetchUrl({ client, parsedUrl, method, maxBodyBytes, timeoutMs });
+      const plainText = htmlToPlainText(body);
+
+      return {
+        url: parsedUrl.href,
+        status: 200,
+        contentType: 'text/html',
+        content: plainText,
+        truncated: body.length >= maxBodyBytes,
+      };
+    },
+  };
+}
+
+function parseAndValidateUrl(urlString) {
+  const trimmed = urlString.trim();
+
+  if (!trimmed.startsWith('http://') && !trimmed.startsWith('https://')) {
+    throw new ToolExecutionError('INVALID_URL', 'URL must start with http:// or https://');
+  }
+
+  try {
+    return new URL(trimmed);
+  } catch (error) {
+    throw new ToolExecutionError('INVALID_URL', `Invalid URL: ${error.message}`);
+  }
+}
+
+function fetchUrl({ client, parsedUrl, method, maxBodyBytes, timeoutMs }) {
+  return new Promise((resolve, reject) => {
+    const timeoutId = setTimeout(() => {
+      reject(new ToolExecutionError('FETCH_TIMEOUT', `Request timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+
+    const options = {
+      hostname: parsedUrl.hostname,
+      port: parsedUrl.port,
+      path: parsedUrl.pathname + parsedUrl.search,
+      method: method.toUpperCase(),
+      headers: {
+        'User-Agent': 'HaxAgent/1.2.0',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+      },
+      timeout: timeoutMs,
+    };
+
+    const req = client.request(options, (res) => {
+      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+        clearTimeout(timeoutId);
+        handleRedirect(res.headers.location, method, maxBodyBytes, timeoutMs, timeoutId)
+          .then(resolve)
+          .catch(reject);
+        return;
+      }
+
+      if (res.statusCode >= 400) {
+        clearTimeout(timeoutId);
+        reject(new ToolExecutionError('HTTP_ERROR', `HTTP ${res.statusCode}: ${res.statusMessage || 'Error'}`));
+        return;
+      }
+
+      const chunks = [];
+      let totalLength = 0;
+      let exceeded = false;
+
+      res.on('data', (chunk) => {
+        if (exceeded) return;
+
+        totalLength += chunk.length;
+        if (totalLength > maxBodyBytes) {
+          exceeded = true;
+          const remaining = maxBodyBytes - (totalLength - chunk.length);
+          if (remaining > 0) {
+            chunks.push(chunk.slice(0, remaining));
+          }
+          res.destroy();
+          return;
+        }
+
+        chunks.push(chunk);
+      });
+
+      res.on('end', () => {
+        clearTimeout(timeoutId);
+        resolve(Buffer.concat(chunks).toString('utf8'));
+      });
+
+      res.on('error', (error) => {
+        clearTimeout(timeoutId);
+        reject(new ToolExecutionError('FETCH_ERROR', `Response error: ${error.message}`));
+      });
+    });
+
+    req.on('error', (error) => {
+      clearTimeout(timeoutId);
+      reject(new ToolExecutionError('FETCH_ERROR', `Request error: ${error.message}`));
+    });
+
+    req.on('timeout', () => {
+      req.destroy();
+      clearTimeout(timeoutId);
+      reject(new ToolExecutionError('FETCH_TIMEOUT', `Request timed out after ${timeoutMs}ms`));
+    });
+
+    req.end();
+  });
+}
+
+async function handleRedirect(location, method, maxBodyBytes, timeoutMs, originalTimeoutId) {
+  clearTimeout(originalTimeoutId);
+
+  let redirectUrl;
+  try {
+    redirectUrl = new URL(location);
+  } catch {
+    throw new ToolExecutionError('INVALID_REDIRECT', `Invalid redirect URL: ${location}`);
+  }
+
+  const client = redirectUrl.protocol === 'https:' ? https : http;
+  return fetchUrl({ client, parsedUrl: redirectUrl, method, maxBodyBytes, timeoutMs });
+}
+
+function htmlToPlainText(html) {
+  if (!html) return '';
+
+  let text = html;
+
+  text = text.replace(/<br\s*\/?>/gi, '\n');
+  text = text.replace(/<\/(p|div|h[1-6]|li|tr|blockquote|pre)/gi, '\n\n');
+  text = text.replace(/<(hr|\/tr)/gi, '\n');
+
+  text = text.replace(/<script[\s\S]*?<\/script>/gi, ' ');
+  text = text.replace(/<style[\s\S]*?<\/style>/gi, ' ');
+  text = text.replace(/<[^>]+>/g, ' ');
+
+  text = text.replace(/&nbsp;/gi, ' ');
+  text = text.replace(/&amp;/gi, '&');
+  text = text.replace(/&lt;/gi, '<');
+  text = text.replace(/&gt;/gi, '>');
+  text = text.replace(/&quot;/gi, '"');
+  text = text.replace(/&#(\d+);/g, (_, code) => String.fromCharCode(parseInt(code, 10)));
+  text = text.replace(/&[a-zA-Z]+;/g, ' ');
+
+  text = text.replace(/[ \t]+/g, ' ');
+  text = text.replace(/\n\s+/g, '\n');
+  text = text.replace(/\s*\n\s*\n\s*/g, '\n\n');
+
+  return text.trim();
+}
+
+function createWebSearchTool() {
+  const DEFAULT_MAX_RESULTS = 10;
+  const DEFAULT_TIMEOUT_MS = 15_000;
+
+  return {
+    name: 'web.search',
+    description: 'Search the web for information. Returns relevant search results with titles, URLs, and snippets.',
+    inputSchema: {
+      type: 'object',
+      required: ['query'],
+      properties: {
+        query: { type: 'string', description: 'The search query string' },
+        maxResults: { type: 'number', description: 'Maximum number of results to return', default: DEFAULT_MAX_RESULTS },
+        timeoutMs: { type: 'number', description: 'Request timeout in milliseconds', default: DEFAULT_TIMEOUT_MS },
+      },
+    },
+    async execute(args) {
+      const query = requireString(args.query, 'query');
+      const maxResults = readPositiveInteger(args.maxResults, DEFAULT_MAX_RESULTS, 'maxResults');
+      const timeoutMs = readPositiveInteger(args.timeoutMs, DEFAULT_TIMEOUT_MS, 'timeoutMs');
+
+      const searchUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
+      const parsedUrl = new URL(searchUrl);
+
+      const html = await fetchUrl({
+        client: https,
+        parsedUrl,
+        method: 'GET',
+        maxBodyBytes: 2 * 1024 * 1024,
+        timeoutMs,
+      });
+
+      const results = parseDuckDuckgoResults(html, maxResults);
+
+      return {
+        query,
+        results,
+        resultCount: results.length,
+      };
+    },
+  };
+}
+
+function parseDuckDuckgoResults(html, maxResults) {
+  const results = [];
+  const resultRegex = /<a[^>]*class="[^"]*result[^"]*"[^>]*href="([^"]+)"[^>]*>(.*?)<\/a>/gi;
+  let match;
+
+  while ((match = resultRegex.exec(html)) !== null && results.length < maxResults) {
+    const url = match[1].replace(/https?:\/\/duckduckgo\.com\/l\/\?uddg=/, '').replace(/[&?]at=.*/, '');
+    const title = htmlToPlainText(match[2]).trim();
+
+    if (title && url.startsWith('http')) {
+      results.push({ title, url });
+    }
+  }
+
+  if (results.length === 0) {
+    const simpleLinks = html.match(/<a[^>]*href="(https?:\/\/[^"]+)"[^>]*>([^<]+)<\/a>/gi) || [];
+    for (const tag of simpleLinks.slice(0, maxResults)) {
+      const urlMatch = tag.match(/href="(https?:\/\/[^"]+)"/);
+      const titleMatch = tag.match(/>([^<]+)</);
+      if (urlMatch && titleMatch) {
+        const title = titleMatch[1].trim();
+        if (title.length > 3 && !title.toLowerCase().includes('duckduckgo')) {
+          results.push({ title, url: urlMatch[1] });
+        }
+      }
+    }
+  }
+
+  return results.slice(0, maxResults);
+}
+
+function createFileEditTool() {
+  return {
+    name: 'file.edit',
+    description: 'Precisely edit a file by replacing a specific section of text. Shows a diff preview before applying changes.',
+    inputSchema: {
+      type: 'object',
+      required: ['path', 'oldStr', 'newStr'],
+      properties: {
+        path: { type: 'string', description: 'The file path to edit' },
+        oldStr: { type: 'string', description: 'The exact text to find and replace' },
+        newStr: { type: 'string', description: 'The new text to replace with' },
+        encoding: { type: 'string', description: 'File encoding', default: 'utf8' },
+        dryRun: { type: 'boolean', description: 'If true, show diff without applying changes', default: false },
+      },
+    },
+    async execute(args, context) {
+      const filePath = requireString(args.path, 'path');
+      const oldStr = requireString(args.oldStr, 'oldStr');
+      const newStr = requireString(args.newStr, 'newStr');
+      const encoding = args.encoding === undefined ? 'utf8' : requireString(args.encoding, 'encoding');
+      const dryRun = args.dryRun === true;
+
+      if (!Buffer.isEncoding(encoding)) {
+        throw new ToolExecutionError('INVALID_ENCODING', `Unsupported file encoding: ${encoding}`);
+      }
+
+      if (oldStr === newStr) {
+        return {
+          path: toWorkspacePath(context.root, path.resolve(context.root, filePath)),
+          changed: false,
+          message: 'oldStr and newStr are identical, no changes needed.',
+        };
+      }
+
+      const resolvedPath = path.resolve(context.root, filePath);
+      const content = await fs.readFile(resolvedPath, { encoding });
+
+      const firstIndex = content.indexOf(oldStr);
+
+      if (firstIndex === -1) {
+        throw new ToolExecutionError('TEXT_NOT_FOUND', `Could not find the exact text in ${filePath}. The text must match exactly (including whitespace and newlines).`);
+      }
+
+      const lastIndex = content.lastIndexOf(oldStr);
+
+      if (firstIndex !== lastIndex) {
+        throw new ToolExecutionError('AMBIGUOUS_TEXT', `The exact text appears multiple times in ${filePath}. Make oldStr more specific to uniquely identify the location.`);
+      }
+
+      const updatedContent = content.replace(oldStr, newStr);
+
+      const diff = generateDiff(oldStr, newStr);
+
+      if (!dryRun) {
+        await fs.writeFile(resolvedPath, updatedContent, { encoding });
+      }
+
+      const oldLines = oldStr.split(/\r?\n/).length;
+      const newLines = newStr.split(/\r?\n/).length;
+
+      return {
+        path: toWorkspacePath(context.root, resolvedPath),
+        changed: true,
+        applied: !dryRun,
+        diff,
+        oldLines,
+        newLines,
+        summary: generateEditSummary(oldLines, newLines),
+      };
+    },
+  };
+}
+
+function generateDiff(oldStr, newStr) {
+  const oldLines = oldStr.split(/\r?\n/);
+  const newLines = newStr.split(/\r?\n/);
+
+  const diff = [];
+  const maxLines = Math.max(oldLines.length, newLines.length);
+
+  for (let i = 0; i < maxLines; i++) {
+    const oldLine = i < oldLines.length ? oldLines[i] : null;
+    const newLine = i < newLines.length ? newLines[i] : null;
+
+    if (oldLine !== newLine) {
+      if (oldLine !== null) {
+        diff.push(`- ${oldLine}`);
+      }
+      if (newLine !== null) {
+        diff.push(`+ ${newLine}`);
+      }
+    }
+  }
+
+  return diff.join('\n');
+}
+
+function generateEditSummary(oldLines, newLines) {
+  const added = Math.max(0, newLines - oldLines);
+  const removed = Math.max(0, oldLines - newLines);
+
+  if (oldLines === newLines) {
+    return `Replaced ${oldLines} line${oldLines !== 1 ? 's' : ''}.`;
+  }
+
+  const parts = [];
+  if (removed > 0) parts.push(`Removed ${removed} line${removed !== 1 ? 's' : ''}`);
+  if (added > 0) parts.push(`Added ${added} line${added !== 1 ? 's' : ''}`);
+
+  return parts.join(', ') + '.';
+}
+
+function createReadDirectoryTool() {
+  const DEFAULT_MAX_ENTRIES = 200;
+
+  return {
+    name: 'file.readDirectory',
+    description: 'Read the contents of a directory, listing files and subdirectories with their types and sizes.',
+    inputSchema: {
+      type: 'object',
+      required: ['path'],
+      properties: {
+        path: { type: 'string', description: 'The directory path to read' },
+        recursive: { type: 'boolean', description: 'Whether to list subdirectories recursively', default: false },
+        maxEntries: { type: 'number', description: 'Maximum number of entries to return', default: DEFAULT_MAX_ENTRIES },
+        includeHidden: { type: 'boolean', description: 'Whether to include hidden files (starting with .)', default: false },
+      },
+    },
+    async execute(args, context) {
+      const dirPath = requireString(args.path, 'path');
+      const recursive = args.recursive === true;
+      const maxEntries = readPositiveInteger(args.maxEntries, DEFAULT_MAX_ENTRIES, 'maxEntries');
+      const includeHidden = args.includeHidden === true;
+
+      const resolvedPath = path.resolve(context.root, dirPath);
+
+      if (resolvedPath === context.root || resolvedPath.startsWith(context.root + path.sep)) {
+        // Inside root
+      } else {
+        throw new ToolExecutionError('PATH_OUTSIDE_ROOT', `Directory path escapes workspace root: ${dirPath}`);
+      }
+
+      let stat;
+      try {
+        stat = await fs.stat(resolvedPath);
+      } catch (error) {
+        if (error.code === 'ENOENT') {
+          throw new ToolExecutionError('PATH_NOT_FOUND', `Directory does not exist: ${dirPath}`);
+        }
+        throw error;
+      }
+
+      if (!stat.isDirectory()) {
+        throw new ToolExecutionError('NOT_A_DIRECTORY', `Path is not a directory: ${dirPath}`);
+      }
+
+      const entries = recursive
+        ? await readDirectoryRecursive(resolvedPath, context.root, includeHidden, maxEntries)
+        : await readDirectoryFlat(resolvedPath, context.root, includeHidden);
+
+      const truncated = entries.length >= maxEntries;
+      const listedEntries = entries.slice(0, maxEntries);
+
+      return {
+        path: toWorkspacePath(context.root, resolvedPath),
+        entries: listedEntries,
+        totalEntries: entries.length,
+        truncated,
+        recursive,
+      };
+    },
+  };
+}
+
+async function readDirectoryFlat(dirPath, root, includeHidden) {
+  const entries = [];
+
+  const items = await fs.readdir(dirPath, { withFileTypes: true });
+
+  for (const item of items) {
+    if (!includeHidden && item.name.startsWith('.')) {
+      continue;
+    }
+
+    const fullPath = path.join(dirPath, item.name);
+    const relativePath = toWorkspacePath(root, fullPath);
+
+    let stat;
+    try {
+      stat = await fs.stat(fullPath);
+    } catch {
+      continue;
+    }
+
+    entries.push({
+      name: item.name,
+      path: relativePath,
+      type: item.isDirectory() ? 'directory' : 'file',
+      size: item.isFile() ? stat.size : undefined,
+    });
+  }
+
+  entries.sort((a, b) => {
+    if (a.type !== b.type) return a.type === 'directory' ? -1 : 1;
+    return a.name.localeCompare(b.name);
+  });
+
+  return entries;
+}
+
+async function readDirectoryRecursive(dirPath, root, includeHidden, maxEntries) {
+  const entries = [];
+  const queue = [{ dir: dirPath, depth: 0 }];
+
+  while (queue.length > 0 && entries.length < maxEntries) {
+    const { dir: currentDir, depth } = queue.shift();
+
+    if (depth > 5) continue;
+
+    const items = await fs.readdir(currentDir, { withFileTypes: true });
+
+    for (const item of items) {
+      if (!includeHidden && item.name.startsWith('.')) {
+        continue;
+      }
+
+      const fullPath = path.join(currentDir, item.name);
+      const relativePath = toWorkspacePath(root, fullPath);
+
+      if (item.isDirectory()) {
+        if (IGNORED_DIRECTORY_NAMES.has(item.name)) {
+          continue;
+        }
+
+        entries.push({
+          name: item.name,
+          path: relativePath,
+          type: 'directory',
+        });
+
+        queue.push({ dir: fullPath, depth: depth + 1 });
+      } else {
+        let stat;
+        try {
+          stat = await fs.stat(fullPath);
+        } catch {
+          continue;
+        }
+
+        entries.push({
+          name: item.name,
+          path: relativePath,
+          type: 'file',
+          size: stat.size,
+        });
+      }
+    }
+  }
+
+  return entries;
 }
 
 function resolveWithinRoot(root, requestedPath) {
@@ -826,6 +1345,10 @@ module.exports = {
   createGlobTool,
   createSearchTool,
   createShellTool,
+  createWebFetchTool,
+  createWebSearchTool,
+  createFileEditTool,
+  createReadDirectoryTool,
   serializeToolResult,
   stringifyToolResult,
 };
