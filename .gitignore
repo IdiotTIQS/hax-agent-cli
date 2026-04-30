@@ -1,0 +1,5 @@
+node_modules/
+.hax-agent/
+*.log
+.env
+claude-code-main/

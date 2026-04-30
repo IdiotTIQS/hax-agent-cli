@@ -1,0 +1,45 @@
+{
+  "name": "hax-agent-cli",
+  "version": "1.0.1",
+  "description": "A professional AI coding assistant with Claude-like CLI experience. Explore codebases, read/write files, execute shell commands, and coordinate agent teams.",
+  "main": "src/index.js",
+  "bin": {
+    "hax-agent": "./src/cli.js"
+  },
+  "scripts": {
+    "start": "node src/cli.js",
+    "auth:team": "node src/cli.js team auth-refactor",
+    "test": "node --test"
+  },
+  "files": [
+    "src/**/*.js",
+    "test/**/*.js"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/IdiotTIQS/hax-agent-cli.git"
+  },
+  "bugs": {
+    "url": "https://github.com/IdiotTIQS/hax-agent-cli/issues"
+  },
+  "homepage": "https://github.com/IdiotTIQS/hax-agent-cli#readme",
+  "keywords": [
+    "ai",
+    "agent",
+    "cli",
+    "coding-assistant",
+    "claude",
+    "code-refactor",
+    "code-exploration",
+    "shell",
+    "anthropic"
+  ],
+  "author": "IdiotTIQS",
+  "license": "MIT",
+  "dependencies": {
+    "@anthropic-ai/sdk": "latest"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
