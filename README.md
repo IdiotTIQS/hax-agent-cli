@@ -18,6 +18,7 @@ Hax Agent CLI 是一个面向开发者的 AI 编码助手，提供类似 Claude 
 - [快速开始](#快速开始)
 - [使用方式](#使用方式)
 - [交互式命令](#交互式命令)
+- [Skills 技能系统](#skills-技能系统)
 - [配置说明](#配置说明)
 - [本地工具](#本地工具)
 - [架构概览](#架构概览)
@@ -34,6 +35,7 @@ Hax Agent CLI 是一个面向开发者的 AI 编码助手，提供类似 Claude 
 - **多 Provider 支持** — 内置 Anthropic（Claude）、OpenAI（GPT）、Google（Gemini）三大主流 Provider，支持运行时切换。
 - **模型管理** — 运行时查看可用模型、动态切换模型。
 - **本地工具集** — 文件读写、搜索、Glob 匹配以及受 allowlist 限制的 shell 命令执行。
+- **Skills 技能系统** — 支持创建、管理和调用可复用的技能，将重复性工作流封装为 SKILL.md 文件。
 - **会话记忆** — 自动保存对话 transcript，新会话自动加载最近的上下文。
 - **分层配置** — 支持 5 级优先级配置合并（默认 → 用户 → 项目 → 显式 → 环境变量）。
 - **多 Agent 团队** — 内置 `auth-refactor` 认证重构团队计划，支持输出结构化协作方案。
@@ -135,6 +137,98 @@ hax-agent            # 任意目录下可用
 | `/provider <name>` | 切换 AI Provider（`anthropic`、`openai`、`google`） |
 | `/api-url <base-url>` | 设置 API Base URL |
 | `/api-key <key>` | 设置 API Key |
+
+---
+
+## Skills 技能系统
+
+Skills 是可复用的工作流封装，允许你将重复性的任务流程保存为 SKILL.md 文件，在后续会话中通过斜杠命令快速调用。
+
+### 技能目录结构
+
+技能存储在以下位置：
+
+```text
+~/.hax-agent/skills/          # 用户级技能（跨项目可用）
+├── code-review/
+│   └── SKILL.md
+└── deploy-workflow/
+    └── SKILL.md
+
+.hax-agent/skills/            # 项目级技能（仅当前项目可用）
+├── run-tests/
+│   └── SKILL.md
+└── ...
+```
+
+每个技能是一个目录，包含一个 `SKILL.md` 文件。
+
+### SKILL.md 格式
+
+```markdown
+---
+name: my-skill
+description: 一句话描述这个技能的作用
+allowed-tools:
+  - file.read
+  - file.write
+  - shell.run
+when_to_use: 描述何时自动调用此技能。以 "Use when..." 开头，包含触发短语和示例消息。
+argument-hint: "[arg1] [arg2]"
+arguments:
+  - arg1
+  - arg2
+---
+
+# 技能标题
+
+详细描述此技能的工作流程。
+
+## Inputs
+- `$arg1`: 描述这个输入
+
+## Goal
+清晰陈述此工作流的目标。
+
+## Steps
+
+### 1. 步骤名称
+此步骤要做什么。具体且可操作。
+
+**Success criteria**: 始终包含！这表明步骤已完成，可以继续下一步。
+
+### 2. 另一步骤
+...
+
+**Human checkpoint**: 何时暂停并询问用户（特别是不可逆操作）。
+```
+
+### 调用技能
+
+在 Shell 中，直接输入技能名作为斜杠命令：
+
+```text
+/code-review                    # 调用代码审查技能
+/code-review src/index.js       # 带参数调用
+/skillify                       # 将当前会话捕获为技能
+/skills                         # 列出所有可用技能
+/skills usage                   # 查看技能使用统计
+```
+
+### 将会话捕获为技能
+
+使用 `/skillify` 命令将当前会话的重复性流程保存为可复用技能：
+
+```text
+/skillify                       # 交互式创建技能
+/skillify deploy workflow       # 描述要捕获的流程
+```
+
+AI 会分析会话内容，识别可复用的步骤，并引导你创建 SKILL.md 文件。
+
+### 技能使用追踪
+
+系统自动追踪每个技能的使用频率和最近使用时间，支持基于使用频率和新鲜度的智能排序。
 
 ---
 

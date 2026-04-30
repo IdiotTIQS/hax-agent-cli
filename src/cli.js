@@ -11,8 +11,10 @@ const { formatTeamPlan } = require('./formatters/team-plan');
 const { formatAgentList, formatMessages, formatRunResult, formatTeamList, formatTeamSnapshot } = require('./formatters/agent-teams');
 const { createLocalToolRegistry } = require('./tools');
 const { registerAgentTeamTools } = require('./teams/tools');
+const { loadAllSkills, createSkillifySkill, recordSkillUsage } = require('./skills');
+const { buildSkillSystemPrompt, matchSkillByIntent, getSkillsForSession } = require('./skills/intent-matcher');
 
-const VERSION = '1.1.0';
+const VERSION = '1.2.0';
 
 const ANSI = {
   reset: '\x1B[0m',
@@ -110,6 +112,7 @@ const THEME = {
   token: ANSI.dim,
   border: ANSI.dim,
   badge: ANSI.bgBrightBlack + ANSI.brightWhite,
+  skillIndicator: ANSI.brightGreen + ANSI.bold,
 };
 
 const SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
@@ -135,6 +138,8 @@ const SLASH_COMMANDS = [
   { name: 'clear', description: 'Clear conversation and start fresh', aliases: ['c'] },
   { name: 'compact', description: 'Compact conversation to reduce context', aliases: [] },
   { name: 'tools', description: 'List available tools', aliases: ['t'] },
+  { name: 'skills', description: 'List or manage skills', aliases: ['skill'], argHint: '[list|usage]' },
+  { name: 'skillify', description: 'Capture this session as a reusable skill', aliases: [], argHint: '[description]' },
   { name: 'agents', description: 'List available agents', aliases: ['a'] },
   { name: 'team', description: 'Manage agent teams and teammates', aliases: ['teams'], argHint: '[new|spawn|task|run|status|send|inbox|agents]' },
   { name: 'models', description: 'List available models', aliases: ['m'] },
@@ -1187,6 +1192,34 @@ function renderPromptLine(screen) {
 }
 
 async function handleChatMessage(content, { screen, session, markdown }) {
+  const skillMatch = content.match(/^\/(\S+)(?:\s+(.*))?$/);
+
+  if (skillMatch) {
+    const skillName = skillMatch[1];
+    const skillArgs = skillMatch[2] ? skillMatch[2].split(/\s+/) : [];
+    const skills = loadAllSkills(session.settings.projectRoot || process.cwd());
+    const skillify = createSkillifySkill(session.messages);
+    const allSkills = [skillify, ...skills];
+    const matchedSkill = allSkills.find((s) => s.name === skillName && !s.isHidden);
+
+    if (matchedSkill) {
+      recordSkillUsage(matchedSkill.name);
+      await handleSkillInvocation(matchedSkill, skillArgs, { screen, session, markdown });
+      return;
+    }
+  }
+
+  const skills = getSkillsForSession(session.settings.projectRoot, session.messages);
+  const intentMatchedSkill = matchSkillByIntent(content, skills);
+
+  if (intentMatchedSkill) {
+    recordSkillUsage(intentMatchedSkill.name);
+    screen.write(`${THEME.dim}Auto-invoking skill: ${intentMatchedSkill.displayName || intentMatchedSkill.name}${ANSI.reset}\n`);
+    await handleSkillInvocation(intentMatchedSkill, [], { screen, session, markdown });
+    return;
+  }
+
+  const skillSystemPrompt = buildSkillSystemPrompt(skills);
   const userMessage = { role: 'user', content };
   const abortController = new AbortController();
   const renderer = new ResponseRenderer(screen, markdown);
@@ -1208,6 +1241,7 @@ async function handleChatMessage(content, { screen, session, markdown }) {
       messages: session.messages,
       toolRegistry: session.toolRegistry,
       signal: abortController.signal,
+      system: skillSystemPrompt,
     })) {
       if (session.responseInterrupted) break;
 
@@ -1241,6 +1275,7 @@ async function handleChatMessage(content, { screen, session, markdown }) {
         messages: session.messages,
         toolRegistry: session.toolRegistry,
         signal: abortController.signal,
+        system: skillSystemPrompt,
       })) {
         if (session.responseInterrupted) break;
 
@@ -1292,6 +1327,69 @@ async function handleChatMessage(content, { screen, session, markdown }) {
   appendTranscriptEntry(session.id, { role: 'assistant', content: assistantText }, session.settings);
 }
 
+async function handleSkillInvocation(skill, args, { screen, session, markdown }) {
+  screen.write(`${THEME.skillIndicator}Skill${ANSI.reset} ${THEME.accent}${skill.displayName || skill.name}${ANSI.reset}\n`);
+
+  try {
+    const promptBlocks = await skill.getPromptForCommand(args);
+    const skillContent = promptBlocks.map((b) => b.text).join('\n');
+
+    const userMessage = { role: 'user', content: skillContent };
+    session.messages.push(userMessage);
+
+    const abortController = new AbortController();
+    const renderer = new ResponseRenderer(screen, markdown);
+    let assistantText = '';
+
+    session.isStreaming = true;
+    session.responseInterrupted = false;
+    session.responseAbortController = abortController;
+    session.responseRenderer = renderer;
+    renderer.startWaiting();
+
+    const otherSkills = getSkillsForSession(session.settings.projectRoot, session.messages).filter((s) => s.name !== skill.name);
+    const skillSystemPrompt = buildSkillSystemPrompt(otherSkills);
+
+    for await (const chunk of session.provider.stream({
+      messages: session.messages,
+      toolRegistry: session.toolRegistry,
+      signal: abortController.signal,
+      system: skillSystemPrompt,
+    })) {
+      if (session.responseInterrupted) break;
+
+      if (chunk.type === 'text') {
+        assistantText += chunk.delta;
+        renderer.writeText(chunk.delta);
+      } else if (chunk.type === 'thinking') {
+        renderer.thinking(chunk);
+      } else if (chunk.type === 'tool_start') {
+        session.costTracker.addToolCall();
+        renderer.startTool(chunk);
+      } else if (chunk.type === 'tool_result') {
+        renderer.finishTool(chunk);
+      } else if (chunk.type === 'usage') {
+        session.costTracker.addUsage(chunk, session.provider.model);
+      }
+    }
+
+    if (!session.responseInterrupted) {
+      renderer.complete({ inputTokens: 0, outputTokens: 0 });
+      session.messages.push({ role: 'assistant', content: assistantText });
+      appendTranscriptEntry(session.id, userMessage, session.settings);
+      appendTranscriptEntry(session.id, { role: 'assistant', content: assistantText }, session.settings);
+    } else {
+      session.messages.pop();
+    }
+  } catch (error) {
+    screen.write(`${THEME.error}Skill execution failed: ${error.message}${ANSI.reset}\n`);
+  } finally {
+    session.isStreaming = false;
+    session.responseAbortController = null;
+    session.responseRenderer = null;
+  }
+}
+
 async function handleSlashCommand(line, context) {
   const [commandName, ...args] = line.slice(1).split(/\s+/);
 
@@ -1300,6 +1398,17 @@ async function handleSlashCommand(line, context) {
   );
 
   if (!command) {
+    const skills = loadAllSkills(context.session.settings.projectRoot || process.cwd());
+    const skillify = createSkillifySkill(context.session.messages);
+    const allSkills = [skillify, ...skills];
+    const matchedSkill = allSkills.find((s) => s.name === commandName && !s.isHidden);
+
+    if (matchedSkill) {
+      recordSkillUsage(matchedSkill.name);
+      await handleSkillInvocation(matchedSkill, args, context);
+      return;
+    }
+
     context.screen.write(`${THEME.error}Unknown command: /${commandName}${ANSI.reset}\n`);
     context.screen.write(`${THEME.dim}Type /help for available commands.${ANSI.reset}\n`);
     return;
@@ -1311,6 +1420,8 @@ async function handleSlashCommand(line, context) {
     case 'clear': clearShell(context); break;
     case 'compact': compactShell(context); break;
     case 'tools': showTools(context); break;
+    case 'skills': showSkills(args, context); break;
+    case 'skillify': await handleSkillifyCommand(args, context); break;
     case 'agents': showAgents(context); break;
     case 'team': await handleTeamCommand(args, context); break;
     case 'models': await showModels(context); break;
@@ -1387,6 +1498,129 @@ function showTools({ screen, session }) {
     screen.write(`  ${THEME.toolIndicator}${nameCol}${ANSI.reset} ${tool.description}\n`);
   }
   screen.write('\n');
+}
+
+function showSkills(args, { screen, session }) {
+  const [subCommand] = args;
+
+  if (!subCommand || subCommand === 'list') {
+    const skills = loadAllSkills(session.settings.projectRoot || process.cwd());
+    const skillify = createSkillifySkill(session.messages);
+    const allSkills = [skillify, ...skills];
+
+    screen.write(`\n${THEME.heading}Available Skills${ANSI.reset}\n`);
+    screen.write(`${THEME.border}──────────────────────────────────${ANSI.reset}\n`);
+
+    for (const skill of allSkills) {
+      if (skill.isHidden) continue;
+      const nameCol = skill.displayName.padEnd(18);
+      const source = skill.source !== 'bundled' ? ` ${THEME.dim}[${skill.source}]${ANSI.reset}` : '';
+      const hint = skill.argumentHint ? ` ${THEME.dim}${skill.argumentHint}${ANSI.reset}` : '';
+      screen.write(`  ${THEME.accent}/${nameCol}${ANSI.reset} ${skill.description}${source}${hint}\n`);
+    }
+
+    if (allSkills.length === 0) {
+      screen.write(`  ${THEME.dim}No skills available. Create skills in ~/.hax-agent/skills/ or .hax-agent/skills/${ANSI.reset}\n`);
+    }
+
+    screen.write(`\n${THEME.dim}Use /skillify to capture a session as a skill.${ANSI.reset}\n\n`);
+  } else if (subCommand === 'usage') {
+    const { getSkillUsageStats } = require('./skills');
+    const stats = getSkillUsageStats();
+    const skillNames = Object.keys(stats);
+
+    if (skillNames.length === 0) {
+      screen.write(`${THEME.dim}No skill usage recorded yet.${ANSI.reset}\n`);
+      return;
+    }
+
+    screen.write(`\n${THEME.heading}Skill Usage Statistics${ANSI.reset}\n`);
+    screen.write(`${THEME.border}──────────────────────────────────${ANSI.reset}\n`);
+
+    const sorted = skillNames.sort((a, b) => {
+      const { getSkillUsageScore } = require('./skills');
+      return getSkillUsageScore(b) - getSkillUsageScore(a);
+    });
+
+    for (const name of sorted) {
+      const { getSkillUsageScore } = require('./skills');
+      const score = getSkillUsageScore(name);
+      const usage = stats[name];
+      const daysAgo = Math.floor((Date.now() - usage.lastUsedAt) / (1000 * 60 * 60 * 24));
+      const timeStr = daysAgo === 0 ? 'today' : daysAgo === 1 ? 'yesterday' : `${daysAgo}d ago`;
+      screen.write(`  ${THEME.accent}${name.padEnd(18)}${ANSI.reset} ${THEME.dim}${usage.usageCount} uses · last ${timeStr} · score ${score.toFixed(2)}${ANSI.reset}\n`);
+    }
+    screen.write('\n');
+  } else {
+    screen.write(`${THEME.error}Unknown skill command: ${subCommand}${ANSI.reset}\n`);
+    screen.write(`${THEME.dim}Usage: /skills [list|usage]${ANSI.reset}\n`);
+  }
+}
+
+async function handleSkillifyCommand(args, { screen, session }) {
+  const description = args.join(' ');
+  const skillify = createSkillifySkill(session.messages);
+
+  screen.write(`\n${THEME.heading}Skillify${ANSI.reset}\n`);
+  screen.write(`${THEME.border}──────────────────────────────────${ANSI.reset}\n`);
+  screen.write(`${THEME.dim}Capturing session as a reusable skill...${ANSI.reset}\n\n`);
+
+  const promptBlocks = await skillify.getPromptForCommand(description ? [description] : []);
+  const skillContent = promptBlocks.map((b) => b.text).join('\n');
+
+  const userMessage = { role: 'user', content: skillContent };
+  session.messages.push(userMessage);
+
+  const abortController = new AbortController();
+  const markdown = new MarkdownRenderer(screen.columns);
+  const renderer = new ResponseRenderer(screen, markdown);
+  let assistantText = '';
+
+  session.isStreaming = true;
+  session.responseInterrupted = false;
+  session.responseAbortController = abortController;
+  session.responseRenderer = renderer;
+  renderer.startWaiting();
+
+  try {
+    for await (const chunk of session.provider.stream({
+      messages: session.messages,
+      toolRegistry: session.toolRegistry,
+      signal: abortController.signal,
+    })) {
+      if (session.responseInterrupted) break;
+
+      if (chunk.type === 'text') {
+        assistantText += chunk.delta;
+        renderer.writeText(chunk.delta);
+      } else if (chunk.type === 'thinking') {
+        renderer.thinking(chunk);
+      } else if (chunk.type === 'tool_start') {
+        session.costTracker.addToolCall();
+        renderer.startTool(chunk);
+      } else if (chunk.type === 'tool_result') {
+        renderer.finishTool(chunk);
+      } else if (chunk.type === 'usage') {
+        session.costTracker.addUsage(chunk, session.provider.model);
+      }
+    }
+
+    if (!session.responseInterrupted) {
+      renderer.complete({ inputTokens: 0, outputTokens: 0 });
+      session.messages.push({ role: 'assistant', content: assistantText });
+      appendTranscriptEntry(session.id, userMessage, session.settings);
+      appendTranscriptEntry(session.id, { role: 'assistant', content: assistantText }, session.settings);
+    } else {
+      session.messages.pop();
+    }
+  } catch (error) {
+    renderer.fail(`Skillify failed: ${error.message}`);
+    session.messages.pop();
+  } finally {
+    session.isStreaming = false;
+    session.responseAbortController = null;
+    session.responseRenderer = null;
+  }
 }
 
 function showAgents({ screen, session }) {
