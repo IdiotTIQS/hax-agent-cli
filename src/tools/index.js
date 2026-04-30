@@ -423,7 +423,6 @@ function createWebFetchTool() {
         try {
           const { body, truncated: bodyTruncated } = await fetchUrl({ parsedUrl, method, maxBodyBytes, timeoutMs });
           const plainText = htmlToPlainText(body);
-          const links = extractPageLinks(body, parsedUrl, 20);
 
           return {
             url: parsedUrl.href,
@@ -431,10 +430,7 @@ function createWebFetchTool() {
             contentType: 'text/html',
             content: plainText,
             truncated: bodyTruncated,
-            linksFound: links,
-            note: links.length > 0
-              ? `Found ${links.length} links. Only fetch additional pages if the user explicitly requests it.`
-              : undefined,
+            note: 'WEB FETCH COMPLETE. Do NOT call web.fetch again unless the user explicitly requests another URL. Use the content above to answer the user.',
           };
         } catch (error) {
           lastError = error;
@@ -540,48 +536,6 @@ function htmlToPlainText(html) {
   text = text.replace(/\s*\n\s*\n\s*/g, '\n\n');
 
   return text.trim();
-}
-
-function extractPageLinks(html, baseUrl, maxLinks) {
-  const links = [];
-  const seen = new Set();
-  const hrefRegex = /href\s*=\s*["'](.*?)["']/gi;
-  let match;
-
-  while ((match = hrefRegex.exec(html)) !== null && links.length < maxLinks) {
-    let href = match[1];
-
-    if (!href || href.startsWith('#') || href.startsWith('mailto:') || href.startsWith('javascript:')) {
-      continue;
-    }
-
-    let resolvedUrl;
-    try {
-      if (href.startsWith('//')) {
-        resolvedUrl = new URL(baseUrl.protocol + href);
-      } else if (href.startsWith('/')) {
-        resolvedUrl = new URL(href, baseUrl);
-      } else if (href.startsWith('http')) {
-        resolvedUrl = new URL(href);
-      } else {
-        resolvedUrl = new URL(href, baseUrl);
-      }
-    } catch {
-      continue;
-    }
-
-    const urlKey = resolvedUrl.href.split('#')[0];
-    if (seen.has(urlKey)) {
-      continue;
-    }
-    seen.add(urlKey);
-
-    if (resolvedUrl.hostname === baseUrl.hostname || resolvedUrl.hostname === 'www.' + baseUrl.hostname.replace('www.', '')) {
-      links.push(resolvedUrl.href);
-    }
-  }
-
-  return links;
 }
 
 function createWebSearchTool() {

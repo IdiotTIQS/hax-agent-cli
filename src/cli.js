@@ -1235,8 +1235,6 @@ async function handleChatMessage(content, { screen, session, markdown }) {
   const turnOutputTokens = session.costTracker.outputTokens;
 
   try {
-    let toolLimitReached = false;
-
     for await (const chunk of session.provider.stream({
       messages: session.messages,
       toolRegistry: session.toolRegistry,
@@ -1262,38 +1260,9 @@ async function handleChatMessage(content, { screen, session, markdown }) {
       } else if (chunk.type === 'tool_result') {
         renderer.finishTool(chunk);
       } else if (chunk.type === 'tool_limit') {
-        toolLimitReached = true;
-        renderer.notice(`Tool turn limit reached after ${chunk.maxToolTurns} turns. Continuing automatically...`);
+        renderer.notice(`Tool turn limit reached after ${chunk.maxToolTurns} turns. Type /continue if you need more.`);
       } else if (chunk.type === 'usage') {
         session.costTracker.addUsage(chunk, session.provider.model);
-      }
-    }
-
-    if (toolLimitReached && !session.responseInterrupted) {
-      renderer.notice('Continuing with the next batch of tool calls...');
-      for await (const chunk of session.provider.stream({
-        messages: session.messages,
-        toolRegistry: session.toolRegistry,
-        signal: abortController.signal,
-        system: skillSystemPrompt,
-      })) {
-        if (session.responseInterrupted) break;
-
-        if (chunk.type === 'text') {
-          assistantText += chunk.delta;
-          renderer.writeText(chunk.delta);
-        } else if (chunk.type === 'thinking') {
-          renderer.thinking(chunk);
-        } else if (chunk.type === 'tool_start') {
-          session.costTracker.addToolCall();
-          renderer.startTool(chunk);
-        } else if (chunk.type === 'tool_result') {
-          renderer.finishTool(chunk);
-        } else if (chunk.type === 'tool_limit') {
-          renderer.notice('Tool turn limit reached again. Ask me to continue if you need more.');
-        } else if (chunk.type === 'usage') {
-          session.costTracker.addUsage(chunk, session.provider.model);
-        }
       }
     }
   } catch (error) {
