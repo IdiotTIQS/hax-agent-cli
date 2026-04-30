@@ -5,7 +5,8 @@ const { normalizeMessages } = require("./messages");
 
 const DEFAULT_MODEL = "gemini-2.5-pro";
 const DEFAULT_MAX_TOKENS = 8192;
-const DEFAULT_MAX_TOOL_TURNS = Infinity;
+const DEFAULT_MAX_TOOL_TURNS = 30;
+const MAX_SAME_TOOL_CALLS = 8;
 const MAX_REPEATED_INVALID_TOOL_RESULTS = 1;
 const DEFAULT_SYSTEM_PROMPT = [
   "# Role & Identity",
@@ -105,6 +106,8 @@ class GoogleProvider extends ChatProvider {
     const maxToolTurns = parsePositiveNumber(request.maxToolTurns, DEFAULT_MAX_TOOL_TURNS);
     const invalidToolCalls = new Map();
     const repeatedInvalidNotices = new Map();
+    const toolCallCounts = new Map();
+    const lastToolName = { current: null };
     let chatHistory = [];
 
     for (let turn = 0; turn < maxToolTurns; turn += 1) {
@@ -138,6 +141,22 @@ class GoogleProvider extends ChatProvider {
 
       if (!toolRegistry || functionCalls.length === 0) {
         return;
+      }
+
+      if (functionCalls.length > 0) {
+        const firstToolName = toRegistryToolName(functionCalls[0].name);
+        if (lastToolName.current === firstToolName) {
+          const count = (toolCallCounts.get(firstToolName) || 0) + 1;
+          toolCallCounts.set(firstToolName, count);
+          if (count >= MAX_SAME_TOOL_CALLS) {
+            yield createToolLimitChunk(turn + 1, "too_many_same_tool_calls");
+            yield createTextChunk(`\n\nI've called ${firstToolName} ${count} times in a row. To prevent excessive tool usage, I'll stop here. If you need more specific information, please ask me to call it again.`);
+            return;
+          }
+        } else {
+          toolCallCounts.set(firstToolName, 1);
+        }
+        lastToolName.current = firstToolName;
       }
 
       chatHistory.push({

@@ -5,7 +5,8 @@ const { normalizeMessages } = require("./messages");
 
 const DEFAULT_MODEL = "claude-opus-4-7";
 const DEFAULT_MAX_TOKENS = 8192;
-const DEFAULT_MAX_TOOL_TURNS = Infinity;
+const DEFAULT_MAX_TOOL_TURNS = 30;
+const MAX_SAME_TOOL_CALLS = 8;
 const MAX_REPEATED_INVALID_TOOL_RESULTS = 1;
 const DEFAULT_SYSTEM_PROMPT = [
   "# Role & Identity",
@@ -110,6 +111,8 @@ class AnthropicProvider extends ChatProvider {
     const maxToolTurns = parsePositiveNumber(request.maxToolTurns, DEFAULT_MAX_TOOL_TURNS);
     const invalidToolCalls = new Map();
     const repeatedInvalidNotices = new Map();
+    const toolCallCounts = new Map();
+    const lastToolName = { current: null };
 
     for (let turn = 0; turn < maxToolTurns; turn += 1) {
       const stream = this.client.messages.stream(this.createRequest({
@@ -140,6 +143,20 @@ class AnthropicProvider extends ChatProvider {
       const toolResults = [];
       for (const toolUse of toolUses) {
         const toolName = toRegistryToolName(toolUse.name);
+
+        if (lastToolName.current === toolName) {
+          const count = (toolCallCounts.get(toolName) || 0) + 1;
+          toolCallCounts.set(toolName, count);
+          if (count >= MAX_SAME_TOOL_CALLS) {
+            yield createToolLimitChunk(turn + 1, "too_many_same_tool_calls");
+            yield createTextChunk(`\n\nI've called ${toolName} ${count} times in a row. To prevent excessive tool usage, I'll stop here. If you need more specific information, please ask me to call it again.`);
+            return;
+          }
+        } else {
+          toolCallCounts.set(toolName, 1);
+        }
+        lastToolName.current = toolName;
+
         const toolInput = toolUse.input || {};
         const callSignature = `${toolName}:${JSON.stringify(toolInput)}`;
         const failedCount = invalidToolCalls.get(callSignature) || 0;
