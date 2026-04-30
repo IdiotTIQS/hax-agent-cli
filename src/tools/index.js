@@ -774,7 +774,7 @@ function createReadDirectoryTool() {
 
   return {
     name: 'file.readDirectory',
-    description: 'Read the contents of a directory, listing files and subdirectories with their types and sizes.',
+    description: 'Read the contents of a directory, listing files and subdirectories with their types and sizes. IMPORTANT: Only read directories relevant to the user\'s request. Do NOT recursively traverse the entire filesystem or large directories like node_modules.',
     inputSchema: {
       type: 'object',
       required: ['path'],
@@ -826,6 +826,7 @@ function createReadDirectoryTool() {
         totalEntries: entries.length,
         truncated,
         recursive,
+        entryCount: listedEntries.length,
       };
     },
   };
