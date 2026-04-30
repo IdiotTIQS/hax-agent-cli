@@ -1,8 +1,6 @@
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
-const https = require('node:https');
-const http = require('node:http');
 const { URL } = require('node:url');
 
 const DEFAULT_MAX_FILE_BYTES = 1024 * 1024;
@@ -399,7 +397,7 @@ function createWebFetchTool() {
 
   return {
     name: 'web.fetch',
-    description: 'Fetch the content of a URL and convert HTML to plain text. Only supports HTTP and HTTPS URLs.',
+    description: 'Fetch the content of a specific URL and convert HTML to plain text. Only supports HTTP and HTTPS URLs. IMPORTANT: Only fetch the URL the user explicitly requested. Do NOT automatically fetch links found in the response content.',
     inputSchema: {
       type: 'object',
       required: ['url'],
@@ -408,6 +406,7 @@ function createWebFetchTool() {
         method: { type: 'string', description: 'HTTP method (GET or POST)', default: 'GET' },
         maxBodyBytes: { type: 'number', description: 'Maximum response body size in bytes', default: DEFAULT_MAX_BODY_BYTES },
         timeoutMs: { type: 'number', description: 'Request timeout in milliseconds', default: DEFAULT_TIMEOUT_MS },
+        maxRetries: { type: 'number', description: 'Maximum number of retry attempts on failure', default: 2 },
       },
     },
     async execute(args) {
@@ -415,20 +414,42 @@ function createWebFetchTool() {
       const method = args.method === undefined ? 'GET' : requireString(args.method, 'method');
       const maxBodyBytes = readPositiveInteger(args.maxBodyBytes, DEFAULT_MAX_BODY_BYTES, 'maxBodyBytes');
       const timeoutMs = readPositiveInteger(args.timeoutMs, DEFAULT_TIMEOUT_MS, 'timeoutMs');
+      const maxRetries = readPositiveInteger(args.maxRetries, 2, 'maxRetries');
 
       const parsedUrl = parseAndValidateUrl(url);
-      const client = parsedUrl.protocol === 'https:' ? https : http;
 
-      const body = await fetchUrl({ client, parsedUrl, method, maxBodyBytes, timeoutMs });
-      const plainText = htmlToPlainText(body);
+      let lastError;
+      for (let attempt = 0; attempt <= maxRetries; attempt++) {
+        try {
+          const { body, truncated: bodyTruncated } = await fetchUrl({ parsedUrl, method, maxBodyBytes, timeoutMs });
+          const plainText = htmlToPlainText(body);
+          const links = extractPageLinks(body, parsedUrl, 20);
 
-      return {
-        url: parsedUrl.href,
-        status: 200,
-        contentType: 'text/html',
-        content: plainText,
-        truncated: body.length >= maxBodyBytes,
-      };
+          return {
+            url: parsedUrl.href,
+            status: 200,
+            contentType: 'text/html',
+            content: plainText,
+            truncated: bodyTruncated,
+            linksFound: links,
+            note: links.length > 0
+              ? `Found ${links.length} links. Only fetch additional pages if the user explicitly requests it.`
+              : undefined,
+          };
+        } catch (error) {
+          lastError = error;
+          if (error.code === 'HTTP_ERROR' || error.code === 'INVALID_URL') {
+            throw error;
+          }
+          if (attempt < maxRetries) {
+            const delay = Math.min(1000 * Math.pow(2, attempt), 5000);
+            await new Promise((resolve) => setTimeout(resolve, delay));
+          }
+        }
+      }
+
+      const message = lastError?.message || 'Unknown fetch error';
+      throw new ToolExecutionError('FETCH_FAILED', `Failed to fetch ${url}: ${message}`);
     },
   };
 }
@@ -447,84 +468,37 @@ function parseAndValidateUrl(urlString) {
   }
 }
 
-function fetchUrl({ client, parsedUrl, method, maxBodyBytes, timeoutMs }) {
-  return new Promise((resolve, reject) => {
-    const timeoutId = setTimeout(() => {
-      reject(new ToolExecutionError('FETCH_TIMEOUT', `Request timed out after ${timeoutMs}ms`));
-    }, timeoutMs);
+async function fetchUrl({ parsedUrl, method, maxBodyBytes, timeoutMs }) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
-    const options = {
-      hostname: parsedUrl.hostname,
-      port: parsedUrl.port,
-      path: parsedUrl.pathname + parsedUrl.search,
+  try {
+    const response = await globalThis.fetch(parsedUrl.href, {
       method: method.toUpperCase(),
       headers: {
-        'User-Agent': 'HaxAgent/1.2.0',
+        'User-Agent': 'HaxAgent/1.3.0',
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
       },
-      timeout: timeoutMs,
-    };
-
-    const req = client.request(options, (res) => {
-      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-        clearTimeout(timeoutId);
-        handleRedirect(res.headers.location, method, maxBodyBytes, timeoutMs, timeoutId)
-          .then(resolve)
-          .catch(reject);
-        return;
-      }
-
-      if (res.statusCode >= 400) {
-        clearTimeout(timeoutId);
-        reject(new ToolExecutionError('HTTP_ERROR', `HTTP ${res.statusCode}: ${res.statusMessage || 'Error'}`));
-        return;
-      }
-
-      const chunks = [];
-      let totalLength = 0;
-      let exceeded = false;
-
-      res.on('data', (chunk) => {
-        if (exceeded) return;
-
-        totalLength += chunk.length;
-        if (totalLength > maxBodyBytes) {
-          exceeded = true;
-          const remaining = maxBodyBytes - (totalLength - chunk.length);
-          if (remaining > 0) {
-            chunks.push(chunk.slice(0, remaining));
-          }
-          res.destroy();
-          return;
-        }
-
-        chunks.push(chunk);
-      });
-
-      res.on('end', () => {
-        clearTimeout(timeoutId);
-        resolve(Buffer.concat(chunks).toString('utf8'));
-      });
-
-      res.on('error', (error) => {
-        clearTimeout(timeoutId);
-        reject(new ToolExecutionError('FETCH_ERROR', `Response error: ${error.message}`));
-      });
+      redirect: 'follow',
+      signal: controller.signal,
     });
 
-    req.on('error', (error) => {
-      clearTimeout(timeoutId);
-      reject(new ToolExecutionError('FETCH_ERROR', `Request error: ${error.message}`));
-    });
+    if (!response.ok) {
+      throw new ToolExecutionError('HTTP_ERROR', `HTTP ${response.status}: ${response.statusText || 'Error'}`);
+    }
 
-    req.on('timeout', () => {
-      req.destroy();
-      clearTimeout(timeoutId);
-      reject(new ToolExecutionError('FETCH_TIMEOUT', `Request timed out after ${timeoutMs}ms`));
-    });
+    const arrayBuffer = await response.arrayBuffer();
+    let buffer = Buffer.from(arrayBuffer);
 
-    req.end();
-  });
+    const truncated = buffer.length >= maxBodyBytes;
+    if (buffer.length > maxBodyBytes) {
+      buffer = buffer.slice(0, maxBodyBytes);
+    }
+
+    return { body: buffer.toString('utf8'), truncated };
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
 async function handleRedirect(location, method, maxBodyBytes, timeoutMs, originalTimeoutId) {
@@ -537,8 +511,7 @@ async function handleRedirect(location, method, maxBodyBytes, timeoutMs, origina
     throw new ToolExecutionError('INVALID_REDIRECT', `Invalid redirect URL: ${location}`);
   }
 
-  const client = redirectUrl.protocol === 'https:' ? https : http;
-  return fetchUrl({ client, parsedUrl: redirectUrl, method, maxBodyBytes, timeoutMs });
+  return fetchUrl({ parsedUrl: redirectUrl, method, maxBodyBytes, timeoutMs });
 }
 
 function htmlToPlainText(html) {
@@ -569,6 +542,48 @@ function htmlToPlainText(html) {
   return text.trim();
 }
 
+function extractPageLinks(html, baseUrl, maxLinks) {
+  const links = [];
+  const seen = new Set();
+  const hrefRegex = /href\s*=\s*["'](.*?)["']/gi;
+  let match;
+
+  while ((match = hrefRegex.exec(html)) !== null && links.length < maxLinks) {
+    let href = match[1];
+
+    if (!href || href.startsWith('#') || href.startsWith('mailto:') || href.startsWith('javascript:')) {
+      continue;
+    }
+
+    let resolvedUrl;
+    try {
+      if (href.startsWith('//')) {
+        resolvedUrl = new URL(baseUrl.protocol + href);
+      } else if (href.startsWith('/')) {
+        resolvedUrl = new URL(href, baseUrl);
+      } else if (href.startsWith('http')) {
+        resolvedUrl = new URL(href);
+      } else {
+        resolvedUrl = new URL(href, baseUrl);
+      }
+    } catch {
+      continue;
+    }
+
+    const urlKey = resolvedUrl.href.split('#')[0];
+    if (seen.has(urlKey)) {
+      continue;
+    }
+    seen.add(urlKey);
+
+    if (resolvedUrl.hostname === baseUrl.hostname || resolvedUrl.hostname === 'www.' + baseUrl.hostname.replace('www.', '')) {
+      links.push(resolvedUrl.href);
+    }
+  }
+
+  return links;
+}
+
 function createWebSearchTool() {
   const DEFAULT_MAX_RESULTS = 10;
   const DEFAULT_TIMEOUT_MS = 15_000;
@@ -593,8 +608,7 @@ function createWebSearchTool() {
       const searchUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
       const parsedUrl = new URL(searchUrl);
 
-      const html = await fetchUrl({
-        client: https,
+      const { body: html } = await fetchUrl({
         parsedUrl,
         method: 'GET',
         maxBodyBytes: 2 * 1024 * 1024,
