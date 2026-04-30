@@ -3,7 +3,7 @@
 const { ChatProvider, createTextChunk } = require("./chat-provider");
 const { normalizeMessages } = require("./messages");
 
-const DEFAULT_MODEL = "claude-opus-4-7";
+const DEFAULT_MODEL = "gemini-2.5-pro";
 const DEFAULT_MAX_TOKENS = 8192;
 const DEFAULT_MAX_TOOL_TURNS = Infinity;
 const MAX_REPEATED_INVALID_TOOL_RESULTS = 1;
@@ -54,15 +54,15 @@ const DEFAULT_SYSTEM_PROMPT = [
   "- Acknowledge limitations when you are uncertain about something.",
 ].join("\n");
 
-class AnthropicProvider extends ChatProvider {
+class GoogleProvider extends ChatProvider {
   constructor(options = {}) {
     super({
-      name: options.name || "anthropic",
+      name: options.name || "google",
       model: options.model || DEFAULT_MODEL,
-      apiKey: options.apiKey || process.env.ANTHROPIC_API_KEY,
-      apiUrl: options.apiUrl || process.env.HAX_AGENT_API_URL || process.env.ANTHROPIC_BASE_URL,
+      apiKey: options.apiKey || process.env.GOOGLE_API_KEY,
+      apiUrl: options.apiUrl || process.env.HAX_AGENT_API_URL || process.env.GOOGLE_BASE_URL,
     });
-    this.client = options.client || createAnthropicClient(this.apiKey, this.apiUrl);
+    this.client = options.client || createGoogleClient(this.apiKey, this.apiUrl);
     this.maxTokens = parsePositiveNumber(options.maxTokens, DEFAULT_MAX_TOKENS);
   }
 
@@ -70,12 +70,15 @@ class AnthropicProvider extends ChatProvider {
     const response = await this.runToolLoop(request);
 
     return {
-      id: response.id,
+      id: response.id || `google-${Date.now()}`,
       provider: this.name,
-      model: response.model || request.model || this.model,
+      model: response.modelVersion || request.model || this.model,
       role: "assistant",
-      content: extractText(response.content),
-      usage: response.usage || null,
+      content: extractText(response.candidates?.[0]?.content?.parts),
+      usage: response.usageMetadata ? {
+        input_tokens: response.usageMetadata.promptTokenCount || 0,
+        output_tokens: response.usageMetadata.candidatesTokenCount || 0,
+      } : null,
       raw: response,
     };
   }
@@ -86,79 +89,90 @@ class AnthropicProvider extends ChatProvider {
       return;
     }
 
-    const stream = this.client.messages.stream(this.createRequest(request), createRequestOptions(request));
+    const response = await this.client.models.generateContentStream(this.createRequest(request));
 
-    for await (const event of stream) {
-      if (event.type === "content_block_delta" && event.delta?.type === "text_delta") {
-        yield createTextChunk(event.delta.text);
+    for await (const chunk of response) {
+      const text = extractText(chunk.candidates?.[0]?.content?.parts);
+      if (text) {
+        yield createTextChunk(text);
       }
-    }
-
-    const response = typeof stream.finalMessage === "function" ? await stream.finalMessage() : null;
-    if (response?.usage) {
-      yield {
-        type: "usage",
-        inputTokens: response.usage.input_tokens || 0,
-        outputTokens: response.usage.output_tokens || 0,
-      };
     }
   }
 
   async *streamToolLoop(request = {}) {
     const toolRegistry = request.toolRegistry;
-    const messages = toAnthropicMessages(request.messages || request.prompt || "");
+    const contents = toGoogleContents(request.messages || request.prompt || "");
     const maxToolTurns = parsePositiveNumber(request.maxToolTurns, DEFAULT_MAX_TOOL_TURNS);
     const invalidToolCalls = new Map();
     const repeatedInvalidNotices = new Map();
+    let chatHistory = [];
 
     for (let turn = 0; turn < maxToolTurns; turn += 1) {
-      const stream = this.client.messages.stream(this.createRequest({
-        ...request,
-        messages,
-      }), createRequestOptions(request));
+      const model = this.client.getGenerativeModel({
+        model: request.model || this.model,
+        tools: createGoogleTools(request.toolRegistry),
+        systemInstruction: createSystemPrompt(request.system),
+        generationConfig: {
+          maxOutputTokens: parsePositiveNumber(request.maxTokens, this.maxTokens),
+        },
+      });
 
-      for await (const event of stream) {
-        const chunk = createStreamChunk(event);
-        if (chunk) {
-          yield chunk;
+      const response = await model.generateContentStream({
+        contents: [...contents, ...chatHistory],
+      });
+
+      let fullText = "";
+      let functionCalls = [];
+
+      for await (const chunk of response) {
+        const text = extractText(chunk.candidates?.[0]?.content?.parts);
+        if (text) {
+          fullText += text;
+          yield createTextChunk(text);
+        }
+        const fc = extractFunctionCalls(chunk.candidates?.[0]?.content?.parts);
+        if (fc.length > 0) {
+          functionCalls = fc;
         }
       }
 
-      const response = typeof stream.finalMessage === "function" ? await stream.finalMessage() : null;
-      if (!response) {
+      if (!toolRegistry || functionCalls.length === 0) {
         return;
       }
 
-      const toolUses = extractToolUses(response.content);
+      chatHistory.push({
+        role: "model",
+        parts: functionCalls.length > 0
+          ? functionCalls.map(fc => ({ functionCall: fc }))
+          : [{ text: fullText }],
+      });
 
-      if (!toolRegistry || toolUses.length === 0) {
-        return;
-      }
-
-      messages.push({ role: "assistant", content: response.content });
-
-      const toolResults = [];
-      for (const toolUse of toolUses) {
-        const toolName = toRegistryToolName(toolUse.name);
-        const toolInput = toolUse.input || {};
+      const functionResponses = [];
+      for (const fc of functionCalls) {
+        const toolName = toRegistryToolName(fc.name);
+        const toolInput = fc.args || {};
         const callSignature = `${toolName}:${JSON.stringify(toolInput)}`;
         const failedCount = invalidToolCalls.get(callSignature) || 0;
         const attempt = failedCount + 1;
 
         if (failedCount >= 2) {
-          const toolResult = createRepeatedInvalidToolResult(toolUse);
-          const toolError = extractToolError(toolResult);
+          const error = "This tool call failed repeatedly with the same input. Choose a valid path or use a different tool.";
           const noticeCount = repeatedInvalidNotices.get(callSignature) || 0;
           const shouldNotice = noticeCount === 0;
           repeatedInvalidNotices.set(callSignature, noticeCount + 1);
-          yield createToolResultChunk(toolName, true, toolError, {
+          yield createToolResultChunk(toolName, true, error, {
             attempt,
             input: toolInput,
             repeatedInvalid: true,
             showNotice: shouldNotice,
             turn: turn + 1,
           });
-          toolResults.push(toolResult);
+          functionResponses.push({
+            functionResponse: {
+              name: fc.name,
+              response: { error },
+            },
+          });
 
           if (noticeCount + 1 >= MAX_REPEATED_INVALID_TOOL_RESULTS) {
             yield createToolLimitChunk(turn + 1, "repeated_invalid_tool_call");
@@ -169,30 +183,36 @@ class AnthropicProvider extends ChatProvider {
         }
 
         yield createToolStartChunk(toolName, toolInput, { attempt, turn: turn + 1 });
-        const toolResult = await executeToolUse(toolRegistry, toolUse);
-        const toolError = extractToolError(toolResult);
-        const parsedToolResult = parseToolResultContent(toolResult);
-        yield createToolResultChunk(toolName, toolResult.is_error, toolError, {
+        const result = await toolRegistry.execute(toolName, toolInput, { root: process.cwd() });
+        const isError = result.ok !== true;
+        const error = isError ? (result.error?.message || result.error?.code || null) : null;
+
+        yield createToolResultChunk(toolName, isError, error, {
           attempt,
-          data: parsedToolResult?.data,
-          durationMs: parsedToolResult?.durationMs,
-          errorCode: parsedToolResult?.error?.code,
+          data: result.data,
+          durationMs: result.durationMs,
+          errorCode: result.error?.code,
           input: toolInput,
           turn: turn + 1,
         });
 
-        if (toolResult.is_error) {
+        if (isError) {
           invalidToolCalls.set(callSignature, failedCount + 1);
         } else {
           invalidToolCalls.delete(callSignature);
         }
 
-        toolResults.push(toolResult);
+        functionResponses.push({
+          functionResponse: {
+            name: fc.name,
+            response: { result: JSON.stringify(result, null, 2) },
+          },
+        });
       }
 
-      messages.push({
-        role: "user",
-        content: toolResults,
+      chatHistory.push({
+        role: "function",
+        parts: functionResponses,
       });
     }
 
@@ -200,45 +220,64 @@ class AnthropicProvider extends ChatProvider {
   }
 
   createRequest(request = {}) {
-    const toolDefinitions = createToolDefinitions(request.toolRegistry);
-    const payload = {
+    return {
       model: request.model || this.model,
-      system: createSystemPrompt(request.system),
-      max_tokens: parsePositiveNumber(request.maxTokens, this.maxTokens),
-      messages: toAnthropicMessages(request.messages || request.prompt || ""),
-      thinking: { type: "adaptive", display: "summarized" },
-      output_config: { effort: "xhigh" },
+      contents: toGoogleContents(request.messages || request.prompt || ""),
+      tools: createGoogleTools(request.toolRegistry),
+      systemInstruction: createSystemPrompt(request.system),
+      generationConfig: {
+        maxOutputTokens: parsePositiveNumber(request.maxTokens, this.maxTokens),
+      },
     };
-
-    if (toolDefinitions.length > 0) {
-      payload.tools = toolDefinitions;
-    }
-
-    return payload;
   }
 
   async runToolLoop(request = {}) {
     const toolRegistry = request.toolRegistry;
-    const messages = toAnthropicMessages(request.messages || request.prompt || "");
+    const contents = toGoogleContents(request.messages || request.prompt || "");
     const maxToolTurns = parsePositiveNumber(request.maxToolTurns, DEFAULT_MAX_TOOL_TURNS);
-    let response;
+    let chatHistory = [];
 
     for (let turn = 0; turn < maxToolTurns; turn += 1) {
-      response = await this.client.messages.create(this.createRequest({
-        ...request,
-        messages,
-      }));
+      const model = this.client.getGenerativeModel({
+        model: request.model || this.model,
+        tools: createGoogleTools(request.toolRegistry),
+        systemInstruction: createSystemPrompt(request.system),
+        generationConfig: {
+          maxOutputTokens: parsePositiveNumber(request.maxTokens, this.maxTokens),
+        },
+      });
 
-      const toolUses = extractToolUses(response.content);
+      const response = await model.generateContent({
+        contents: [...contents, ...chatHistory],
+      });
 
-      if (!toolRegistry || toolUses.length === 0) {
+      const functionCalls = extractFunctionCalls(response.candidates?.[0]?.content?.parts);
+
+      if (!toolRegistry || functionCalls.length === 0) {
         return response;
       }
 
-      messages.push({ role: "assistant", content: response.content });
-      messages.push({
-        role: "user",
-        content: await Promise.all(toolUses.map((toolUse) => executeToolUse(toolRegistry, toolUse))),
+      chatHistory.push({
+        role: "model",
+        parts: functionCalls.map(fc => ({ functionCall: fc })),
+      });
+
+      const functionResponses = [];
+      for (const fc of functionCalls) {
+        const toolName = toRegistryToolName(fc.name);
+        const toolInput = fc.args || {};
+        const result = await toolRegistry.execute(toolName, toolInput, { root: process.cwd() });
+        functionResponses.push({
+          functionResponse: {
+            name: fc.name,
+            response: { result: JSON.stringify(result, null, 2) },
+          },
+        });
+      }
+
+      chatHistory.push({
+        role: "function",
+        parts: functionResponses,
       });
     }
 
@@ -247,130 +286,130 @@ class AnthropicProvider extends ChatProvider {
 
   async listModels() {
     try {
-      const page = await this.client.models.list();
-      const models = Array.isArray(page.data) ? page.data : [];
+      const response = await this.client.listModels();
+      const models = Array.isArray(response.models) ? response.models : [];
 
       if (models.length > 0) {
         return models.map((model) => ({
-          id: model.id,
-          name: model.display_name || model.name || model.id,
+          id: model.name?.replace("models/", "") || model.name,
+          name: model.displayName || model.name,
         }));
       }
-    } catch (error) {
+    } catch {
       // API 端点可能不支持 models.list 或返回 404，使用预定义列表
     }
 
-    // 预定义的 Claude 模型列表
     return [
-      { id: 'claude-sonnet-4-20250514', name: 'Claude Sonnet 4' },
-      { id: 'claude-opus-4-20250514', name: 'Claude Opus 4' },
-      { id: 'claude-haiku-3-5-20241022', name: 'Claude Haiku 3.5' },
-      { id: 'claude-3-5-sonnet-20241022', name: 'Claude 3.5 Sonnet' },
-      { id: 'claude-3-opus-20240229', name: 'Claude 3 Opus' },
+      { id: "gemini-2.5-pro", name: "Gemini 2.5 Pro" },
+      { id: "gemini-2.5-flash", name: "Gemini 2.5 Flash" },
+      { id: "gemini-2.0-flash", name: "Gemini 2.0 Flash" },
+      { id: "gemini-1.5-pro", name: "Gemini 1.5 Pro" },
+      { id: "gemini-1.5-flash", name: "Gemini 1.5 Flash" },
     ];
   }
 
   setApiUrl(apiUrl) {
     const normalizedApiUrl = super.setApiUrl(apiUrl);
-    this.client = createAnthropicClient(this.apiKey, this.apiUrl);
+    this.client = createGoogleClient(this.apiKey, this.apiUrl);
     return normalizedApiUrl;
   }
 
   setApiKey(apiKey) {
     const normalizedApiKey = super.setApiKey(apiKey);
-    this.client = createAnthropicClient(this.apiKey, this.apiUrl);
+    this.client = createGoogleClient(this.apiKey, this.apiUrl);
     return normalizedApiKey;
   }
 }
 
-function toAnthropicMessages(input) {
+function toGoogleContents(input) {
   const messages = Array.isArray(input) ? input : normalizeMessages(input);
+  const contents = [];
 
-  return messages.flatMap((message) => {
-    if (message == null) {
-      return [];
-    }
+  for (const message of messages) {
+    if (message == null) continue;
 
     if (typeof message === "string") {
-      return [{ role: "user", content: message }];
+      contents.push({ role: "user", parts: [{ text: message }] });
+      continue;
     }
 
     if (Array.isArray(message)) {
-      return toAnthropicMessages(message);
+      contents.push(...toGoogleContents(message));
+      continue;
     }
 
     if (typeof message !== "object") {
-      return [{ role: "user", content: String(message) }];
+      contents.push({ role: "user", parts: [{ text: String(message) }] });
+      continue;
     }
 
-    if (message.role !== "user" && message.role !== "assistant") {
-      return [];
+    if (message.role === "user") {
+      const content = Array.isArray(message.content)
+        ? message.content.map(c => typeof c === "string" ? { text: c } : c)
+        : [{ text: message.content || "" }];
+      contents.push({ role: "user", parts: content });
+    } else if (message.role === "assistant") {
+      const content = Array.isArray(message.content)
+        ? message.content.map(c => typeof c === "string" ? { text: c } : c)
+        : [{ text: message.content || "" }];
+      contents.push({ role: "model", parts: content });
     }
+  }
 
-    return [{
-      role: message.role,
-      content: Array.isArray(message.content) ? message.content : normalizeMessages([message])[0]?.content || "",
-    }];
-  });
+  return contents;
+}
+
+function extractText(parts) {
+  if (!Array.isArray(parts)) return "";
+  return parts
+    .filter(p => p?.text)
+    .map(p => p.text)
+    .join("");
+}
+
+function extractFunctionCalls(parts) {
+  if (!Array.isArray(parts)) return [];
+  return parts
+    .filter(p => p?.functionCall)
+    .map(p => p.functionCall);
 }
 
 function createSystemPrompt(systemPrompt) {
   const extraPrompt = typeof systemPrompt === "string" ? systemPrompt.trim() : "";
-  return extraPrompt ? `${DEFAULT_SYSTEM_PROMPT}\n\n${extraPrompt}` : DEFAULT_SYSTEM_PROMPT;
+  const basePrompt = DEFAULT_SYSTEM_PROMPT;
+  return extraPrompt ? `${basePrompt}\n\n${extraPrompt}` : basePrompt;
 }
 
-function createToolDefinitions(toolRegistry) {
+function createGoogleTools(toolRegistry) {
   if (!toolRegistry || typeof toolRegistry.list !== "function") {
     return [];
   }
 
-  return toolRegistry.list().map((tool) => ({
-    name: toAnthropicToolName(tool.name),
-    description: tool.description,
-    input_schema: tool.inputSchema || { type: "object", properties: {} },
-  }));
+  return [{
+    functionDeclarations: toolRegistry.list().map((tool) => ({
+      name: toGoogleToolName(tool.name),
+      description: tool.description,
+      parameters: toOpenAPISchema(tool.inputSchema),
+    })),
+  }];
 }
 
-function toAnthropicToolName(name) {
-  return String(name).replace(/[^a-zA-Z0-9_-]/g, "_");
+function toGoogleToolName(name) {
+  return String(name).replace(/[^a-zA-Z0-9_]/g, "_");
 }
 
 function toRegistryToolName(name) {
   return String(name).replace(/_/g, ".");
 }
 
-function extractToolUses(content) {
-  if (!Array.isArray(content)) {
-    return [];
+function toOpenAPISchema(schema) {
+  if (!schema || schema.type !== "object") {
+    return { type: "object", properties: {} };
   }
-
-  return content.filter((block) => block?.type === "tool_use" && block.id && block.name);
-}
-
-async function executeToolUse(toolRegistry, toolUse) {
-  const result = await toolRegistry.execute(toRegistryToolName(toolUse.name), toolUse.input || {});
-
-  return createToolResultBlock(toolUse.id, result);
-}
-
-function createRepeatedInvalidToolResult(toolUse) {
-  return createToolResultBlock(toolUse.id, {
-    type: "tool_result",
-    toolName: toRegistryToolName(toolUse.name),
-    ok: false,
-    error: {
-      code: "REPEATED_INVALID_TOOL_CALL",
-      message: "This tool call failed repeatedly with the same input. Choose a valid path or use a different tool instead of retrying the same empty arguments.",
-    },
-  });
-}
-
-function createToolResultBlock(toolUseId, result) {
   return {
-    type: "tool_result",
-    tool_use_id: toolUseId,
-    content: JSON.stringify(result, null, 2),
-    is_error: result.ok !== true,
+    type: schema.type || "object",
+    properties: schema.properties || {},
+    required: schema.required || [],
   };
 }
 
@@ -400,57 +439,6 @@ function createToolLimitChunk(maxToolTurns, reason = "max_tool_turns") {
     reason,
     maxToolTurns,
   };
-}
-
-function createThinkingChunk() {
-  return {
-    type: "thinking",
-    summary: "Thinking...",
-  };
-}
-
-function createStreamChunk(event) {
-  if (event.type !== "content_block_delta") {
-    return null;
-  }
-
-  if (event.delta?.type === "text_delta") {
-    return createTextChunk(event.delta.text);
-  }
-
-  if (event.delta?.type === "thinking_delta" || event.delta?.type === "signature_delta") {
-    return createThinkingChunk();
-  }
-
-  return null;
-}
-
-function extractToolError(toolResult) {
-  if (!toolResult?.is_error) {
-    return null;
-  }
-
-  const parsed = parseToolResultContent(toolResult);
-  return parsed?.error?.message || parsed?.error?.code || null;
-}
-
-function parseToolResultContent(toolResult) {
-  try {
-    return JSON.parse(toolResult.content);
-  } catch (_error) {
-    return null;
-  }
-}
-
-function extractText(content) {
-  if (!Array.isArray(content)) {
-    return "";
-  }
-
-  return content
-    .filter((block) => block?.type === "text")
-    .map((block) => block.text)
-    .join("");
 }
 
 function summarizeToolInput(name, input) {
@@ -531,28 +519,46 @@ function parsePositiveNumber(value, fallback) {
   return Number.isFinite(number) && number > 0 ? number : fallback;
 }
 
-function createAnthropicClient(apiKey, apiUrl) {
-  let AnthropicModule;
+function createGoogleClient(apiKey, apiUrl) {
+  let GoogleModule;
 
   try {
-    AnthropicModule = require("@anthropic-ai/sdk");
+    GoogleModule = require("@google/generative-ai");
   } catch (error) {
     if (error.code === "MODULE_NOT_FOUND") {
-      throw new Error("Install @anthropic-ai/sdk before using the Anthropic provider");
+      throw new Error("Install @google/generative-ai before using the Google provider");
     }
-
     throw error;
   }
 
-  const Anthropic = AnthropicModule.default || AnthropicModule;
-  const baseURL = apiUrl || process.env.HAX_AGENT_API_URL || process.env.ANTHROPIC_BASE_URL;
+  const { GoogleGenerativeAI } = GoogleModule;
+  const resolvedApiKey = apiKey || process.env.GOOGLE_API_KEY;
 
-  return new Anthropic({
-    apiKey: apiKey || process.env.ANTHROPIC_API_KEY,
-    ...(baseURL ? { baseURL } : {}),
-  });
+  if (!resolvedApiKey) {
+    return createMockGoogleClient();
+  }
+
+  return new GoogleGenerativeAI(resolvedApiKey);
+}
+
+function createMockGoogleClient() {
+  return {
+    getGenerativeModel: () => ({
+      generateContent: async () => ({
+        response: {
+          text: () => "Google provider is configured but no API key was provided. Please set GOOGLE_API_KEY or use /api-key to configure it.",
+        },
+      }),
+      generateContentStream: async function* () {
+        yield {
+          candidates: [{ content: { parts: [{ text: "Google provider is configured but no API key was provided. Please set GOOGLE_API_KEY or use /api-key to configure it." }] } }],
+        };
+      },
+    }),
+    listModels: async () => ({ models: [] }),
+  };
 }
 
 module.exports = {
-  AnthropicProvider,
+  GoogleProvider,
 };

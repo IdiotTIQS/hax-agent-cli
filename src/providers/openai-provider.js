@@ -3,7 +3,7 @@
 const { ChatProvider, createTextChunk } = require("./chat-provider");
 const { normalizeMessages } = require("./messages");
 
-const DEFAULT_MODEL = "claude-opus-4-7";
+const DEFAULT_MODEL = "gpt-4o";
 const DEFAULT_MAX_TOKENS = 8192;
 const DEFAULT_MAX_TOOL_TURNS = Infinity;
 const MAX_REPEATED_INVALID_TOOL_RESULTS = 1;
@@ -54,15 +54,15 @@ const DEFAULT_SYSTEM_PROMPT = [
   "- Acknowledge limitations when you are uncertain about something.",
 ].join("\n");
 
-class AnthropicProvider extends ChatProvider {
+class OpenAIProvider extends ChatProvider {
   constructor(options = {}) {
     super({
-      name: options.name || "anthropic",
+      name: options.name || "openai",
       model: options.model || DEFAULT_MODEL,
-      apiKey: options.apiKey || process.env.ANTHROPIC_API_KEY,
-      apiUrl: options.apiUrl || process.env.HAX_AGENT_API_URL || process.env.ANTHROPIC_BASE_URL,
+      apiKey: options.apiKey || process.env.OPENAI_API_KEY,
+      apiUrl: options.apiUrl || process.env.HAX_AGENT_API_URL || process.env.OPENAI_BASE_URL,
     });
-    this.client = options.client || createAnthropicClient(this.apiKey, this.apiUrl);
+    this.client = options.client || createOpenAIClient(this.apiKey, this.apiUrl);
     this.maxTokens = parsePositiveNumber(options.maxTokens, DEFAULT_MAX_TOKENS);
   }
 
@@ -74,7 +74,7 @@ class AnthropicProvider extends ChatProvider {
       provider: this.name,
       model: response.model || request.model || this.model,
       role: "assistant",
-      content: extractText(response.content),
+      content: extractText(response.choices?.[0]?.message?.content),
       usage: response.usage || null,
       raw: response,
     };
@@ -86,79 +86,112 @@ class AnthropicProvider extends ChatProvider {
       return;
     }
 
-    const stream = this.client.messages.stream(this.createRequest(request), createRequestOptions(request));
+    const response = await this.client.chat.completions.create(
+      { ...this.createRequest(request), stream: true },
+      createRequestOptions(request)
+    );
 
-    for await (const event of stream) {
-      if (event.type === "content_block_delta" && event.delta?.type === "text_delta") {
-        yield createTextChunk(event.delta.text);
-      }
+    if (!response || typeof response[Symbol.asyncIterator] !== 'function') {
+      yield createTextChunk(response.choices?.[0]?.message?.content || '');
+      return;
     }
 
-    const response = typeof stream.finalMessage === "function" ? await stream.finalMessage() : null;
-    if (response?.usage) {
-      yield {
-        type: "usage",
-        inputTokens: response.usage.input_tokens || 0,
-        outputTokens: response.usage.output_tokens || 0,
-      };
+    for await (const chunk of response) {
+      const delta = chunk.choices?.[0]?.delta;
+      if (delta?.content) {
+        yield createTextChunk(delta.content);
+      }
     }
   }
 
   async *streamToolLoop(request = {}) {
     const toolRegistry = request.toolRegistry;
-    const messages = toAnthropicMessages(request.messages || request.prompt || "");
+    const messages = toOpenAIMessages(request.messages || request.prompt || "", request.system);
     const maxToolTurns = parsePositiveNumber(request.maxToolTurns, DEFAULT_MAX_TOOL_TURNS);
     const invalidToolCalls = new Map();
     const repeatedInvalidNotices = new Map();
 
     for (let turn = 0; turn < maxToolTurns; turn += 1) {
-      const stream = this.client.messages.stream(this.createRequest({
-        ...request,
-        messages,
-      }), createRequestOptions(request));
+      const response = await this.client.chat.completions.create({
+        ...this.createRequest({ ...request, messages }),
+        stream: true,
+      }, createRequestOptions(request));
 
-      for await (const event of stream) {
-        const chunk = createStreamChunk(event);
-        if (chunk) {
-          yield chunk;
+      if (!response || typeof response[Symbol.asyncIterator] !== 'function') {
+        const content = response?.choices?.[0]?.message?.content || '';
+        if (content) yield createTextChunk(content);
+        return;
+      }
+
+      const stream = response;
+
+      let fullContent = "";
+      let toolCalls = [];
+
+      for await (const chunk of stream) {
+        const delta = chunk.choices?.[0]?.delta;
+        if (delta?.content) {
+          fullContent += delta.content;
+          yield createTextChunk(delta.content);
+        }
+        if (delta?.tool_calls) {
+          for (const tc of delta.tool_calls) {
+            if (toolCalls[tc.index]) {
+              toolCalls[tc.index].function.arguments += tc.function.arguments;
+            } else {
+              toolCalls[tc.index] = {
+                id: tc.id,
+                type: tc.type,
+                function: { name: tc.function.name, arguments: tc.function.arguments },
+              };
+            }
+          }
         }
       }
 
-      const response = typeof stream.finalMessage === "function" ? await stream.finalMessage() : null;
-      if (!response) {
+      const message = {
+        role: "assistant",
+        content: fullContent || null,
+        tool_calls: toolCalls.length > 0 ? toolCalls.map(tc => ({
+          id: tc.id,
+          type: tc.type,
+          function: { name: tc.function.name, arguments: tc.function.arguments },
+        })) : undefined,
+      };
+
+      messages.push(message);
+
+      if (!toolRegistry || toolCalls.length === 0) {
         return;
       }
-
-      const toolUses = extractToolUses(response.content);
-
-      if (!toolRegistry || toolUses.length === 0) {
-        return;
-      }
-
-      messages.push({ role: "assistant", content: response.content });
 
       const toolResults = [];
-      for (const toolUse of toolUses) {
-        const toolName = toRegistryToolName(toolUse.name);
-        const toolInput = toolUse.input || {};
+      for (const toolCall of toolCalls) {
+        const toolName = toRegistryToolName(toolCall.function.name);
+        let toolInput;
+        try {
+          toolInput = JSON.parse(toolCall.function.arguments || "{}");
+        } catch {
+          toolInput = {};
+        }
+
         const callSignature = `${toolName}:${JSON.stringify(toolInput)}`;
         const failedCount = invalidToolCalls.get(callSignature) || 0;
         const attempt = failedCount + 1;
 
         if (failedCount >= 2) {
-          const toolResult = createRepeatedInvalidToolResult(toolUse);
-          const toolError = extractToolError(toolResult);
+          const error = "This tool call failed repeatedly with the same input. Choose a valid path or use a different tool.";
           const noticeCount = repeatedInvalidNotices.get(callSignature) || 0;
           const shouldNotice = noticeCount === 0;
           repeatedInvalidNotices.set(callSignature, noticeCount + 1);
-          yield createToolResultChunk(toolName, true, toolError, {
+          yield createToolResultChunk(toolName, true, error, {
             attempt,
             input: toolInput,
             repeatedInvalid: true,
             showNotice: shouldNotice,
             turn: turn + 1,
           });
-          toolResults.push(toolResult);
+          toolResults.push(createToolResultBlock(toolCall.id, true, error));
 
           if (noticeCount + 1 >= MAX_REPEATED_INVALID_TOOL_RESULTS) {
             yield createToolLimitChunk(turn + 1, "repeated_invalid_tool_call");
@@ -169,31 +202,30 @@ class AnthropicProvider extends ChatProvider {
         }
 
         yield createToolStartChunk(toolName, toolInput, { attempt, turn: turn + 1 });
-        const toolResult = await executeToolUse(toolRegistry, toolUse);
-        const toolError = extractToolError(toolResult);
-        const parsedToolResult = parseToolResultContent(toolResult);
-        yield createToolResultChunk(toolName, toolResult.is_error, toolError, {
+        const result = await toolRegistry.execute(toolName, toolInput, { root: process.cwd() });
+        const isError = result.ok !== true;
+        const error = isError ? (result.error?.message || result.error?.code || null) : null;
+        const parsedResult = parseResultData(result.data);
+
+        yield createToolResultChunk(toolName, isError, error, {
           attempt,
-          data: parsedToolResult?.data,
-          durationMs: parsedToolResult?.durationMs,
-          errorCode: parsedToolResult?.error?.code,
+          data: parsedResult,
+          durationMs: result.durationMs,
+          errorCode: result.error?.code,
           input: toolInput,
           turn: turn + 1,
         });
 
-        if (toolResult.is_error) {
+        if (isError) {
           invalidToolCalls.set(callSignature, failedCount + 1);
         } else {
           invalidToolCalls.delete(callSignature);
         }
 
-        toolResults.push(toolResult);
+        toolResults.push(createToolResultBlock(toolCall.id, isError, JSON.stringify(result, null, 2)));
       }
 
-      messages.push({
-        role: "user",
-        content: toolResults,
-      });
+      messages.push({ role: "tool", tool_results: toolResults });
     }
 
     yield createToolLimitChunk(maxToolTurns);
@@ -201,13 +233,11 @@ class AnthropicProvider extends ChatProvider {
 
   createRequest(request = {}) {
     const toolDefinitions = createToolDefinitions(request.toolRegistry);
+    const messages = toOpenAIMessages(request.messages || request.prompt || "", request.system);
     const payload = {
       model: request.model || this.model,
-      system: createSystemPrompt(request.system),
       max_tokens: parsePositiveNumber(request.maxTokens, this.maxTokens),
-      messages: toAnthropicMessages(request.messages || request.prompt || ""),
-      thinking: { type: "adaptive", display: "summarized" },
-      output_config: { effort: "xhigh" },
+      messages,
     };
 
     if (toolDefinitions.length > 0) {
@@ -219,27 +249,40 @@ class AnthropicProvider extends ChatProvider {
 
   async runToolLoop(request = {}) {
     const toolRegistry = request.toolRegistry;
-    const messages = toAnthropicMessages(request.messages || request.prompt || "");
+    const messages = toOpenAIMessages(request.messages || request.prompt || "", request.system);
     const maxToolTurns = parsePositiveNumber(request.maxToolTurns, DEFAULT_MAX_TOOL_TURNS);
     let response;
 
     for (let turn = 0; turn < maxToolTurns; turn += 1) {
-      response = await this.client.messages.create(this.createRequest({
+      response = await this.client.chat.completions.create(this.createRequest({
         ...request,
         messages,
       }));
 
-      const toolUses = extractToolUses(response.content);
+      const message = response.choices?.[0]?.message;
+      const toolCalls = message?.tool_calls || [];
 
-      if (!toolRegistry || toolUses.length === 0) {
+      if (!toolRegistry || toolCalls.length === 0) {
         return response;
       }
 
-      messages.push({ role: "assistant", content: response.content });
-      messages.push({
-        role: "user",
-        content: await Promise.all(toolUses.map((toolUse) => executeToolUse(toolRegistry, toolUse))),
-      });
+      messages.push(message);
+
+      const toolResults = [];
+      for (const toolCall of toolCalls) {
+        const toolName = toRegistryToolName(toolCall.function.name);
+        let toolInput;
+        try {
+          toolInput = JSON.parse(toolCall.function.arguments || "{}");
+        } catch {
+          toolInput = {};
+        }
+
+        const result = await toolRegistry.execute(toolName, toolInput, { root: process.cwd() });
+        toolResults.push(createToolResultBlock(toolCall.id, result.ok !== true, JSON.stringify(result, null, 2)));
+      }
+
+      messages.push({ role: "tool", tool_results: toolResults });
     }
 
     throw new Error("Tool turn limit reached before the task was completed. Please ask me to continue.");
@@ -253,65 +296,75 @@ class AnthropicProvider extends ChatProvider {
       if (models.length > 0) {
         return models.map((model) => ({
           id: model.id,
-          name: model.display_name || model.name || model.id,
+          name: model.name || model.id,
         }));
       }
-    } catch (error) {
+    } catch {
       // API 端点可能不支持 models.list 或返回 404，使用预定义列表
     }
 
-    // 预定义的 Claude 模型列表
     return [
-      { id: 'claude-sonnet-4-20250514', name: 'Claude Sonnet 4' },
-      { id: 'claude-opus-4-20250514', name: 'Claude Opus 4' },
-      { id: 'claude-haiku-3-5-20241022', name: 'Claude Haiku 3.5' },
-      { id: 'claude-3-5-sonnet-20241022', name: 'Claude 3.5 Sonnet' },
-      { id: 'claude-3-opus-20240229', name: 'Claude 3 Opus' },
+      { id: "gpt-4o", name: "GPT-4o" },
+      { id: "gpt-4o-mini", name: "GPT-4o Mini" },
+      { id: "gpt-4-turbo", name: "GPT-4 Turbo" },
+      { id: "gpt-3.5-turbo", name: "GPT-3.5 Turbo" },
+      { id: "o1", name: "o1" },
+      { id: "o3-mini", name: "o3 Mini" },
     ];
   }
 
   setApiUrl(apiUrl) {
     const normalizedApiUrl = super.setApiUrl(apiUrl);
-    this.client = createAnthropicClient(this.apiKey, this.apiUrl);
+    this.client = createOpenAIClient(this.apiKey, this.apiUrl);
     return normalizedApiUrl;
   }
 
   setApiKey(apiKey) {
     const normalizedApiKey = super.setApiKey(apiKey);
-    this.client = createAnthropicClient(this.apiKey, this.apiUrl);
+    this.client = createOpenAIClient(this.apiKey, this.apiUrl);
     return normalizedApiKey;
   }
 }
 
-function toAnthropicMessages(input) {
+function toOpenAIMessages(input, systemPrompt) {
   const messages = Array.isArray(input) ? input : normalizeMessages(input);
+  const result = [];
 
-  return messages.flatMap((message) => {
-    if (message == null) {
-      return [];
-    }
+  const systemContent = createSystemPrompt(systemPrompt);
+  result.push({ role: "system", content: systemContent });
+
+  for (const message of messages) {
+    if (message == null) continue;
 
     if (typeof message === "string") {
-      return [{ role: "user", content: message }];
+      result.push({ role: "user", content: message });
+      continue;
     }
 
     if (Array.isArray(message)) {
-      return toAnthropicMessages(message);
+      result.push(...toOpenAIMessages(message));
+      continue;
     }
 
     if (typeof message !== "object") {
-      return [{ role: "user", content: String(message) }];
+      result.push({ role: "user", content: String(message) });
+      continue;
     }
 
-    if (message.role !== "user" && message.role !== "assistant") {
-      return [];
+    if (message.role === "system") {
+      result.push({ role: "system", content: message.content });
+      continue;
     }
 
-    return [{
-      role: message.role,
-      content: Array.isArray(message.content) ? message.content : normalizeMessages([message])[0]?.content || "",
-    }];
-  });
+    if (message.role === "user" || message.role === "assistant") {
+      result.push({
+        role: message.role,
+        content: Array.isArray(message.content) ? message.content : (message.content || ""),
+      });
+    }
+  }
+
+  return result;
 }
 
 function createSystemPrompt(systemPrompt) {
@@ -325,13 +378,16 @@ function createToolDefinitions(toolRegistry) {
   }
 
   return toolRegistry.list().map((tool) => ({
-    name: toAnthropicToolName(tool.name),
-    description: tool.description,
-    input_schema: tool.inputSchema || { type: "object", properties: {} },
+    type: "function",
+    function: {
+      name: toOpenAIToolName(tool.name),
+      description: tool.description,
+      parameters: tool.inputSchema || { type: "object", properties: {} },
+    },
   }));
 }
 
-function toAnthropicToolName(name) {
+function toOpenAIToolName(name) {
   return String(name).replace(/[^a-zA-Z0-9_-]/g, "_");
 }
 
@@ -339,38 +395,11 @@ function toRegistryToolName(name) {
   return String(name).replace(/_/g, ".");
 }
 
-function extractToolUses(content) {
-  if (!Array.isArray(content)) {
-    return [];
-  }
-
-  return content.filter((block) => block?.type === "tool_use" && block.id && block.name);
-}
-
-async function executeToolUse(toolRegistry, toolUse) {
-  const result = await toolRegistry.execute(toRegistryToolName(toolUse.name), toolUse.input || {});
-
-  return createToolResultBlock(toolUse.id, result);
-}
-
-function createRepeatedInvalidToolResult(toolUse) {
-  return createToolResultBlock(toolUse.id, {
-    type: "tool_result",
-    toolName: toRegistryToolName(toolUse.name),
-    ok: false,
-    error: {
-      code: "REPEATED_INVALID_TOOL_CALL",
-      message: "This tool call failed repeatedly with the same input. Choose a valid path or use a different tool instead of retrying the same empty arguments.",
-    },
-  });
-}
-
-function createToolResultBlock(toolUseId, result) {
+function createToolResultBlock(toolCallId, isError, content) {
   return {
-    type: "tool_result",
-    tool_use_id: toolUseId,
-    content: JSON.stringify(result, null, 2),
-    is_error: result.ok !== true,
+    tool_call_id: toolCallId,
+    role: "tool",
+    content: typeof content === "string" ? content : JSON.stringify(content),
   };
 }
 
@@ -402,55 +431,20 @@ function createToolLimitChunk(maxToolTurns, reason = "max_tool_turns") {
   };
 }
 
-function createThinkingChunk() {
-  return {
-    type: "thinking",
-    summary: "Thinking...",
-  };
-}
-
-function createStreamChunk(event) {
-  if (event.type !== "content_block_delta") {
-    return null;
-  }
-
-  if (event.delta?.type === "text_delta") {
-    return createTextChunk(event.delta.text);
-  }
-
-  if (event.delta?.type === "thinking_delta" || event.delta?.type === "signature_delta") {
-    return createThinkingChunk();
-  }
-
-  return null;
-}
-
-function extractToolError(toolResult) {
-  if (!toolResult?.is_error) {
-    return null;
-  }
-
-  const parsed = parseToolResultContent(toolResult);
-  return parsed?.error?.message || parsed?.error?.code || null;
-}
-
-function parseToolResultContent(toolResult) {
-  try {
-    return JSON.parse(toolResult.content);
-  } catch (_error) {
-    return null;
-  }
-}
-
 function extractText(content) {
-  if (!Array.isArray(content)) {
-    return "";
-  }
+  if (!content) return "";
+  return String(content);
+}
 
-  return content
-    .filter((block) => block?.type === "text")
-    .map((block) => block.text)
-    .join("");
+function parseResultData(data) {
+  if (typeof data === "string") {
+    try {
+      return JSON.parse(data);
+    } catch {
+      return data;
+    }
+  }
+  return data;
 }
 
 function summarizeToolInput(name, input) {
@@ -531,28 +525,48 @@ function parsePositiveNumber(value, fallback) {
   return Number.isFinite(number) && number > 0 ? number : fallback;
 }
 
-function createAnthropicClient(apiKey, apiUrl) {
-  let AnthropicModule;
+function createOpenAIClient(apiKey, apiUrl) {
+  let OpenAIModule;
 
   try {
-    AnthropicModule = require("@anthropic-ai/sdk");
+    OpenAIModule = require("openai");
   } catch (error) {
     if (error.code === "MODULE_NOT_FOUND") {
-      throw new Error("Install @anthropic-ai/sdk before using the Anthropic provider");
+      throw new Error("Install openai before using the OpenAI provider");
     }
-
     throw error;
   }
 
-  const Anthropic = AnthropicModule.default || AnthropicModule;
-  const baseURL = apiUrl || process.env.HAX_AGENT_API_URL || process.env.ANTHROPIC_BASE_URL;
+  const OpenAI = OpenAIModule.default || OpenAIModule;
+  const baseURL = apiUrl || process.env.HAX_AGENT_API_URL || process.env.OPENAI_BASE_URL;
+  const resolvedApiKey = apiKey || process.env.OPENAI_API_KEY;
 
-  return new Anthropic({
-    apiKey: apiKey || process.env.ANTHROPIC_API_KEY,
+  if (!resolvedApiKey) {
+    return createMockOpenAIClient();
+  }
+
+  return new OpenAI({
+    apiKey: resolvedApiKey,
     ...(baseURL ? { baseURL } : {}),
   });
 }
 
+function createMockOpenAIClient() {
+  return {
+    chat: {
+      completions: {
+        create: async () => ({
+          id: "mock-openai",
+          choices: [{ message: { role: "assistant", content: "OpenAI provider is configured but no API key was provided. Please set OPENAI_API_KEY or use /api-key to configure it." } }],
+        }),
+      },
+    },
+    models: {
+      list: async () => ({ data: [] }),
+    },
+  };
+}
+
 module.exports = {
-  AnthropicProvider,
+  OpenAIProvider,
 };

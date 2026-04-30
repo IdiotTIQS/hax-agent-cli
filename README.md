@@ -1,12 +1,13 @@
 # Hax Agent CLI
 
-> v1.0.2 — 轻量级、Claude-like 的本地 Agent 命令行工具 · 由 [IdiotTIQS](https://github.com/IdiotTIQS) 开发
+> v1.1.0 — 轻量级、Claude-like 的本地 Agent 命令行工具 · 由 [IdiotTIQS](https://github.com/IdiotTIQS) 开发
 
 [![Node.js](https://img.shields.io/badge/Node.js-%3E%3D18-brightgreen)](https://nodejs.org)
 [![License](https://img.shields.io/badge/License-MIT-blue)](#license)
 [![PRs](https://img.shields.io/badge/PRs-welcome-brightgreen)](#开发与贡献)
+[![npm](https://img.shields.io/npm/v/hax-agent-cli)](https://www.npmjs.com/package/hax-agent-cli)
 
-Hax Agent CLI 是一个面向开发者的 AI 编码助手，提供类似 Claude 的终端体验。支持交互式对话、多 Provider 切换、本地文件工具、会话记忆管理以及多 Agent 团队协作计划生成。
+Hax Agent CLI 是一个面向开发者的 AI 编码助手，提供类似 Claude 的终端体验。支持 Anthropic、OpenAI、Google 三大主流 AI 提供商，支持交互式对话、多 Provider 切换、本地文件工具、会话记忆管理以及多 Agent 团队协作计划生成。
 
 ---
 
@@ -30,14 +31,13 @@ Hax Agent CLI 是一个面向开发者的 AI 编码助手，提供类似 Claude 
 ## 功能特性
 
 - **交互式 Agent Shell** — 默认进入聊天模式，支持持续上下文对话、斜杠命令和流式输出。
-- **多 Provider 支持** — 内置 Mock（本地模拟）和 Anthropic（Claude 模型）Provider，可扩展。
+- **多 Provider 支持** — 内置 Anthropic（Claude）、OpenAI（GPT）、Google（Gemini）三大主流 Provider，支持运行时切换。
 - **模型管理** — 运行时查看可用模型、动态切换模型。
 - **本地工具集** — 文件读写、搜索、Glob 匹配以及受 allowlist 限制的 shell 命令执行。
 - **会话记忆** — 自动保存对话 transcript，新会话自动加载最近的上下文。
 - **分层配置** — 支持 5 级优先级配置合并（默认 → 用户 → 项目 → 显式 → 环境变量）。
 - **多 Agent 团队** — 内置 `auth-refactor` 认证重构团队计划，支持输出结构化协作方案。
 - **Cost 追踪** — 统计 token 用量与费用估算。
-- **零外部依赖核心** — 仅 `@anthropic-ai/sdk` 一个运行时依赖。
 
 ---
 
@@ -45,7 +45,7 @@ Hax Agent CLI 是一个面向开发者的 AI 编码助手，提供类似 Claude 
 
 - **Node.js** >= 18
 - **npm**（或 pnpm / yarn）
-- **Anthropic API Key**（仅在使用真实模型时需要）
+- **API Key**（Anthropic / OpenAI / Google，至少一个）
 
 ---
 
@@ -54,6 +54,10 @@ Hax Agent CLI 是一个面向开发者的 AI 编码助手，提供类似 Claude 
 ### 1. 安装
 
 ```bash
+# 从 npm 安装
+npm install -g hax-agent-cli
+
+# 或从源码安装
 git clone https://github.com/IdiotTIQS/hax-agent-cli.git
 cd hax-agent-cli
 npm install
@@ -62,16 +66,19 @@ npm install
 ### 2. 启动交互式 Shell
 
 ```bash
+hax-agent
+# 或
 npm start
 ```
 
-首次启动默认使用本地 Mock 模式，无需 API Key，可直接在终端中体验。
-
-### 3. 连接真实模型
+### 3. 配置 Provider
 
 在 Shell 中运行时设置：
 
 ```text
+/provider anthropic     # 切换到 Anthropic
+/provider openai        # 切换到 OpenAI
+/provider google        # 切换到 Google
 /api-url https://api.anthropic.com
 /api-key sk-ant-xxxxxxxxxxxx
 /model claude-sonnet-4-20250514
@@ -125,6 +132,7 @@ hax-agent            # 任意目录下可用
 | `/agents` | 查看内置 Agent 角色 |
 | `/models` | 查看当前 Provider 可用模型 |
 | `/model <id-or-number>` | 切换模型 |
+| `/provider <name>` | 切换 AI Provider（`anthropic`、`openai`、`google`） |
 | `/api-url <base-url>` | 设置 API Base URL |
 | `/api-key <key>` | 设置 API Key |
 
@@ -142,13 +150,23 @@ hax-agent            # 任意目录下可用
 
 > ⚠️ 建议不要把包含 API Key 的项目配置提交到版本库。推荐使用环境变量或用户配置。
 
+### 支持的 Provider
+
+| Provider | 别名 | 默认模型 | 环境变量 |
+|----------|------|----------|----------|
+| **Anthropic** | `anthropic`, `claude` | `claude-opus-4-7` | `ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL` |
+| **OpenAI** | `openai`, `gpt` | `gpt-4o` | `OPENAI_API_KEY`, `OPENAI_BASE_URL` |
+| **Google** | `google`, `gemini` | `gemini-2.5-pro` | `GOOGLE_API_KEY`, `GOOGLE_BASE_URL` |
+
 ### 完整环境变量
 
 | 变量 | 说明 | 默认值 |
 |------|------|--------|
-| `HAX_AGENT_PROVIDER` / `AI_PROVIDER` | Provider 名称（`mock`、`local`、`anthropic`、`claude`） | `mock` |
+| `HAX_AGENT_PROVIDER` / `AI_PROVIDER` | Provider 名称（`mock`、`local`、`anthropic`、`claude`、`openai`、`gpt`、`google`、`gemini`） | `mock` |
 | `ANTHROPIC_API_KEY` | Anthropic API Key | — |
-| `HAX_AGENT_API_URL` / `ANTHROPIC_BASE_URL` | API Base URL | — |
+| `OPENAI_API_KEY` | OpenAI API Key | — |
+| `GOOGLE_API_KEY` | Google API Key | — |
+| `HAX_AGENT_API_URL` / `ANTHROPIC_BASE_URL` / `OPENAI_BASE_URL` / `GOOGLE_BASE_URL` | API Base URL | — |
 | `HAX_AGENT_MODEL` / `AI_MODEL` | 模型 ID | `claude-sonnet-4-20250514` |
 | `HAX_AGENT_MAX_TURNS` | 最大对话轮数 | `20` |
 | `HAX_AGENT_TEMPERATURE` | 采样温度 | `0.2` |
@@ -244,6 +262,8 @@ src/
 │   ├── factory.js                #   Provider 工厂 + 注册机制
 │   ├── chat-provider.js          #   基础 Provider 抽象类
 │   ├── anthropic-provider.js     #   Anthropic (Claude) 实现
+│   ├── openai-provider.js        #   OpenAI (GPT) 实现
+│   ├── google-provider.js        #   Google (Gemini) 实现
 │   ├── mock-provider.js          #   本地 Mock 实现
 │   └── messages.js               #   消息格式规范化
 │

@@ -37,6 +37,8 @@ function assembleSystemPrompt(options = {}) {
   const prompts = settings.prompts || {};
   const sections = [];
 
+  sections.push(formatSection('Identity', 'You are Hax Agent CLI, a lightweight AI coding assistant running in the terminal. You help developers with coding, file operations, shell commands, and project management. Always identify yourself as Hax Agent when asked.'));
+
   if (options.instructions) {
     sections.push(formatSection('Instructions', options.instructions));
   }

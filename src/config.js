@@ -29,7 +29,18 @@ const DEFAULT_SETTINGS = Object.freeze({
   tools: {
     shell: {
       enabled: true,
-      allowedCommands: ['node', 'npm', 'git'],
+      allowedCommands: [
+        'node', 'npm', 'npx', 'yarn', 'pnpm', 'bun',
+        'git', 'gh',
+        'ls', 'dir', 'cat', 'type', 'echo', 'head', 'tail', 'wc', 'pwd', 'whoami', 'hostname',
+        'mkdir', 'rm', 'cp', 'mv', 'touch', 'rmdir',
+        'find', 'grep', 'rg', 'ag',
+        'curl', 'wget',
+        'python', 'python3', 'pip', 'pip3',
+        'tsc', 'eslint', 'prettier', 'jest', 'vitest', 'mocha',
+        'docker', 'docker-compose',
+        'code', 'open', 'start',
+      ],
       timeoutMs: 10_000,
       maxBuffer: 200_000,
     },
@@ -125,8 +136,9 @@ function readEnvOverrides(env = process.env) {
 
   setIfDefined(overrides, ['agent', 'name'], env.HAX_AGENT_NAME);
   setIfDefined(overrides, ['agent', 'model'], env.HAX_AGENT_MODEL);
-  setIfDefined(overrides, ['agent', 'apiKey'], env.ANTHROPIC_API_KEY);
-  setIfDefined(overrides, ['agent', 'apiUrl'], env.HAX_AGENT_API_URL || env.ANTHROPIC_BASE_URL);
+  setIfDefined(overrides, ['agent', 'provider'], env.HAX_AGENT_PROVIDER || env.AI_PROVIDER);
+  setIfDefined(overrides, ['agent', 'apiKey'], env.ANTHROPIC_API_KEY || env.OPENAI_API_KEY || env.GOOGLE_API_KEY);
+  setIfDefined(overrides, ['agent', 'apiUrl'], env.HAX_AGENT_API_URL || env.ANTHROPIC_BASE_URL || env.OPENAI_BASE_URL || env.GOOGLE_BASE_URL);
   setIfDefined(overrides, ['agent', 'maxTurns'], parseNumberEnv(env, 'HAX_AGENT_MAX_TURNS'));
   setIfDefined(overrides, ['agent', 'temperature'], parseNumberEnv(env, 'HAX_AGENT_TEMPERATURE'));
   setIfDefined(overrides, ['memory', 'enabled'], parseBooleanEnv(env, 'HAX_AGENT_MEMORY_ENABLED'));

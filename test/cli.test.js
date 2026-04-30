@@ -229,6 +229,6 @@ test('rejects missing team name with usage guidance', () => {
   const result = runCli(['team']);
 
   assert.equal(result.status, 1);
-  assert.match(result.stderr, /Usage: hax-agent team auth-refactor/);
+  assert.match(result.stderr, /Usage: hax-agent team/);
   assert.equal(result.stdout, '');
 });

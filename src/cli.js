@@ -5,10 +5,14 @@ const { loadSettings, updateUserSettings } = require('./config');
 const { appendTranscriptEntry, createSessionId, listSessions, readTranscript } = require('./memory');
 const { createProvider } = require('./providers');
 const { createAuthRefactorTeam } = require('./teams/auth-refactor');
+const { createTeamRuntime } = require('./teams/runtime');
+const { loadAgentDefinitions } = require('./teams/agents');
 const { formatTeamPlan } = require('./formatters/team-plan');
+const { formatAgentList, formatMessages, formatRunResult, formatTeamList, formatTeamSnapshot } = require('./formatters/agent-teams');
 const { createLocalToolRegistry } = require('./tools');
+const { registerAgentTeamTools } = require('./teams/tools');
 
-const VERSION = '1.0.2';
+const VERSION = '1.1.0';
 
 const ANSI = {
   reset: '\x1B[0m',
@@ -132,8 +136,10 @@ const SLASH_COMMANDS = [
   { name: 'compact', description: 'Compact conversation to reduce context', aliases: [] },
   { name: 'tools', description: 'List available tools', aliases: ['t'] },
   { name: 'agents', description: 'List available agents', aliases: ['a'] },
+  { name: 'team', description: 'Manage agent teams and teammates', aliases: ['teams'], argHint: '[new|spawn|task|run|status|send|inbox|agents]' },
   { name: 'models', description: 'List available models', aliases: ['m'] },
   { name: 'model', description: 'Switch the active model', aliases: [], argHint: '<model-id-or-number>' },
+  { name: 'provider', description: 'Show or switch the AI provider', aliases: ['p'], argHint: '<anthropic|openai|google>' },
   { name: 'api-url', description: 'Show or set the API base URL', aliases: [], argHint: '<base-url>' },
   { name: 'api-key', description: 'Show or set the API key', aliases: [], argHint: '<key>' },
   { name: 'cost', description: 'Show token usage and cost for this session', aliases: [] },
@@ -157,7 +163,8 @@ const TOP_LEVEL_COMMANDS = [
   { name: 'chat', description: 'Start the interactive agent shell (default)', aliases: [] },
   { name: 'help', description: 'Show available commands', aliases: ['--help', '-h'] },
   { name: 'models', description: 'List available provider models', aliases: [] },
-  { name: 'team', description: 'Create an agent team plan', aliases: [], argHint: 'auth-refactor' },
+  { name: 'agents', description: 'List available agent types', aliases: [] },
+  { name: 'team', description: 'Manage agent teams', aliases: ['teams'], argHint: '[new|spawn|task|run|status|list|agents]' },
   { name: 'version', description: 'Show version information', aliases: ['-v', '--version'] },
   { name: 'resume', description: 'Resume a previous session', aliases: ['-r'], argHint: '[session-id]' },
   { name: 'sessions', description: 'List previous sessions', aliases: [] },
@@ -991,7 +998,8 @@ async function main(argv) {
   switch (command.name) {
     case 'chat': await runShell(args); break;
     case 'models': await runModelsCommand(); break;
-    case 'team': runTeamCommand(args); break;
+    case 'agents': runAgentsCommand(); break;
+    case 'team': await runTeamCommand(args); break;
     case 'resume': await runResumeCommand(args); break;
     case 'sessions': await runSessionsCommand(); break;
     default: showHelp();
@@ -1003,7 +1011,9 @@ async function runShell(args) {
   const provider = createProvider(settings.agent, process.env);
   const screen = new TerminalScreen();
   const markdown = new MarkdownRenderer(screen.columns);
-  const session = new Session({ provider, settings, toolRegistry: createLocalToolRegistry({ root: process.cwd(), shellPolicy: settings.tools?.shell }) });
+  const toolRegistry = createLocalToolRegistry({ root: process.cwd(), shellPolicy: settings.tools?.shell });
+  registerAgentTeamTools(toolRegistry, { settings, projectRoot: process.cwd() });
+  const session = new Session({ provider, settings, toolRegistry });
 
   if (!screen.isTTY()) {
     await runNonInteractiveShell(session, screen, markdown);
@@ -1302,8 +1312,10 @@ async function handleSlashCommand(line, context) {
     case 'compact': compactShell(context); break;
     case 'tools': showTools(context); break;
     case 'agents': showAgents(context); break;
+    case 'team': await handleTeamCommand(args, context); break;
     case 'models': await showModels(context); break;
     case 'model': await switchModel(args, context); break;
+    case 'provider': await switchProvider(args, context); break;
     case 'api-url': await switchApiUrl(args, context); break;
     case 'api-key': await switchApiKey(args, context); break;
     case 'cost': showCost(context); break;
@@ -1377,19 +1389,64 @@ function showTools({ screen, session }) {
   screen.write('\n');
 }
 
-function showAgents({ screen }) {
+function showAgents({ screen, session }) {
+  const definitions = loadAgentDefinitions({ projectRoot: session.settings.projectRoot || process.cwd(), settings: session.settings });
   screen.write(`\n${THEME.heading}Available Agents${ANSI.reset}\n`);
   screen.write(`${THEME.border}──────────────────────────────────${ANSI.reset}\n`);
 
-  for (const agent of AGENTS) {
-    const nameCol = agent.name.padEnd(14);
-    screen.write(`  ${agent.icon} ${THEME.accent}${nameCol}${ANSI.reset} ${agent.description}\n`);
+  for (const agent of definitions.activeAgents) {
+    const nameCol = agent.agentType.padEnd(18);
+    const source = agent.source ? ` ${THEME.dim}[${agent.source}]${ANSI.reset}` : '';
+    screen.write(`  ${THEME.accent}${nameCol}${ANSI.reset} ${agent.role || agent.whenToUse || 'General teammate'}${source}\n`);
+  }
+
+  if (definitions.failedFiles.length > 0) {
+    screen.write(`\n${THEME.warning}Some agent files failed to load:${ANSI.reset}\n`);
+    for (const failure of definitions.failedFiles) {
+      screen.write(`  ${THEME.dim}${failure.path}${ANSI.reset} ${failure.error}\n`);
+    }
   }
   screen.write('\n');
 }
 
 async function showModels({ screen, session }) {
   session.availableModels = await printModels(session.provider, screen);
+}
+
+async function switchProvider(args, { screen, session }) {
+  const [providerName] = args;
+
+  if (!providerName) {
+    screen.write(`${THEME.dim}Current provider: ${ANSI.reset}${THEME.bold}${session.provider.name}${ANSI.reset}\n`);
+    screen.write(`${THEME.dim}Available: anthropic, openai, google${ANSI.reset}\n`);
+    screen.write(`${THEME.dim}Usage: /provider <anthropic|openai|google>${ANSI.reset}\n`);
+    return;
+  }
+
+  const normalized = providerName.toLowerCase().trim();
+  const validProviders = ['anthropic', 'claude', 'openai', 'gpt', 'google', 'gemini'];
+
+  if (!validProviders.includes(normalized)) {
+    screen.write(`${THEME.error}Unknown provider: ${providerName}${ANSI.reset}\n`);
+    screen.write(`${THEME.dim}Available: anthropic, openai, google${ANSI.reset}\n`);
+    return;
+  }
+
+  session.provider = createProvider({
+    provider: normalized,
+    apiKey: session.provider.apiKey,
+    apiUrl: session.provider.apiUrl,
+    model: session.provider.model,
+  }, process.env);
+
+  persistAgentSettings({
+    provider: session.provider.name,
+    apiKey: session.provider.apiKey,
+    apiUrl: session.provider.apiUrl,
+    model: session.provider.model,
+  });
+  session.availableModels = undefined;
+  screen.write(`${THEME.success}Switched provider to ${session.provider.name}${ANSI.reset}\n`);
 }
 
 async function switchModel(args, { screen, session }) {
@@ -1624,15 +1681,194 @@ async function runModelsCommand() {
   await printModels(provider, { write: (t) => process.stdout.write(t), isInteractive: () => true });
 }
 
-function runTeamCommand(args) {
-  const [teamName] = args;
-  if (teamName !== 'auth-refactor') {
-    console.error('Usage: hax-agent team auth-refactor');
+function runAgentsCommand() {
+  const settings = loadSettings();
+  const definitions = loadAgentDefinitions({ projectRoot: settings.projectRoot || process.cwd(), settings });
+  console.log(formatAgentList(definitions));
+}
+
+async function runTeamCommand(args) {
+  const settings = loadSettings();
+  const runtime = createCliTeamRuntime(settings);
+  const [subCommand, ...subArgs] = args;
+
+  if (!subCommand || subCommand === 'help') {
+    console.error(formatTeamUsage());
     process.exitCode = 1;
     return;
   }
-  const team = createAuthRefactorTeam();
-  console.log(formatTeamPlan(team));
+
+  if (subCommand === 'auth-refactor') {
+    const team = createAuthRefactorTeam();
+    console.log(formatTeamPlan(team));
+    return;
+  }
+
+  try {
+    const output = await executeTeamCommand(runtime, subCommand, subArgs, { settings });
+    if (output) {
+      console.log(output);
+    }
+  } catch (error) {
+    console.error(`${THEME.error}Error: ${error.message}${ANSI.reset}`);
+    process.exitCode = 1;
+  }
+}
+
+function createCliTeamRuntime(settings) {
+  return createTeamRuntime({
+    settings,
+    projectRoot: settings.projectRoot || process.cwd(),
+    toolRegistryFactory: () => createLocalToolRegistry({ root: settings.projectRoot || process.cwd(), shellPolicy: settings.tools?.shell }),
+  });
+}
+
+async function handleTeamCommand(args, { screen, session }) {
+  const runtime = createCliTeamRuntime(session.settings);
+  const [subCommand = 'status', ...subArgs] = args;
+
+  try {
+    const output = await executeTeamCommand(runtime, subCommand, subArgs, { settings: session.settings, session });
+    if (output) {
+      screen.write(`\n${output}\n\n`);
+    }
+  } catch (error) {
+    screen.write(`${THEME.error}Error: ${error.message}${ANSI.reset}\n`);
+  }
+}
+
+async function executeTeamCommand(runtime, subCommand, args, context = {}) {
+  switch (subCommand) {
+    case 'help':
+      return formatTeamUsage();
+    case 'agents':
+      return formatAgentList(loadAgentDefinitions({ projectRoot: context.settings?.projectRoot || process.cwd(), settings: context.settings }));
+    case 'list':
+      return formatTeamList(runtime.listTeams());
+    case 'new':
+    case 'create': {
+      const options = parseTeamOptions(args);
+      const members = parseMembersOption(options.members || options.member);
+      const result = runtime.createTeam({
+        name: options.name || options._[0] || 'default',
+        mission: options.mission || options._.slice(1).join(' '),
+        members,
+      });
+      return formatTeamSnapshot(result.team);
+    }
+    case 'spawn':
+    case 'add-agent': {
+      const options = parseTeamOptions(args);
+      runtime.loadOrCreateTeam({ name: options.team || options.t || 'default' });
+      const member = runtime.addMember({
+        agentType: options.type || options.agent || options._[0] || 'general-purpose',
+        name: options.name || options._[1],
+        model: options.model,
+      });
+      return `Spawned ${member.name} (${member.agentType}) in team ${runtime.snapshot().teamName}.\n\n${formatTeamSnapshot(runtime.snapshot())}`;
+    }
+    case 'task':
+    case 'add-task': {
+      const options = parseTeamOptions(args);
+      runtime.loadOrCreateTeam({ name: options.team || options.t || 'default' });
+      const title = options.title || options._.join(' ');
+      const task = runtime.addTask({
+        title,
+        prompt: options.prompt || title,
+        owner: options.owner,
+        agentType: options.type || options.agent,
+        deliverable: options.deliverable,
+        dependsOn: options.depends || options.dependsOn,
+        parallel: options.parallel !== 'false',
+      });
+      return `Added task ${task.id}.\n\n${formatTeamSnapshot(runtime.snapshot())}`;
+    }
+    case 'run': {
+      const options = parseTeamOptions(args);
+      runtime.loadOrCreateTeam({ name: options.team || options.t || 'default' });
+      const result = await runtime.run({ concurrency: options.concurrency, maxToolTurns: options.maxToolTurns });
+      return formatRunResult(result);
+    }
+    case 'status':
+    case 'show': {
+      const options = parseTeamOptions(args);
+      const snapshot = runtime.loadTeam(options.team || options.t || options._[0] || 'default');
+      return formatTeamSnapshot(snapshot);
+    }
+    case 'send': {
+      const options = parseTeamOptions(args);
+      runtime.loadTeam(options.team || options.t || 'default');
+      const message = runtime.sendMessage({
+        to: options.to || options._[0],
+        body: options.message || options._.slice(1).join(' '),
+      });
+      return formatMessages([message]);
+    }
+    case 'inbox': {
+      const options = parseTeamOptions(args);
+      runtime.loadTeam(options.team || options.t || 'default');
+      const messages = runtime.drainMessages(options.agent || options._[0] || 'lead');
+      return formatMessages(messages);
+    }
+    default:
+      throw new Error(`Unknown team command: ${subCommand}.\n${formatTeamUsage()}`);
+  }
+}
+
+function parseTeamOptions(args) {
+  const options = { _: [] };
+
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+
+    if (!arg.startsWith('--')) {
+      options._.push(arg);
+      continue;
+    }
+
+    const [rawKey, inlineValue] = arg.slice(2).split('=');
+    const key = rawKey.replace(/-([a-z])/g, (_match, char) => char.toUpperCase());
+    const value = inlineValue !== undefined ? inlineValue : args[index + 1] && !args[index + 1].startsWith('--') ? args[++index] : 'true';
+    options[key] = value;
+  }
+
+  return options;
+}
+
+function parseMembersOption(value) {
+  if (!value) {
+    return [];
+  }
+
+  return String(value).split(',').map((item) => {
+    const [agentType, name] = item.split(':');
+    return { agentType, name };
+  }).filter((member) => member.agentType);
+}
+
+function formatTeamUsage() {
+  return [
+    'Usage: hax-agent team <command> [options]',
+    '',
+    'Commands:',
+    '  team agents                         List available agent types',
+    '  team list                           List saved teams',
+    '  team new <name> --mission <text>     Create a team state file',
+    '  team spawn <agent-type> [name]       Add a teammate to a team',
+    '  team task <title> --owner <agent>    Add a task to the team board',
+    '  team run --team <name>               Run ready tasks with teammates',
+    '  team status [name]                   Show roster, task board, and progress',
+    '  team send <agent> <message>          Send a mailbox message',
+    '  team inbox <agent>                   Read unread mailbox messages',
+    '  team auth-refactor                   Print the legacy auth refactor plan',
+    '',
+    'Options:',
+    '  --team <name>                        Select team, default: default',
+    '  --type <agent-type>                  Preferred agent type for task owner',
+    '  --members type:name,type:name        Initial roster for team new',
+    '  --depends T1,T2                      Task dependencies',
+    '  --concurrency <n>                    Max ready tasks to run at once',
+  ].join('\n');
 }
 
 async function runResumeCommand(args) {
