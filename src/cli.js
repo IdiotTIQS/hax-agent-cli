@@ -12,7 +12,7 @@ const { PermissionManager, PermissionLevel, PERMISSION_LABELS } = require('./per
 const { Session, InputHistory } = require('./session');
 const { THEME, TerminalScreen, MarkdownRenderer, stripAnsi } = require('./renderer');
 
-const VERSION = '1.3.1';
+const VERSION = '1.3.2';
 
 const KNOWN_COMMANDS = ['chat', 'models', 'agents', 'team', 'resume', 'sessions', 'help', '--help', '-h'];
 

@@ -1,6 +1,6 @@
 # Hax Agent CLI
 
-> v1.3.1 — 轻量级、Claude-like 的本地 Agent 命令行工具 · 由 [IdiotTIQS](https://github.com/IdiotTIQS) 开发
+> v1.3.2 — 轻量级、Claude-like 的本地 Agent 命令行工具 · 由 [IdiotTIQS](https://github.com/IdiotTIQS) 开发
 
 [![Node.js](https://img.shields.io/badge/Node.js-%3E%3D18-brightgreen)](https://nodejs.org)
 [![License](https://img.shields.io/badge/License-MIT-blue)](#license)
