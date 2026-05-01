@@ -1,6 +1,6 @@
 # Hax Agent CLI
 
-> v1.3.4 — Lightweight, Claude-like Local Agent CLI · Developed by [IdiotTIQS](https://github.com/IdiotTIQS)
+> v1.3.5 — Lightweight, Claude-like Local Agent CLI · Developed by [IdiotTIQS](https://github.com/IdiotTIQS)
 
 [![Node.js](https://img.shields.io/badge/Node.js-%3E%3D18-brightgreen)](https://nodejs.org)
 [![License](https://img.shields.io/badge/License-MIT-blue)](#license)
