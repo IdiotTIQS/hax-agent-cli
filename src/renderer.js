@@ -860,6 +860,10 @@ function stripAnsi(text) {
   return text.replace(/\x1B\[[0-?]*[ -/]*[@-~]/g, '');
 }
 
+function styled(color, text) {
+  return `${color}${text}${ANSI.reset}`;
+}
+
 module.exports = {
   ANSI,
   THEME,
@@ -887,4 +891,5 @@ module.exports = {
   isDisplayableInput,
   formatProviderError,
   stripAnsi,
+  styled,
 };

@@ -363,14 +363,14 @@ test('anthropic provider feeds repeated invalid streaming tool calls back to the
   );
 
   assert.equal(chunks.filter((chunk) => chunk.type === 'tool_start').length, 2);
-  assert.equal(repeatedErrors.length, 1);
+  assert.equal(repeatedErrors.length, 3);
   assert.equal(repeatedErrors[0].attempt, 3);
   assert.equal(repeatedErrors[0].repeatedInvalid, true);
   assert.equal(repeatedErrors[0].showNotice, true);
   assert.deepEqual(chunks.at(-1), {
     type: 'tool_limit',
     reason: 'repeated_invalid_tool_call',
-    maxToolTurns: 3,
+    maxToolTurns: 5,
   });
   assert.equal(chunks.some((chunk) => chunk.type === 'text' && /Stopped repeated invalid tool call/.test(chunk.delta)), false);
 });

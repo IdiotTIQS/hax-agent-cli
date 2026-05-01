@@ -2,59 +2,25 @@
 
 const { ChatProvider, createTextChunk } = require("./chat-provider");
 const { normalizeMessages } = require("./messages");
+const {
+  DEFAULT_SYSTEM_PROMPT,
+  DEFAULT_MAX_TOOL_TURNS,
+  MAX_SAME_TOOL_CALLS,
+  MAX_REPEATED_INVALID_TOOL_RESULTS,
+  withRetry,
+  parsePositiveNumber,
+  createRepeatedInvalidToolResult,
+  createToolStartChunk,
+  createToolResultChunk,
+  createToolLimitChunk,
+  createThinkingChunk,
+  extractToolError,
+  parseToolResultContent,
+  getPermissionLevel,
+} = require("./shared");
 
-const DEFAULT_MODEL = "gpt-4o";
-const DEFAULT_MAX_TOKENS = 8192;
-const DEFAULT_MAX_TOOL_TURNS = 30;
-const MAX_SAME_TOOL_CALLS = 50;
-const MAX_REPEATED_INVALID_TOOL_RESULTS = 1;
-const DEFAULT_SYSTEM_PROMPT = [
-  "# Role & Identity",
-  "You are Hax Agent, a professional AI coding assistant with deep expertise in software development.",
-  "You think like a senior engineer: deliberate, thorough, and security-conscious.",
-  "",
-  "# Core Principles",
-  "- Always read existing files before modifying them to understand context and avoid regressions.",
-  "- Preserve existing code style, conventions, and architectural patterns.",
-  "- Make minimal, focused changes rather than rewriting entire files.",
-  "- Explain your reasoning briefly before making significant changes.",
-  "- When uncertain about file paths or code locations, use file.glob or file.search first.",
-  "",
-  "# Tool Usage Guidelines",
-  "- Use tools carefully and only with valid, non-empty arguments.",
-  "- Never call file.read with an empty path.",
-  "- If a tool call fails, adapt your approach instead of repeating the same failing input.",
-  "- Use shell.run only for allowlisted commands, with arguments passed in args rather than shell strings.",
-  "- Before writing a file, read the existing file when it exists, then write complete updated content.",
-  "- After making changes, verify correctness by reading back the modified file or running tests.",
-  "- When a tool returns data (like web.fetch or web.search), use that data to answer the user. Do NOT call the same tool again.",
-  "",
-  "# Code Quality Standards",
-  "- Write clean, readable, and well-structured code.",
-  "- Follow the principle of least surprise: code should behave predictably.",
-  "- Handle errors gracefully with meaningful error messages.",
-  "- Avoid introducing unnecessary dependencies.",
-  "- Keep functions focused and single-purpose.",
-  "",
-  "# Security Awareness",
-  "- Never expose secrets, API keys, or credentials in code or logs.",
-  "- Validate and sanitize all user inputs.",
-  "- Follow least-privilege principles for file and shell operations.",
-  "- Be cautious with eval(), exec(), and dynamic code execution.",
-  "",
-  "# Task Approach",
-  "1. Understand the task by examining relevant code first.",
-  "2. Plan your changes before executing them.",
-  "3. Execute changes incrementally, verifying each step.",
-  "4. Test your changes when test infrastructure is available.",
-  "5. Summarize what you changed and why.",
-  "",
-  "# Communication Style",
-  "- Be concise but informative in your responses.",
-  "- Use code blocks with language tags for code examples.",
-  "- When explaining errors, include both the cause and the fix.",
-  "- Acknowledge limitations when you are uncertain about something.",
-].join("\n");
+const DEFAULT_MODEL = "gpt-4.1";
+const DEFAULT_MAX_TOKENS = 100000;
 
 class OpenAIProvider extends ChatProvider {
   constructor(options = {}) {
@@ -62,21 +28,20 @@ class OpenAIProvider extends ChatProvider {
       name: options.name || "openai",
       model: options.model || DEFAULT_MODEL,
       apiKey: options.apiKey || process.env.OPENAI_API_KEY,
-      apiUrl: options.apiUrl || process.env.HAX_AGENT_API_URL || process.env.OPENAI_BASE_URL,
+      apiUrl: options.apiUrl || process.env.OPENAI_BASE_URL,
     });
     this.client = options.client || createOpenAIClient(this.apiKey, this.apiUrl);
     this.maxTokens = parsePositiveNumber(options.maxTokens, DEFAULT_MAX_TOKENS);
   }
 
   async chat(request = {}) {
-    const response = await this.runToolLoop(request);
-
+    const response = await withRetry(() => this.runToolLoop(request))();
     return {
       id: response.id,
       provider: this.name,
       model: response.model || request.model || this.model,
       role: "assistant",
-      content: extractText(response.choices?.[0]?.message?.content),
+      content: extractText(response),
       usage: response.usage || null,
       raw: response,
     };
@@ -88,17 +53,12 @@ class OpenAIProvider extends ChatProvider {
       return;
     }
 
-    const response = await this.client.chat.completions.create(
-      { ...this.createRequest(request), stream: true },
-      createRequestOptions(request)
-    );
+    const stream = await this.client.chat.completions.create({
+      ...this.createRequest(request),
+      stream: true,
+    });
 
-    if (!response || typeof response[Symbol.asyncIterator] !== 'function') {
-      yield createTextChunk(response.choices?.[0]?.message?.content || '');
-      return;
-    }
-
-    for await (const chunk of response) {
+    for await (const chunk of stream) {
       const delta = chunk.choices?.[0]?.delta;
       if (delta?.content) {
         yield createTextChunk(delta.content);
@@ -117,73 +77,93 @@ class OpenAIProvider extends ChatProvider {
     let forceTextResponse = false;
 
     for (let turn = 0; turn < maxToolTurns; turn += 1) {
-      const requestPayload = this.createRequest({ ...request, messages });
+      let stream;
+      const requestOverrides = {
+        ...request,
+        messages,
+      };
       if (forceTextResponse) {
-        requestPayload.tool_choice = "none";
+        requestOverrides.tools = undefined;
+        requestOverrides.tool_choice = "none";
       }
-      const response = await this.client.chat.completions.create({
-        ...requestPayload,
-        stream: true,
-      }, createRequestOptions(request));
-
-      if (!response || typeof response[Symbol.asyncIterator] !== 'function') {
-        const content = response?.choices?.[0]?.message?.content || '';
-        if (content) yield createTextChunk(content);
+      try {
+        stream = await withRetry(() => this.client.chat.completions.create(this.createRequest(requestOverrides)))();
+      } catch (err) {
+        yield createTextChunk(`\nError: ${err.message || 'API request failed after retries'}`);
         return;
       }
 
-      const stream = response;
-
       let fullContent = "";
+      let finishReason = null;
+      const toolCalls = new Map();
       let reasoningContent = "";
-      let toolCalls = [];
 
-      for await (const chunk of stream) {
-        const delta = chunk.choices?.[0]?.delta;
-        if (delta?.reasoning_content) {
-          reasoningContent += delta.reasoning_content;
-        }
-        if (delta?.content) {
-          fullContent += delta.content;
-          if (!forceTextResponse) {
-            yield createTextChunk(delta.content);
+      if (stream?.[Symbol.asyncIterator]) {
+        for await (const event of stream) {
+          const delta = event.choices?.[0]?.delta;
+          if (delta?.content) {
+            fullContent += delta.content;
+          }
+          if (delta?.reasoning_content) {
+            reasoningContent += delta.reasoning_content;
+          }
+          if (event.choices?.[0]?.finish_reason) {
+            finishReason = event.choices[0].finish_reason;
+          }
+          if (delta?.tool_calls) {
+            for (const tc of delta.tool_calls) {
+              const index = tc.index ?? 0;
+              if (!toolCalls.has(index)) {
+                toolCalls.set(index, {
+                  id: tc.id || "",
+                  type: tc.type || "function",
+                  function: { name: "", arguments: "" },
+                });
+              }
+              const existing = toolCalls.get(index);
+              if (tc.id) existing.id = tc.id;
+              if (tc.type) existing.type = tc.type;
+              if (tc.function?.name) existing.function.name += tc.function.name;
+              if (tc.function?.arguments) existing.function.arguments += tc.function.arguments;
+            }
           }
         }
-        if (delta?.tool_calls) {
-          for (const tc of delta.tool_calls) {
-            if (toolCalls[tc.index]) {
-              toolCalls[tc.index].function.arguments += tc.function.arguments;
-            } else {
-              toolCalls[tc.index] = {
-                id: tc.id,
-                type: tc.type,
-                function: { name: tc.function.name, arguments: tc.function.arguments },
-              };
-            }
+      } else {
+        const choice = stream?.choices?.[0];
+        finishReason = choice?.finish_reason;
+        fullContent = choice?.message?.content || "";
+        reasoningContent = choice?.message?.reasoning_content || "";
+        if (choice?.message?.tool_calls) {
+          for (const tc of choice.message.tool_calls) {
+            toolCalls.set(toolCalls.size, tc);
           }
         }
       }
 
-      if (toolCalls.length > 0) {
-        const firstToolName = toRegistryToolName(toolCalls[0].function.name);
-        if (lastToolName.current === firstToolName) {
-          const count = (toolCallCounts.get(firstToolName) || 0) + 1;
-          toolCallCounts.set(firstToolName, count);
-          if (count >= MAX_SAME_TOOL_CALLS) {
-            yield createToolLimitChunk(turn + 1, "too_many_same_tool_calls");
-            yield createTextChunk(`\n\nI've called ${firstToolName} ${count} times in a row. To prevent excessive tool usage, I'll stop here. If you need more specific information, please ask me to call it again.`);
-            return;
-          }
-        } else {
-          toolCallCounts.set(firstToolName, 1);
-        }
-        lastToolName.current = firstToolName;
+      if (fullContent) {
+        yield createTextChunk(fullContent);
+      }
+
+      const sortedToolCalls = [...toolCalls.entries()]
+        .sort(([a], [b]) => a - b)
+        .map(([, tc]) => tc);
+
+      if (finishReason === "length" && sortedToolCalls.length === 0) {
+        return;
+      }
+
+      if (!toolRegistry || sortedToolCalls.length === 0) {
+        return;
+      }
+
+      if (forceTextResponse) {
+        continue;
       }
 
       const message = {
         role: "assistant",
         content: fullContent || null,
-        tool_calls: toolCalls.length > 0 ? toolCalls.map(tc => ({
+        tool_calls: sortedToolCalls.length > 0 ? sortedToolCalls.map(tc => ({
           id: tc.id,
           type: tc.type,
           function: { name: tc.function.name, arguments: tc.function.arguments },
@@ -194,55 +174,76 @@ class OpenAIProvider extends ChatProvider {
         message.reasoning_content = reasoningContent;
       }
 
-      if (forceTextResponse || !toolRegistry || toolCalls.length === 0) {
-        if (forceTextResponse && fullContent) {
-          const cleanContent = fullContent.replace(/<｜｜DSML｜｜[\s\S]*?<\/｜｜DSML｜｜tool_calls>/g, '').trim();
-          if (cleanContent) {
-            yield createTextChunk(cleanContent);
+      messages.push(message);
+
+      const permissionResults = await Promise.all(
+        sortedToolCalls.map(async (tc) => {
+          const toolName = toRegistryToolName(tc.function.name);
+          const level = getPermissionLevel(toolRegistry, toolName);
+          if (level === "allow") {
+            return null;
           }
+          const toolInput = parseToolInput(tc.function.arguments);
+          return { tc, toolName, level, toolInput };
+        })
+      );
+
+      const needsApproval = permissionResults.filter(Boolean);
+      if (needsApproval.length > 0) {
+        for (const { tc, toolName, level, toolInput } of needsApproval) {
+          const toolResult = {
+            type: "tool_result",
+            tool_use_id: tc.id,
+            toolName,
+            requiresApproval: true,
+            level,
+            input: toolInput,
+            description: tc.function?.description,
+          };
+          yield toolResult;
         }
-        messages.push(message);
         return;
       }
 
-      if (toolCalls.some((toolCall) => toolRegistry.hasSingleCallResult?.(toRegistryToolName(toolCall.function.name)))) {
-        forceTextResponse = true;
-        messages.push({
-          role: "user",
-          content: "Use the previous tool result to answer the user's request now in natural language. Do not call tools and do not output tool-call markup or DSML/XML tags.",
-        });
-        continue;
+      for (const tc of sortedToolCalls) {
+        const toolName = toRegistryToolName(tc.function.name);
+
+        if (lastToolName.current === toolName) {
+          const count = (toolCallCounts.get(toolName) || 0) + 1;
+          toolCallCounts.set(toolName, count);
+          if (count >= MAX_SAME_TOOL_CALLS) {
+            yield createToolLimitChunk(turn + 1, "too_many_same_tool_calls");
+            yield createTextChunk(`\n\nI've called ${toolName} ${count} times in a row. To prevent excessive tool usage, I'll stop here. If you need more specific information, please ask me to call it again.`);
+            return;
+          }
+        } else {
+          toolCallCounts.set(toolName, 1);
+        }
+        lastToolName.current = toolName;
       }
 
-      messages.push(message);
-
       const toolResults = [];
-      for (const toolCall of toolCalls) {
-        const toolName = toRegistryToolName(toolCall.function.name);
-        let toolInput;
-        try {
-          toolInput = JSON.parse(toolCall.function.arguments || "{}");
-        } catch {
-          toolInput = {};
-        }
-
+      for (const tc of sortedToolCalls) {
+        const toolName = toRegistryToolName(tc.function.name);
+        const toolInput = parseToolInput(tc.function.arguments);
         const callSignature = `${toolName}:${JSON.stringify(toolInput)}`;
         const failedCount = invalidToolCalls.get(callSignature) || 0;
         const attempt = failedCount + 1;
 
         if (failedCount >= 2) {
-          const error = "This tool call failed repeatedly with the same input. Choose a valid path or use a different tool.";
+          const toolResult = createRepeatedInvalidToolResult({ id: tc.id, name: tc.function.name }, (n) => toRegistryToolName(n));
+          const toolError = extractToolError(toolResult);
           const noticeCount = repeatedInvalidNotices.get(callSignature) || 0;
           const shouldNotice = noticeCount === 0;
           repeatedInvalidNotices.set(callSignature, noticeCount + 1);
-          yield createToolResultChunk(toolName, true, error, {
+          yield createToolResultChunk(toolName, true, toolError, {
             attempt,
             input: toolInput,
             repeatedInvalid: true,
             showNotice: shouldNotice,
             turn: turn + 1,
           });
-          toolResults.push(createToolResultBlock(toolCall.id, true, error));
+          toolResults.push(createToolResultBlock(tc.id, true, toolResult.content));
 
           if (noticeCount + 1 >= MAX_REPEATED_INVALID_TOOL_RESULTS) {
             yield createToolLimitChunk(turn + 1, "repeated_invalid_tool_call");
@@ -253,16 +254,16 @@ class OpenAIProvider extends ChatProvider {
         }
 
         yield createToolStartChunk(toolName, toolInput, { attempt, turn: turn + 1 });
-        const result = await toolRegistry.execute(toolName, toolInput, { root: process.cwd() });
-        const isError = result.ok !== true;
-        const error = isError ? (result.error?.message || result.error?.code || null) : null;
-        const parsedResult = parseResultData(result.data);
+        const registryResult = await toolRegistry.execute(toolName, toolInput, { root: process.cwd() });
+        const isError = registryResult.ok !== true;
+        const toolError = isError ? (registryResult.error?.message || registryResult.error?.code || null) : null;
+        const parsedResult = parseResultData(registryResult.data);
 
-        yield createToolResultChunk(toolName, isError, error, {
+        yield createToolResultChunk(toolName, isError, toolError, {
           attempt,
           data: parsedResult,
-          durationMs: result.durationMs,
-          errorCode: result.error?.code,
+          durationMs: registryResult.durationMs,
+          errorCode: registryResult.error?.code,
           input: toolInput,
           turn: turn + 1,
         });
@@ -273,32 +274,56 @@ class OpenAIProvider extends ChatProvider {
           invalidToolCalls.delete(callSignature);
         }
 
-        const resultForModel = { ...result };
+        const resultForModel = { ...registryResult };
         delete resultForModel.repeatedSingleCall;
-        toolResults.push(createToolResultBlock(toolCall.id, isError, JSON.stringify(resultForModel, null, 2)));
+        toolResults.push(createToolResultBlock(tc.id, isError, JSON.stringify(resultForModel, null, 2)));
 
-        if (result.repeatedSingleCall) {
+        if (registryResult.repeatedSingleCall) {
           forceTextResponse = true;
         }
       }
 
       messages.push(...toolResults);
+
+      if (sortedToolCalls.some((tc) => toolRegistry.hasSingleCallResult?.(toRegistryToolName(tc.function.name)))) {
+        forceTextResponse = true;
+        messages.push({
+          role: "user",
+          content: "Use the previous tool result to answer the user's request now in natural language. Do not call tools and do not output tool-call markup or DSML/XML tags.",
+        });
+        continue;
+      }
     }
 
     yield createToolLimitChunk(maxToolTurns);
   }
 
   createRequest(request = {}) {
+    const isPreFormatted = Array.isArray(request.messages) &&
+      request.messages.length > 0 &&
+      request.messages[0]?.role === "system";
+    const messages = isPreFormatted
+      ? request.messages
+      : toOpenAIMessages(request.messages || request.prompt || "", request.system);
     const toolDefinitions = createToolDefinitions(request.toolRegistry);
-    const messages = toOpenAIMessages(request.messages || request.prompt || "", request.system);
+
     const payload = {
       model: request.model || this.model,
       max_tokens: parsePositiveNumber(request.maxTokens, this.maxTokens),
       messages,
+      stream: !!request.stream,
     };
 
     if (toolDefinitions.length > 0) {
       payload.tools = toolDefinitions;
+    }
+
+    if (request.tool_choice) {
+      payload.tool_choice = request.tool_choice;
+    }
+
+    if (request.signal) {
+      payload.signal = request.signal;
     }
 
     return payload;
@@ -308,18 +333,20 @@ class OpenAIProvider extends ChatProvider {
     const toolRegistry = request.toolRegistry;
     const messages = toOpenAIMessages(request.messages || request.prompt || "", request.system);
     const maxToolTurns = parsePositiveNumber(request.maxToolTurns, DEFAULT_MAX_TOOL_TURNS);
+    let forceTextResponse = false;
     let response;
 
     for (let turn = 0; turn < maxToolTurns; turn += 1) {
-      response = await this.client.chat.completions.create(this.createRequest({
-        ...request,
-        messages,
-      }));
+      const requestPayload = this.createRequest({ ...request, messages });
+      if (forceTextResponse) {
+        requestPayload.tool_choice = "none";
+      }
+      response = await withRetry(() => this.client.chat.completions.create(requestPayload))();
 
       const message = response.choices?.[0]?.message;
       const toolCalls = message?.tool_calls || [];
 
-      if (!toolRegistry || toolCalls.length === 0) {
+      if (forceTextResponse || !toolRegistry || toolCalls.length === 0) {
         return response;
       }
 
@@ -328,18 +355,22 @@ class OpenAIProvider extends ChatProvider {
       const toolResults = [];
       for (const toolCall of toolCalls) {
         const toolName = toRegistryToolName(toolCall.function.name);
-        let toolInput;
-        try {
-          toolInput = JSON.parse(toolCall.function.arguments || "{}");
-        } catch {
-          toolInput = {};
-        }
+        const toolInput = parseToolInput(toolCall.function.arguments);
 
         const result = await toolRegistry.execute(toolName, toolInput, { root: process.cwd() });
         toolResults.push(createToolResultBlock(toolCall.id, result.ok !== true, JSON.stringify(result, null, 2)));
       }
 
       messages.push(...toolResults);
+
+      if (toolCalls.some((tc) => toolRegistry.hasSingleCallResult?.(toRegistryToolName(tc.function.name)))) {
+        forceTextResponse = true;
+        messages.push({
+          role: "user",
+          content: "Use the previous tool result to answer the user's request now in natural language. Do not call tools and do not output tool-call markup or DSML/XML tags.",
+        });
+        continue;
+      }
     }
 
     throw new Error("Tool turn limit reached before the task was completed. Please ask me to continue.");
@@ -347,26 +378,26 @@ class OpenAIProvider extends ChatProvider {
 
   async listModels() {
     try {
-      const page = await this.client.models.list();
-      const models = Array.isArray(page.data) ? page.data : [];
+      const response = await this.client.models.list();
+      const models = Array.isArray(response.data) ? response.data : [];
 
       if (models.length > 0) {
         return models.map((model) => ({
           id: model.id,
-          name: model.name || model.id,
+          name: model.id,
         }));
       }
-    } catch {
-      // API 端点可能不支持 models.list 或返回 404，使用预定义列表
+    } catch (error) {
+      // API endpoint may not support models.list or returns 404, use predefined list
     }
 
     return [
-      { id: "gpt-4o", name: "GPT-4o" },
-      { id: "gpt-4o-mini", name: "GPT-4o Mini" },
-      { id: "gpt-4-turbo", name: "GPT-4 Turbo" },
-      { id: "gpt-3.5-turbo", name: "GPT-3.5 Turbo" },
-      { id: "o1", name: "o1" },
-      { id: "o3-mini", name: "o3 Mini" },
+      { id: 'gpt-4.1', name: 'GPT-4.1' },
+      { id: 'gpt-4.1-mini', name: 'GPT-4.1 Mini' },
+      { id: 'gpt-4o', name: 'GPT-4o' },
+      { id: 'gpt-4o-mini', name: 'GPT-4o Mini' },
+      { id: 'o3-mini', name: 'o3-mini' },
+      { id: 'codex-mini-latest', name: 'Codex Mini' },
     ];
   }
 
@@ -484,37 +515,16 @@ function createToolResultBlock(toolCallId, isError, content) {
   };
 }
 
-function createToolStartChunk(name, input, metadata = {}) {
-  return {
-    type: "tool_start",
-    name,
-    input,
-    displayInput: summarizeToolInput(name, input),
-    ...metadata,
-  };
-}
+function parseToolInput(argumentsRaw) {
+  if (!argumentsRaw) {
+    return {};
+  }
 
-function createToolResultChunk(name, isError, error, metadata = {}) {
-  return {
-    type: "tool_result",
-    name,
-    isError,
-    ...(error ? { error } : {}),
-    ...metadata,
-  };
-}
-
-function createToolLimitChunk(maxToolTurns, reason = "max_tool_turns") {
-  return {
-    type: "tool_limit",
-    reason,
-    maxToolTurns,
-  };
-}
-
-function extractText(content) {
-  if (!content) return "";
-  return String(content);
+  try {
+    return JSON.parse(argumentsRaw);
+  } catch (_error) {
+    return {};
+  }
 }
 
 function parseResultData(data) {
@@ -528,82 +538,9 @@ function parseResultData(data) {
   return data;
 }
 
-function summarizeToolInput(name, input) {
-  const value = input && typeof input === "object" ? input : {};
-
-  if (name === "file.read") {
-    return joinInputParts([formatInputPart("file", value.path), formatInputPart("maxBytes", value.maxBytes)]);
-  }
-
-  if (name === "file.write") {
-    return joinInputParts([
-      formatInputPart("file", value.path),
-      formatInputPart("chars", typeof value.content === "string" ? value.content.length : undefined),
-      formatInputPart("maxBytes", value.maxBytes),
-    ]);
-  }
-
-  if (name === "file.glob") {
-    return joinInputParts([
-      formatInputPart("pattern", value.pattern),
-      formatInputPart("cwd", value.cwd),
-      formatInputPart("maxResults", value.maxResults),
-    ]);
-  }
-
-  if (name === "file.search") {
-    return joinInputParts([
-      formatInputPart("query", value.query),
-      formatInputPart("path", value.path),
-      formatInputPart("glob", value.glob),
-      formatInputPart("regex", value.regex),
-    ]);
-  }
-
-  if (name === "shell.run") {
-    const command = [value.command, ...(Array.isArray(value.args) ? value.args : [])].filter(Boolean).join(" ");
-    return joinInputParts([
-      formatInputPart("command", command),
-      formatInputPart("cwd", value.cwd),
-      formatInputPart("timeoutMs", value.timeoutMs),
-    ]);
-  }
-
-  return joinInputParts(Object.entries(value)
-    .filter(([key, item]) => isDisplayableInput(key, item))
-    .slice(0, 3)
-    .map(([key, item]) => formatInputPart(key, item)));
-}
-
-function isDisplayableInput(key, value) {
-  return !/key|token|secret|password|content|env/i.test(key) &&
-    (typeof value === "string" || typeof value === "number" || typeof value === "boolean");
-}
-
-function formatInputPart(key, value) {
-  if (value === undefined || value === null || value === "") {
-    return null;
-  }
-
-  const text = String(value).replace(/\s+/g, " ");
-  const truncated = text.length > 80 ? `${text.slice(0, 77)}...` : text;
-  return `${key}: ${truncated}`;
-}
-
-function joinInputParts(parts) {
-  return parts.filter(Boolean).join(", ");
-}
-
-function createRequestOptions(request = {}) {
-  return request.signal ? { signal: request.signal } : undefined;
-}
-
-function parsePositiveNumber(value, fallback) {
-  if (value === Infinity || value === Number.POSITIVE_INFINITY) {
-    return Infinity;
-  }
-  const number = Number(value);
-  return Number.isFinite(number) && number > 0 ? number : fallback;
+function extractText(response) {
+  const content = response?.choices?.[0]?.message?.content;
+  return typeof content === "string" ? content : "";
 }
 
 function createOpenAIClient(apiKey, apiUrl) {

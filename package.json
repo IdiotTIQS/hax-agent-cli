@@ -9,7 +9,7 @@
   "scripts": {
     "start": "node src/cli.js",
     "auth:team": "node src/cli.js team auth-refactor",
-    "test": "node --test"
+    "test": "node --test test/*.test.js"
   },
   "files": [
     "src/**/*.js",

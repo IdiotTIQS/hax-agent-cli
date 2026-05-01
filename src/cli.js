@@ -11,7 +11,7 @@ const { registerAgentTeamTools } = require('./teams/tools');
 const { loadAllSkills, createSkillifySkill, recordSkillUsage } = require('./skills');
 const { PermissionManager, PermissionLevel, PERMISSION_LABELS } = require('./permissions');
 const { Session, InputHistory } = require('./session');
-const { THEME, TerminalScreen, MarkdownRenderer, stripAnsi } = require('./renderer');
+const { THEME, ANSI, TerminalScreen, MarkdownRenderer, stripAnsi, styled } = require('./renderer');
 
 const VERSION = '1.3.2';
 
@@ -214,7 +214,7 @@ async function runShell(args, explicitSession) {
     terminal: true,
   });
 
-  rl.setPrompt(`${THEME.promptPrefix}>${stripAnsi(THEME.ANSI?.reset || '')} `);
+  rl.setPrompt(`${styled(THEME.promptPrefix, '>')} `);
 
   screen.activate();
 
@@ -319,20 +319,20 @@ async function runShell(args, explicitSession) {
         const levelColor = level === PermissionLevel.DANGEROUS ? THEME.error
           : level === PermissionLevel.ASK ? THEME.warning : THEME.success;
 
-        screen.write(`\n${levelColor}╭─ 权限请求 ─────────────────────────────────╮${stripAnsi(THEME.ANSI?.reset || '')}\n`);
-        screen.write(`${levelColor}│${stripAnsi(THEME.ANSI?.reset || '')}  级别: ${levelColor}${levelLabel}${stripAnsi(THEME.ANSI?.reset || '')}\n`);
-        screen.write(`${levelColor}│${stripAnsi(THEME.ANSI?.reset || '')}  操作: ${THEME.bold}${toolName}${stripAnsi(THEME.ANSI?.reset || '')}\n`);
+        screen.write(`\n${levelColor}╭─ 权限请求 ─────────────────────────────────╮${ANSI.reset}\n`);
+        screen.write(`${levelColor}│${ANSI.reset}  级别: ${styled(levelColor, levelLabel)}\n`);
+        screen.write(`${levelColor}│${ANSI.reset}  操作: ${styled(THEME.bold, toolName)}\n`);
 
         const descLines = description.split('\n');
         for (const line of descLines) {
-          screen.write(`${levelColor}│${stripAnsi(THEME.ANSI?.reset || '')}  ${THEME.dim}${line}${stripAnsi(THEME.ANSI?.reset || '')}\n`);
+          screen.write(`${levelColor}│${ANSI.reset}  ${styled(THEME.dim, line)}\n`);
         }
 
-        screen.write(`${levelColor}│${stripAnsi(THEME.ANSI?.reset || '')}\n`);
-        screen.write(`${levelColor}│${stripAnsi(THEME.ANSI?.reset || '')}  ${THEME.promptPrefix}[Y]${stripAnsi(THEME.ANSI?.reset || '')} 允许    ${THEME.error}[N]${stripAnsi(THEME.ANSI?.reset || '')} 拒绝\n`);
-        screen.write(`${levelColor}│${stripAnsi(THEME.ANSI?.reset || '')}  ${THEME.promptPrefix}[A]${stripAnsi(THEME.ANSI?.reset || '')} 永久允许  ${THEME.error}[D]${stripAnsi(THEME.ANSI?.reset || '')} 永久拒绝\n`);
-        screen.write(`${levelColor}╰──────────────────────────────────────────────╯${stripAnsi(THEME.ANSI?.reset || '')}\n`);
-        screen.write(`${THEME.dim}请选择 (Y/N/A/D):${stripAnsi(THEME.ANSI?.reset || '')} `);
+        screen.write(`${levelColor}│${ANSI.reset}\n`);
+        screen.write(`${levelColor}│${ANSI.reset}  ${styled(THEME.promptPrefix, '[Y]')} 允许    ${styled(THEME.error, '[N]')} 拒绝\n`);
+        screen.write(`${levelColor}│${ANSI.reset}  ${styled(THEME.promptPrefix, '[A]')} 永久允许  ${styled(THEME.error, '[D]')} 永久拒绝\n`);
+        screen.write(`${levelColor}╰──────────────────────────────────────────────╯${ANSI.reset}\n`);
+        screen.write(styled(THEME.dim, '请选择 (Y/N/A/D):') + ' ');
 
         let resolved = false;
 
@@ -377,13 +377,14 @@ async function runShell(args, explicitSession) {
   renderBanner(screen, session);
 
   if (session.provider.name === 'mock' || session.provider.name === 'local') {
-    screen.write(`${THEME.warning}⚠ Local mock mode is active. Set /api-url and /api-key to chat with a real model.${stripAnsi(THEME.ANSI?.reset || '')}\n\n`);
+    screen.write(styled(THEME.warning, '⚠ Local mock mode is active. Set /api-url and /api-key to chat with a real model.') + '\n\n');
   }
 
   if (session.permissionManager.mode === 'yolo') {
-    screen.write(`${THEME.warning}⚠ YOLO 模式已启用 - 所有操作将自动执行，无需确认${stripAnsi(THEME.ANSI?.reset || '')}\n\n`);
+    screen.write(styled(THEME.warning, '⚠ YOLO 模式已启用 - 所有操作将自动执行，无需确认') + '\n\n');
   } else {
-    screen.write(`${THEME.dim}权限模式: ${session.permissionManager.mode === 'normal' ? '标准' : session.permissionManager.mode} · 使用 /permissions 管理权限${stripAnsi(THEME.ANSI?.reset || '')}\n\n`);
+    const permLabel = session.permissionManager.mode === 'normal' ? '标准' : session.permissionManager.mode;
+    screen.write(styled(THEME.dim, `权限模式: ${permLabel} · 使用 /permissions 管理权限`) + '\n\n');
   }
 
   renderStatusLine(screen, session);
@@ -406,7 +407,7 @@ async function runShell(args, explicitSession) {
         screen.write(trimmed + '\n');
         session.shouldExit = true;
         const cost = session.costTracker.getCost(session.provider?.model);
-        screen.write(`${THEME.success}Session ended.${stripAnsi(THEME.ANSI?.reset || '')} ${THEME.dim}Cost: $${cost.toFixed(4)} · Turns: ${session.costTracker.turnCount}${stripAnsi(THEME.ANSI?.reset || '')}\n`);
+        screen.write(`${styled(THEME.success, 'Session ended.')} ${styled(THEME.dim, `Cost: $${cost.toFixed(4)} · Turns: ${session.costTracker.turnCount}`)}\n`);
         screen.deactivate();
         process.exit(0);
       }
@@ -416,7 +417,7 @@ async function runShell(args, explicitSession) {
         vimInsertMode = true;
         screen.clearLine();
         screen.write(trimmed + '\n');
-        screen.write(`${THEME.success}Vim mode ${vimMode ? 'enabled' : 'disabled'}.${stripAnsi(THEME.ANSI?.reset || '')}\n`);
+        screen.write(styled(THEME.success, `Vim mode ${vimMode ? 'enabled' : 'disabled'}.`) + '\n');
         rl.prompt();
         return;
       }
@@ -430,7 +431,7 @@ async function runShell(args, explicitSession) {
         session.costTracker = new (require('./session').CostTracker)();
         screen.clear();
         renderBanner(screen, session);
-        screen.write(`${THEME.success}Context cleared.${stripAnsi(THEME.ANSI?.reset || '')}\n\n`);
+        screen.write(styled(THEME.success, 'Context cleared.') + '\n\n');
         rl.prompt();
         return;
       }
@@ -445,7 +446,7 @@ async function runShell(args, explicitSession) {
     }
 
     if (session.isStreaming) {
-      screen.write(`${THEME.warning}Cannot send while the assistant is generating a response.${stripAnsi(THEME.ANSI?.reset || '')}\n`);
+      screen.write(styled(THEME.warning, 'Cannot send while the assistant is generating a response.') + '\n');
       rl.prompt();
       return;
     }
@@ -463,7 +464,7 @@ async function runShell(args, explicitSession) {
       }
 
       screen.clearLine();
-      screen.write(`${THEME.shellIndicator}!${shellLine}${stripAnsi(THEME.ANSI?.reset || '')}\n`);
+      screen.write(styled(THEME.shellIndicator, `!${shellLine}`) + '\n');
 
       const isWindows = process.platform === 'win32';
       const shell = isWindows ? 'powershell.exe' : '/bin/bash';
@@ -477,14 +478,14 @@ async function runShell(args, explicitSession) {
       await new Promise((resolve) => {
         child.on('close', (code) => {
           if (code !== 0) {
-            screen.write(`${THEME.warning}Exit code: ${code}${stripAnsi(THEME.ANSI?.reset || '')}\n`);
+            screen.write(styled(THEME.warning, `Exit code: ${code}`) + '\n');
           }
           renderStatusLine(screen, session);
           rl.prompt();
           resolve();
         });
         child.on('error', (err) => {
-          screen.write(`${THEME.error}Command error: ${err.message}${stripAnsi(THEME.ANSI?.reset || '')}\n`);
+          screen.write(styled(THEME.error, `Command error: ${err.message}`) + '\n');
           renderStatusLine(screen, session);
           rl.prompt();
           resolve();
@@ -495,7 +496,8 @@ async function runShell(args, explicitSession) {
 
     screen.clearLine();
     screen.write('\n');
-    screen.write(`${THEME.userIndicator}You ${new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })} ${stripAnsi(THEME.ANSI?.reset || '')}  ${trimmed}\n`);
+    const time = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    screen.write(`${styled(THEME.userIndicator, `You ${time}`)}  ${trimmed}\n`);
 
     await handleChatMessage(trimmed, { screen, session, markdown });
     renderStatusLine(screen, session);
@@ -522,13 +524,13 @@ async function runShell(args, explicitSession) {
         if (session.responseAbortController) {
           session.responseAbortController.abort();
         }
-        screen.write(`\n${THEME.warning}^C${stripAnsi(THEME.ANSI?.reset || '')}\n`);
+        screen.write('\n' + styled(THEME.warning, '^C') + '\n');
         return;
       }
 
       pendingExitCount += 1;
       if (pendingExitCount === 1) {
-        screen.write(`\n${THEME.warning}Press Ctrl+C again to exit.${stripAnsi(THEME.ANSI?.reset || '')}\n`);
+        screen.write('\n' + styled(THEME.warning, 'Press Ctrl+C again to exit.') + '\n');
         renderStatusLine(screen, session);
         rl.prompt();
         setTimeout(() => { pendingExitCount = 0; }, 2000);
@@ -557,11 +559,11 @@ async function runShell(args, explicitSession) {
       const modeLabel = newMode === 'yolo' ? 'YOLO (自动执行)' : '标准 (需确认)';
       const modeColor = newMode === 'yolo' ? THEME.warning : THEME.success;
 
-      screen.write(`\n${modeColor}╭────────────────────────────────────╮${stripAnsi(THEME.ANSI?.reset || '')}\n`);
-      screen.write(`${modeColor}│${stripAnsi(THEME.ANSI?.reset || '')}  权限模式已切换: ${modeColor}${THEME.bold}${modeLabel}${stripAnsi(THEME.ANSI?.reset || '')}\n`);
-      screen.write(`${modeColor}│${stripAnsi(THEME.ANSI?.reset || '')}\n`);
-      screen.write(`${modeColor}│${stripAnsi(THEME.ANSI?.reset || '')}  ${THEME.dim}按 Shift+Tab 循环切换模式${stripAnsi(THEME.ANSI?.reset || '')}\n`);
-      screen.write(`${modeColor}╰────────────────────────────────────╯${stripAnsi(THEME.ANSI?.reset || '')}\n\n`);
+      screen.write(`\n${modeColor}╭────────────────────────────────────╮${ANSI.reset}\n`);
+      screen.write(`${modeColor}│${ANSI.reset}  权限模式已切换: ${styled(modeColor + THEME.bold, modeLabel)}\n`);
+      screen.write(`${modeColor}│${ANSI.reset}\n`);
+      screen.write(`${modeColor}│${ANSI.reset}  ${styled(THEME.dim, '按 Shift+Tab 循环切换模式')}\n`);
+      screen.write(`${modeColor}╰────────────────────────────────────╯${ANSI.reset}\n\n`);
 
       renderStatusLine(screen, session);
       rl.prompt();

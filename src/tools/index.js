@@ -4,7 +4,7 @@ const { spawn } = require('node:child_process');
 const { URL } = require('node:url');
 const { PermissionManager } = require('../permissions');
 
-const DEFAULT_MAX_FILE_BYTES = 1024 * 1024;
+const DEFAULT_MAX_FILE_BYTES = 50 * 1024 * 1024;
 const DEFAULT_MAX_RESULTS = 1000;
 const IGNORED_DIRECTORY_NAMES = new Set(['.git', 'node_modules', '.hg', '.svn']);
 
