@@ -6,7 +6,7 @@ const { normalizeMessages } = require("./messages");
 const DEFAULT_MODEL = "gpt-4o";
 const DEFAULT_MAX_TOKENS = 8192;
 const DEFAULT_MAX_TOOL_TURNS = 30;
-const MAX_SAME_TOOL_CALLS = 8;
+const MAX_SAME_TOOL_CALLS = 50;
 const MAX_REPEATED_INVALID_TOOL_RESULTS = 1;
 const DEFAULT_SYSTEM_PROMPT = [
   "# Role & Identity",
