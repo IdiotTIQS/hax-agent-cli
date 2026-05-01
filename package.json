@@ -9,11 +9,11 @@
   "scripts": {
     "start": "node src/cli.js",
     "auth:team": "node src/cli.js team auth-refactor",
-    "test": "node --test test/*.test.js"
+    "test": "node --test test/*.test.js",
+    "prepublishOnly": "npm test"
   },
   "files": [
-    "src/**/*.js",
-    "test/**/*.js"
+    "src/**/*.js"
   ],
   "repository": {
     "type": "git",

@@ -106,7 +106,7 @@ const SPINNER_VERBS = [
   'Evaluating', 'Generating', 'Considering', 'Examining', 'Planning',
 ];
 
-const VERSION = '1.3.3';
+const VERSION = require('../package.json').version;
 
 const CLAUDE_BANNER = [
   '',
