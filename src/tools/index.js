@@ -18,13 +18,13 @@ class ToolExecutionError extends Error {
 }
 
 const SINGLE_CALL_TOOLS = new Set(['web.fetch', 'web.search', 'file.readDirectory']);
+const SINGLE_CALL_CACHE_MS = 300_000;
 
 class ToolRegistry {
   constructor(options = {}) {
     this.root = path.resolve(options.root || process.cwd());
     this.tools = new Map();
-    this._singleCallUsed = new Set();
-    this._singleCallResults = new Map();
+    this._singleCallCache = new Map();
     this.permissionManager = options.permissionManager || new PermissionManager();
     this.approvalCallback = options.approvalCallback || null;
   }
@@ -65,12 +65,17 @@ class ToolRegistry {
   }
 
   resetSingleCallTracking() {
-    this._singleCallUsed.clear();
-    this._singleCallResults.clear();
+    this._singleCallCache.clear();
   }
 
   hasSingleCallResult(name) {
-    return SINGLE_CALL_TOOLS.has(name) && this._singleCallUsed.has(name);
+    const entry = this._singleCallCache.get(name);
+    if (!entry) return false;
+    if (Date.now() - entry.timestamp > SINGLE_CALL_CACHE_MS) {
+      this._singleCallCache.delete(name);
+      return false;
+    }
+    return true;
   }
 
   async execute(name, args = {}, context = {}) {
@@ -81,18 +86,16 @@ class ToolRegistry {
         throw new ToolExecutionError('INVALID_TOOL_NAME', 'Tool name must be a non-empty string.');
       }
 
-      if (SINGLE_CALL_TOOLS.has(name) && this._singleCallUsed.has(name)) {
-        const cachedResult = this._singleCallResults.get(name);
-        if (cachedResult) {
-          const serialized = serializeToolResult({
-            toolName: name,
-            ok: true,
-            data: cachedResult,
-            durationMs: 0,
-          });
-          serialized.repeatedSingleCall = true;
-          return serialized;
-        }
+      if (SINGLE_CALL_TOOLS.has(name) && this.hasSingleCallResult(name)) {
+        const cachedResult = this._singleCallCache.get(name).data;
+        const serialized = serializeToolResult({
+          toolName: name,
+          ok: true,
+          data: cachedResult,
+          durationMs: 0,
+        });
+        serialized.repeatedSingleCall = true;
+        return serialized;
       }
 
       assertPlainObject(args, 'Tool arguments');
@@ -121,8 +124,7 @@ class ToolRegistry {
       });
 
       if (SINGLE_CALL_TOOLS.has(name)) {
-        this._singleCallUsed.add(name);
-        this._singleCallResults.set(name, data);
+        this._singleCallCache.set(name, { data, timestamp: Date.now() });
       }
 
       return serializeToolResult({
@@ -155,7 +157,8 @@ function createLocalToolRegistry(options = {}) {
     .register(createWebFetchTool())
     .register(createWebSearchTool())
     .register(createFileEditTool())
-    .register(createReadDirectoryTool());
+    .register(createReadDirectoryTool())
+    .register(createDeleteFileTool());
 
   return registry;
 }
@@ -769,6 +772,50 @@ function generateEditSummary(oldLines, newLines) {
   if (added > 0) parts.push(`Added ${added} line${added !== 1 ? 's' : ''}`);
 
   return parts.join(', ') + '.';
+}
+
+function createDeleteFileTool() {
+  return {
+    name: 'file.delete',
+    description: 'Delete a file inside the workspace root. The file is moved to .hax-agent/trash/ by default for recovery.',
+    inputSchema: {
+      type: 'object',
+      required: ['path'],
+      properties: {
+        path: { type: 'string', description: 'The file path to delete' },
+        permanent: { type: 'boolean', description: 'If true, permanently delete instead of moving to trash', default: false },
+      },
+    },
+    async execute(args, context) {
+      const filePath = requireString(args.path, 'path');
+      const permanent = args.permanent === true;
+
+      const resolvedPath = resolveWithinRoot(context.root, filePath);
+      const stats = await statPath(resolvedPath);
+
+      if (!stats.isFile()) {
+        throw new ToolExecutionError('NOT_A_FILE', `Path is not a file: ${filePath}`);
+      }
+
+      if (permanent) {
+        await fs.unlink(resolvedPath);
+      } else {
+        const trashDir = path.join(context.root, '.hax-agent', 'trash');
+        await fs.mkdir(trashDir, { recursive: true });
+        const baseName = path.basename(filePath);
+        const timestamp = Date.now();
+        const trashPath = path.join(trashDir, `${timestamp}-${baseName}`);
+        await fs.rename(resolvedPath, trashPath);
+      }
+
+      return {
+        path: toWorkspacePath(context.root, resolvedPath),
+        deleted: true,
+        permanent,
+        bytes: stats.size,
+      };
+    },
+  };
 }
 
 function createReadDirectoryTool() {
@@ -1395,6 +1442,7 @@ module.exports = {
   createWebSearchTool,
   createFileEditTool,
   createReadDirectoryTool,
+  createDeleteFileTool,
   serializeToolResult,
   stringifyToolResult,
 };

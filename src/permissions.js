@@ -13,6 +13,7 @@ const TOOL_PERMISSIONS = {
   'web.search': PermissionLevel.AUTO,
   'file.write': PermissionLevel.ASK,
   'file.edit': PermissionLevel.ASK,
+  'file.delete': PermissionLevel.DANGEROUS,
   'shell.run': null,
 };
 
@@ -88,6 +89,10 @@ function formatToolDescription(toolName, toolArgs) {
     const newStr = (toolArgs?.newStr || '').slice(0, 60);
     return `编辑文件: ${filePath}\n  替换: "${oldStr}" -> "${newStr}"`;
   }
+  if (toolName === 'file.delete') {
+    const filePath = toolArgs?.path || 'unknown';
+    return `删除文件: ${filePath}`;
+  }
   if (toolName === 'shell.run') {
     const command = [toolArgs?.command, ...(Array.isArray(toolArgs?.args) ? toolArgs.args : [])].filter(Boolean).join(' ');
     const cwd = toolArgs?.cwd || '.';
@@ -101,6 +106,10 @@ class PermissionManager {
     this.globalMode = options.mode || 'normal';
     this._alwaysAllow = new Set();
     this._alwaysDeny = new Set();
+    this._persistPath = options.persistPath || null;
+    if (this._persistPath) {
+      this._loadFromDisk().catch(() => {});
+    }
   }
 
   get mode() {
@@ -122,16 +131,55 @@ class PermissionManager {
   setAlwaysAllow(toolKey) {
     this._alwaysAllow.add(toolKey);
     this._alwaysDeny.delete(toolKey);
+    this._saveToDisk().catch(() => {});
   }
 
   setAlwaysDeny(toolKey) {
     this._alwaysDeny.add(toolKey);
     this._alwaysAllow.delete(toolKey);
+    this._saveToDisk().catch(() => {});
   }
 
   resetOverrides() {
     this._alwaysAllow.clear();
     this._alwaysDeny.clear();
+    this._saveToDisk().catch(() => {});
+  }
+
+  setPersistPath(persistPath) {
+    this._persistPath = persistPath;
+    if (persistPath) {
+      this._loadFromDisk().catch(() => {});
+    }
+  }
+
+  async _saveToDisk() {
+    if (!this._persistPath) return;
+    const fs = require('node:fs/promises');
+    const data = {
+      mode: this.globalMode,
+      alwaysAllow: Array.from(this._alwaysAllow),
+      alwaysDeny: Array.from(this._alwaysDeny),
+    };
+    await fs.mkdir(require('node:path').dirname(this._persistPath), { recursive: true });
+    await fs.writeFile(this._persistPath, JSON.stringify(data, null, 2), 'utf8');
+  }
+
+  async _loadFromDisk() {
+    if (!this._persistPath) return;
+    const fs = require('node:fs/promises');
+    try {
+      const raw = await fs.readFile(this._persistPath, 'utf8');
+      const data = JSON.parse(raw);
+      if (data.alwaysAllow) {
+        for (const key of data.alwaysAllow) this._alwaysAllow.add(key);
+      }
+      if (data.alwaysDeny) {
+        for (const key of data.alwaysDeny) this._alwaysDeny.add(key);
+      }
+    } catch (_) {
+      // file doesn't exist or is corrupt, use defaults
+    }
   }
 
   getToolKey(toolName, toolArgs) {

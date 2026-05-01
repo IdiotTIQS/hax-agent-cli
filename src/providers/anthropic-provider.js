@@ -56,6 +56,23 @@ const DEFAULT_SYSTEM_PROMPT = [
   "- Acknowledge limitations when you are uncertain about something.",
 ].join("\n");
 
+function withRetry(fn, maxRetries = 3, baseDelayMs = 1000) {
+  return async (...args) => {
+    for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
+      try {
+        return await fn(...args);
+      } catch (err) {
+        if (attempt >= maxRetries) throw err;
+        const status = err?.status || 0;
+        const retryable = status >= 500 || status === 429 || !status;
+        if (!retryable) throw err;
+        const delay = baseDelayMs * Math.pow(2, attempt) + Math.random() * 500;
+        await new Promise((r) => setTimeout(r, delay));
+      }
+    }
+  };
+}
+
 class AnthropicProvider extends ChatProvider {
   constructor(options = {}) {
     super({
@@ -69,8 +86,7 @@ class AnthropicProvider extends ChatProvider {
   }
 
   async chat(request = {}) {
-    const response = await this.runToolLoop(request);
-
+    const response = await withRetry(() => this.runToolLoop(request))();
     return {
       id: response.id,
       provider: this.name,
@@ -124,7 +140,14 @@ class AnthropicProvider extends ChatProvider {
       if (forceTextResponse) {
         requestPayload.tool_choice = { type: "none" };
       }
-      const stream = this.client.messages.stream(requestPayload, createRequestOptions(request));
+
+      let stream;
+      try {
+        stream = await withRetry(() => this.client.messages.stream(requestPayload, createRequestOptions(request)))();
+      } catch (err) {
+        yield createTextChunk(`\nError: ${err.message || 'API request failed after retries'}`);
+        return;
+      }
 
       let bufferedText = "";
       let hasDsmContent = false;
@@ -300,10 +323,10 @@ class AnthropicProvider extends ChatProvider {
     let response;
 
     for (let turn = 0; turn < maxToolTurns; turn += 1) {
-      response = await this.client.messages.create(this.createRequest({
+      response = await withRetry(() => this.client.messages.create(this.createRequest({
         ...request,
         messages,
-      }));
+      })))();
 
       const toolUses = extractToolUses(response.content);
 
@@ -333,10 +356,9 @@ class AnthropicProvider extends ChatProvider {
         }));
       }
     } catch (error) {
-      // API 端点可能不支持 models.list 或返回 404，使用预定义列表
+      // API endpoint may not support models.list or returns 404, use predefined list
     }
 
-    // 预定义的 Claude 模型列表
     return [
       { id: 'claude-sonnet-4-20250514', name: 'Claude Sonnet 4' },
       { id: 'claude-opus-4-20250514', name: 'Claude Opus 4' },
@@ -468,7 +490,6 @@ function parseDsmToolCalls(text) {
 
 async function executeToolUse(toolRegistry, toolUse) {
   const result = await toolRegistry.execute(toRegistryToolName(toolUse.name), toolUse.input || {});
-
   return createToolResultBlock(toolUse.id, result);
 }
 
@@ -528,22 +549,6 @@ function createThinkingChunk() {
   };
 }
 
-function createStreamChunk(event) {
-  if (event.type !== "content_block_delta") {
-    return null;
-  }
-
-  if (event.delta?.type === "text_delta") {
-    return createTextChunk(event.delta.text);
-  }
-
-  if (event.delta?.type === "thinking_delta" || event.delta?.type === "signature_delta") {
-    return createThinkingChunk();
-  }
-
-  return null;
-}
-
 function extractToolError(toolResult) {
   if (!toolResult?.is_error) {
     return null;
@@ -587,6 +592,10 @@ function summarizeToolInput(name, input) {
     ]);
   }
 
+  if (name === "file.delete") {
+    return joinInputParts([formatInputPart("file", value.path)]);
+  }
+
   if (name === "file.glob") {
     return joinInputParts([
       formatInputPart("pattern", value.pattern),
@@ -628,7 +637,6 @@ function formatInputPart(key, value) {
   if (value === undefined || value === null || value === "") {
     return null;
   }
-
   const text = String(value).replace(/\s+/g, " ");
   const truncated = text.length > 80 ? `${text.slice(0, 77)}...` : text;
   return `${key}: ${truncated}`;
@@ -659,7 +667,6 @@ function createAnthropicClient(apiKey, apiUrl) {
     if (error.code === "MODULE_NOT_FOUND") {
       throw new Error("Install @anthropic-ai/sdk before using the Anthropic provider");
     }
-
     throw error;
   }
 
