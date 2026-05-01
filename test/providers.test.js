@@ -5,6 +5,7 @@ const path = require('node:path');
 const http = require('node:http');
 const test = require('node:test');
 const { AnthropicProvider, MockProvider } = require('../src/providers');
+const { OpenAIProvider } = require('../src/providers/openai-provider');
 const { ToolRegistry, createLocalToolRegistry, createWebFetchTool, createWebSearchTool, createFileEditTool, createReadDirectoryTool, ToolExecutionError } = require('../src/tools');
 
 test('mock provider explains local mock mode conversationally', async () => {
@@ -733,6 +734,87 @@ test('read directory tool is registered in local tool registry', () => {
   assert.match(readDir.description, /directory/i);
   assert.ok(readDir.inputSchema.required.includes('path'));
 });
+
+test('openai provider preserves tool results and forces text after repeated single-call tool request', async () => {
+  const requests = [];
+  let executions = 0;
+  const registry = new ToolRegistry();
+
+  registry.register({
+    name: 'web.fetch',
+    description: 'Fetch a URL.',
+    inputSchema: {
+      type: 'object',
+      required: ['url'],
+      properties: { url: { type: 'string' } },
+    },
+    async execute() {
+      executions += 1;
+      return { url: 'https://www.baidu.com', title: 'Baidu home page' };
+    },
+  });
+
+  const provider = new OpenAIProvider({
+    client: {
+      chat: {
+        completions: {
+          create(request) {
+            requests.push(request);
+
+            if (requests.length === 1 || requests.length === 2) {
+              return createOpenAIStream([
+                {
+                  choices: [{
+                    delta: {
+                      tool_calls: [{
+                        index: 0,
+                        id: `call_${requests.length}`,
+                        type: 'function',
+                        function: { name: 'web_fetch', arguments: '{"url":"https://www.baidu.com"}' },
+                      }],
+                    },
+                  }],
+                },
+              ]);
+            }
+
+            return createOpenAIStream([
+              { choices: [{ delta: { content: 'Baidu is a Chinese search engine.' } }] },
+            ]);
+          },
+        },
+      },
+    },
+  });
+
+  const chunks = [];
+  for await (const chunk of provider.stream({ prompt: 'webfetch baidu.com', toolRegistry: registry, maxToolTurns: 5 })) {
+    chunks.push(chunk);
+  }
+
+  assert.equal(executions, 1);
+  assert.equal(requests.length, 3);
+  assert.equal(requests[2].tool_choice, 'none');
+  assert.equal(chunks.filter((chunk) => chunk.type === 'tool_start').length, 1);
+  assert.equal(chunks.filter((chunk) => chunk.type === 'tool_result').length, 1);
+  assert.equal(chunks.at(-1).type, 'text');
+  assert.equal(chunks.at(-1).delta, 'Baidu is a Chinese search engine.');
+
+  const secondRequestToolMessage = requests[1].messages.find((message) => message.role === 'tool');
+  assert.ok(secondRequestToolMessage);
+  assert.equal(secondRequestToolMessage.tool_call_id, 'call_1');
+  assert.match(secondRequestToolMessage.content, /Baidu home page/);
+});
+
+function createOpenAIStream(events) {
+  return {
+    async *[Symbol.asyncIterator]() {
+      for (const event of events) {
+        yield event;
+      }
+    },
+  };
+}
 
 function createMessageStream(events, finalMessage) {
   return {

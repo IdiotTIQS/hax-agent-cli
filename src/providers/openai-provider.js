@@ -27,6 +27,7 @@ const DEFAULT_SYSTEM_PROMPT = [
   "- Use shell.run only for allowlisted commands, with arguments passed in args rather than shell strings.",
   "- Before writing a file, read the existing file when it exists, then write complete updated content.",
   "- After making changes, verify correctness by reading back the modified file or running tests.",
+  "- When a tool returns data (like web.fetch or web.search), use that data to answer the user. Do NOT call the same tool again.",
   "",
   "# Code Quality Standards",
   "- Write clean, readable, and well-structured code.",
@@ -113,10 +114,15 @@ class OpenAIProvider extends ChatProvider {
     const repeatedInvalidNotices = new Map();
     const toolCallCounts = new Map();
     const lastToolName = { current: null };
+    let forceTextResponse = false;
 
     for (let turn = 0; turn < maxToolTurns; turn += 1) {
+      const requestPayload = this.createRequest({ ...request, messages });
+      if (forceTextResponse) {
+        requestPayload.tool_choice = "none";
+      }
       const response = await this.client.chat.completions.create({
-        ...this.createRequest({ ...request, messages }),
+        ...requestPayload,
         stream: true,
       }, createRequestOptions(request));
 
@@ -129,13 +135,19 @@ class OpenAIProvider extends ChatProvider {
       const stream = response;
 
       let fullContent = "";
+      let reasoningContent = "";
       let toolCalls = [];
 
       for await (const chunk of stream) {
         const delta = chunk.choices?.[0]?.delta;
+        if (delta?.reasoning_content) {
+          reasoningContent += delta.reasoning_content;
+        }
         if (delta?.content) {
           fullContent += delta.content;
-          yield createTextChunk(delta.content);
+          if (!forceTextResponse) {
+            yield createTextChunk(delta.content);
+          }
         }
         if (delta?.tool_calls) {
           for (const tc of delta.tool_calls) {
@@ -178,11 +190,31 @@ class OpenAIProvider extends ChatProvider {
         })) : undefined,
       };
 
-      messages.push(message);
+      if (reasoningContent) {
+        message.reasoning_content = reasoningContent;
+      }
 
-      if (!toolRegistry || toolCalls.length === 0) {
+      if (forceTextResponse || !toolRegistry || toolCalls.length === 0) {
+        if (forceTextResponse && fullContent) {
+          const cleanContent = fullContent.replace(/<｜｜DSML｜｜[\s\S]*?<\/｜｜DSML｜｜tool_calls>/g, '').trim();
+          if (cleanContent) {
+            yield createTextChunk(cleanContent);
+          }
+        }
+        messages.push(message);
         return;
       }
+
+      if (toolCalls.some((toolCall) => toolRegistry.hasSingleCallResult?.(toRegistryToolName(toolCall.function.name)))) {
+        forceTextResponse = true;
+        messages.push({
+          role: "user",
+          content: "Use the previous tool result to answer the user's request now in natural language. Do not call tools and do not output tool-call markup or DSML/XML tags.",
+        });
+        continue;
+      }
+
+      messages.push(message);
 
       const toolResults = [];
       for (const toolCall of toolCalls) {
@@ -241,10 +273,16 @@ class OpenAIProvider extends ChatProvider {
           invalidToolCalls.delete(callSignature);
         }
 
-        toolResults.push(createToolResultBlock(toolCall.id, isError, JSON.stringify(result, null, 2)));
+        const resultForModel = { ...result };
+        delete resultForModel.repeatedSingleCall;
+        toolResults.push(createToolResultBlock(toolCall.id, isError, JSON.stringify(resultForModel, null, 2)));
+
+        if (result.repeatedSingleCall) {
+          forceTextResponse = true;
+        }
       }
 
-      messages.push({ role: "tool", tool_results: toolResults });
+      messages.push(...toolResults);
     }
 
     yield createToolLimitChunk(maxToolTurns);
@@ -301,7 +339,7 @@ class OpenAIProvider extends ChatProvider {
         toolResults.push(createToolResultBlock(toolCall.id, result.ok !== true, JSON.stringify(result, null, 2)));
       }
 
-      messages.push({ role: "tool", tool_results: toolResults });
+      messages.push(...toolResults);
     }
 
     throw new Error("Tool turn limit reached before the task was completed. Please ask me to continue.");
@@ -375,10 +413,34 @@ function toOpenAIMessages(input, systemPrompt) {
       continue;
     }
 
-    if (message.role === "user" || message.role === "assistant") {
+    if (message.role === "user") {
       result.push({
-        role: message.role,
+        role: "user",
         content: Array.isArray(message.content) ? message.content : (message.content || ""),
+      });
+      continue;
+    }
+
+    if (message.role === "assistant") {
+      const assistantMessage = {
+        role: "assistant",
+        content: Array.isArray(message.content) ? message.content : (message.content || null),
+      };
+      if (Array.isArray(message.tool_calls) && message.tool_calls.length > 0) {
+        assistantMessage.tool_calls = message.tool_calls;
+      }
+      if (message.reasoning_content) {
+        assistantMessage.reasoning_content = message.reasoning_content;
+      }
+      result.push(assistantMessage);
+      continue;
+    }
+
+    if (message.role === "tool") {
+      result.push({
+        role: "tool",
+        tool_call_id: message.tool_call_id,
+        content: typeof message.content === "string" ? message.content : JSON.stringify(message.content),
       });
     }
   }

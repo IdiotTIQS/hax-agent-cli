@@ -16,10 +16,14 @@ class ToolExecutionError extends Error {
   }
 }
 
+const SINGLE_CALL_TOOLS = new Set(['web.fetch', 'web.search', 'file.readDirectory']);
+
 class ToolRegistry {
   constructor(options = {}) {
     this.root = path.resolve(options.root || process.cwd());
     this.tools = new Map();
+    this._singleCallUsed = new Set();
+    this._singleCallResults = new Map();
   }
 
   register(tool) {
@@ -57,12 +61,35 @@ class ToolRegistry {
     }));
   }
 
+  resetSingleCallTracking() {
+    this._singleCallUsed.clear();
+    this._singleCallResults.clear();
+  }
+
+  hasSingleCallResult(name) {
+    return SINGLE_CALL_TOOLS.has(name) && this._singleCallUsed.has(name);
+  }
+
   async execute(name, args = {}, context = {}) {
     const startedAt = Date.now();
 
     try {
       if (!isNonEmptyString(name)) {
         throw new ToolExecutionError('INVALID_TOOL_NAME', 'Tool name must be a non-empty string.');
+      }
+
+      if (SINGLE_CALL_TOOLS.has(name) && this._singleCallUsed.has(name)) {
+        const cachedResult = this._singleCallResults.get(name);
+        if (cachedResult) {
+          const serialized = serializeToolResult({
+            toolName: name,
+            ok: true,
+            data: cachedResult,
+            durationMs: 0,
+          });
+          serialized.repeatedSingleCall = true;
+          return serialized;
+        }
       }
 
       assertPlainObject(args, 'Tool arguments');
@@ -77,6 +104,11 @@ class ToolRegistry {
         root: this.root,
         registry: this,
       });
+
+      if (SINGLE_CALL_TOOLS.has(name)) {
+        this._singleCallUsed.add(name);
+        this._singleCallResults.set(name, data);
+      }
 
       return serializeToolResult({
         toolName: name,
@@ -430,7 +462,7 @@ function createWebFetchTool() {
             contentType: 'text/html',
             content: plainText,
             truncated: bodyTruncated,
-            note: 'WEB FETCH COMPLETE. Do NOT call web.fetch again unless the user explicitly requests another URL. Use the content above to answer the user.',
+            note: 'FETCH COMPLETE. You now have the content. STOP calling tools. Write your response to the user now using this content. Do NOT call web.fetch, web.search, or file.readDirectory again.',
           };
         } catch (error) {
           lastError = error;
@@ -575,6 +607,7 @@ function createWebSearchTool() {
         query,
         results,
         resultCount: results.length,
+        note: 'SEARCH COMPLETE. You now have the search results. STOP calling tools. Write your response to the user now using these results. Do NOT call web.fetch, web.search, or file.readDirectory again.',
       };
     },
   };
@@ -781,6 +814,7 @@ function createReadDirectoryTool() {
         truncated,
         recursive,
         entryCount: listedEntries.length,
+        note: 'DIRECTORY LISTING COMPLETE. You now have the directory contents. Use this information to answer the user. Do NOT call file.readDirectory again for the same or parent directories.',
       };
     },
   };

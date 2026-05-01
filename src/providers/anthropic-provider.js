@@ -27,6 +27,7 @@ const DEFAULT_SYSTEM_PROMPT = [
   "- Use shell.run only for allowlisted commands, with arguments passed in args rather than shell strings.",
   "- Before writing a file, read the existing file when it exists, then write complete updated content.",
   "- After making changes, verify correctness by reading back the modified file or running tests.",
+  "- When a tool returns data (like web.fetch or web.search), use that data to answer the user. Do NOT call the same tool again.",
   "",
   "# Code Quality Standards",
   "- Write clean, readable, and well-structured code.",
@@ -113,32 +114,72 @@ class AnthropicProvider extends ChatProvider {
     const repeatedInvalidNotices = new Map();
     const toolCallCounts = new Map();
     const lastToolName = { current: null };
+    let forceTextResponse = false;
 
     for (let turn = 0; turn < maxToolTurns; turn += 1) {
-      const stream = this.client.messages.stream(this.createRequest({
+      const requestPayload = this.createRequest({
         ...request,
         messages,
-      }), createRequestOptions(request));
+      });
+      if (forceTextResponse) {
+        requestPayload.tool_choice = { type: "none" };
+      }
+      const stream = this.client.messages.stream(requestPayload, createRequestOptions(request));
+
+      let bufferedText = "";
+      let hasDsmContent = false;
 
       for await (const event of stream) {
-        const chunk = createStreamChunk(event);
-        if (chunk) {
-          yield chunk;
+        if (event.type === "content_block_delta" && event.delta?.type === "text_delta") {
+          bufferedText += event.delta.text;
+        } else if (event.type === "content_block_delta" && (event.delta?.type === "thinking_delta" || event.delta?.type === "signature_delta")) {
+          yield createThinkingChunk();
         }
       }
 
       const response = typeof stream.finalMessage === "function" ? await stream.finalMessage() : null;
       if (!response) {
+        if (bufferedText) {
+          yield createTextChunk(bufferedText);
+        }
         return;
       }
 
       const toolUses = extractToolUses(response.content);
+      const isDsm = toolUses.some((u) => String(u.id).startsWith("dsml_"));
 
-      if (!toolRegistry || toolUses.length === 0) {
+      if (isDsm) {
+        hasDsmContent = true;
+        const cleanText = bufferedText.replace(/<\uFF5C\uFF5CDSML\uFF5C\uFF5C[\s\S]*?<\/\uFF5C\uFF5CDSML\uFF5C\uFF5Ctool_calls>/g, "").trim();
+        if (cleanText) {
+          yield createTextChunk(cleanText);
+        }
+      } else if (bufferedText) {
+        yield createTextChunk(bufferedText);
+      }
+
+      if (forceTextResponse || !toolRegistry || toolUses.length === 0) {
         return;
       }
 
-      messages.push({ role: "assistant", content: response.content });
+      if (toolUses.some((toolUse) => toolRegistry.hasSingleCallResult?.(toRegistryToolName(toolUse.name)))) {
+        forceTextResponse = true;
+        messages.push({
+          role: "user",
+          content: "Use the previous tool result to answer the user's request now in natural language. Do not call tools and do not output tool-call markup or XML tags.",
+        });
+        continue;
+      }
+
+      if (isDsm) {
+        const textWithoutDsm = bufferedText.replace(/<\uFF5C\uFF5CDSML\uFF5C\uFF5C[\s\S]*?<\/\uFF5C\uFF5CDSML\uFF5C\uFF5Ctool_calls>/g, "").trim();
+        messages.push({
+          role: "assistant",
+          content: textWithoutDsm || "I'll use the available tools to help you.",
+        });
+      } else {
+        messages.push({ role: "assistant", content: response.content });
+      }
 
       const toolResults = [];
       for (const toolUse of toolUses) {
@@ -186,7 +227,8 @@ class AnthropicProvider extends ChatProvider {
         }
 
         yield createToolStartChunk(toolName, toolInput, { attempt, turn: turn + 1 });
-        const toolResult = await executeToolUse(toolRegistry, toolUse);
+        const registryResult = await toolRegistry.execute(toolName, toolInput, { root: process.cwd() });
+        const toolResult = createToolResultBlock(toolUse.id, registryResult);
         const toolError = extractToolError(toolResult);
         const parsedToolResult = parseToolResultContent(toolResult);
         yield createToolResultChunk(toolName, toolResult.is_error, toolError, {
@@ -204,13 +246,30 @@ class AnthropicProvider extends ChatProvider {
           invalidToolCalls.delete(callSignature);
         }
 
-        toolResults.push(toolResult);
+        if (registryResult.repeatedSingleCall) {
+          forceTextResponse = true;
+        }
+        delete registryResult.repeatedSingleCall;
+
+        if (isDsm) {
+          toolResults.push({ toolName, isError: toolResult.is_error, content: toolResult.content });
+        } else {
+          toolResults.push(toolResult);
+        }
       }
 
-      messages.push({
-        role: "user",
-        content: toolResults,
-      });
+      if (isDsm) {
+        const resultTexts = toolResults.map((r) => `[Tool: ${r.toolName || "unknown"}] ${r.is_error ? "Error" : "Result"}: ${r.content}`);
+        messages.push({
+          role: "user",
+          content: resultTexts.join("\n\n"),
+        });
+      } else {
+        messages.push({
+          role: "user",
+          content: toolResults,
+        });
+      }
     }
 
     yield createToolLimitChunk(maxToolTurns);
@@ -357,11 +416,54 @@ function toRegistryToolName(name) {
 }
 
 function extractToolUses(content) {
-  if (!Array.isArray(content)) {
+  if (Array.isArray(content)) {
+    const nativeUses = content.filter((block) => block?.type === "tool_use" && block.id && block.name);
+    if (nativeUses.length > 0) {
+      return nativeUses;
+    }
+  }
+
+  const text = Array.isArray(content)
+    ? content.filter((block) => block?.type === "text").map((block) => block.text || "").join("")
+    : "";
+
+  const dsmlCalls = parseDsmToolCalls(text);
+  if (dsmlCalls.length > 0) {
+    return dsmlCalls.map((call, index) => ({
+      type: "tool_use",
+      id: `dsml_${Date.now()}_${index}`,
+      name: call.name,
+      input: call.parameters,
+    }));
+  }
+
+  return [];
+}
+
+function parseDsmToolCalls(text) {
+  if (!text || typeof text !== "string") {
     return [];
   }
 
-  return content.filter((block) => block?.type === "tool_use" && block.id && block.name);
+  const calls = [];
+  const callPattern = /<\uFF5C\uFF5CDSML\uFF5C\uFF5Cinvoke\s+name="([^"]+)"[^>]*>([\s\S]*?)<\/\uFF5C\uFF5CDSML\uFF5C\uFF5Cinvoke>/g;
+  let callMatch;
+
+  while ((callMatch = callPattern.exec(text)) !== null) {
+    const name = callMatch[1];
+    const body = callMatch[2];
+    const parameters = {};
+    const paramPattern = /<\uFF5C\uFF5CDSML\uFF5C\uFF5Cparameter\s+name="([^"]+)"[^>]*>([\s\S]*?)<\/\uFF5C\uFF5CDSML\uFF5C\uFF5Cparameter>/g;
+    let paramMatch;
+
+    while ((paramMatch = paramPattern.exec(body)) !== null) {
+      parameters[paramMatch[1]] = paramMatch[2];
+    }
+
+    calls.push({ name, parameters });
+  }
+
+  return calls;
 }
 
 async function executeToolUse(toolRegistry, toolUse) {

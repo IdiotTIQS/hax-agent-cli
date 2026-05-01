@@ -14,7 +14,7 @@ const { registerAgentTeamTools } = require('./teams/tools');
 const { loadAllSkills, createSkillifySkill, recordSkillUsage } = require('./skills');
 const { buildSkillSystemPrompt, matchSkillByIntent, getSkillsForSession } = require('./skills/intent-matcher');
 
-const VERSION = '1.3.0';
+const VERSION = '1.3.1';
 
 const ANSI = {
   reset: '\x1B[0m',
@@ -1225,6 +1225,7 @@ async function handleChatMessage(content, { screen, session, markdown }) {
   const renderer = new ResponseRenderer(screen, markdown);
   let assistantText = '';
 
+  session.toolRegistry.resetSingleCallTracking();
   session.messages.push(userMessage);
   session.isStreaming = true;
   session.responseInterrupted = false;

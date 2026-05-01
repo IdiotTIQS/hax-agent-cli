@@ -27,6 +27,7 @@ const DEFAULT_SYSTEM_PROMPT = [
   "- Use shell.run only for allowlisted commands, with arguments passed in args rather than shell strings.",
   "- Before writing a file, read the existing file when it exists, then write complete updated content.",
   "- After making changes, verify correctness by reading back the modified file or running tests.",
+  "- When a tool returns data (like web.fetch or web.search), use that data to answer the user. Do NOT call the same tool again.",
   "",
   "# Code Quality Standards",
   "- Write clean, readable, and well-structured code.",
@@ -108,17 +109,26 @@ class GoogleProvider extends ChatProvider {
     const repeatedInvalidNotices = new Map();
     const toolCallCounts = new Map();
     const lastToolName = { current: null };
+    let forceTextResponse = false;
     let chatHistory = [];
 
     for (let turn = 0; turn < maxToolTurns; turn += 1) {
-      const model = this.client.getGenerativeModel({
+      const modelConfig = {
         model: request.model || this.model,
         tools: createGoogleTools(request.toolRegistry),
         systemInstruction: createSystemPrompt(request.system),
         generationConfig: {
           maxOutputTokens: parsePositiveNumber(request.maxTokens, this.maxTokens),
         },
-      });
+      };
+      if (forceTextResponse) {
+        modelConfig.toolConfig = {
+          functionCallingConfig: {
+            mode: "NONE",
+          },
+        };
+      }
+      const model = this.client.getGenerativeModel(modelConfig);
 
       const response = await model.generateContentStream({
         contents: [...contents, ...chatHistory],
@@ -139,8 +149,17 @@ class GoogleProvider extends ChatProvider {
         }
       }
 
-      if (!toolRegistry || functionCalls.length === 0) {
+      if (forceTextResponse || !toolRegistry || functionCalls.length === 0) {
         return;
+      }
+
+      if (functionCalls.some((fc) => toolRegistry.hasSingleCallResult?.(toRegistryToolName(fc.name)))) {
+        forceTextResponse = true;
+        chatHistory.push({
+          role: "user",
+          parts: [{ text: "Use the previous tool result to answer the user's request now in natural language. Do not call tools and do not output tool-call markup or XML tags." }],
+        });
+        continue;
       }
 
       if (functionCalls.length > 0) {
@@ -170,6 +189,7 @@ class GoogleProvider extends ChatProvider {
       for (const fc of functionCalls) {
         const toolName = toRegistryToolName(fc.name);
         const toolInput = fc.args || {};
+
         const callSignature = `${toolName}:${JSON.stringify(toolInput)}`;
         const failedCount = invalidToolCalls.get(callSignature) || 0;
         const attempt = failedCount + 1;
@@ -221,12 +241,18 @@ class GoogleProvider extends ChatProvider {
           invalidToolCalls.delete(callSignature);
         }
 
+        const resultForModel = { ...result };
+        delete resultForModel.repeatedSingleCall;
         functionResponses.push({
           functionResponse: {
             name: fc.name,
-            response: { result: JSON.stringify(result, null, 2) },
+            response: { result: JSON.stringify(resultForModel, null, 2) },
           },
         });
+
+        if (result.repeatedSingleCall) {
+          forceTextResponse = true;
+        }
       }
 
       chatHistory.push({
