@@ -11,9 +11,10 @@ const { formatAgentList, formatMessages, formatRunResult, formatTeamList, format
 const { PERMISSION_LABELS } = require('./permissions');
 const {
   THEME, TerminalScreen, MarkdownRenderer, ResponseRenderer,
-  formatProviderError, VERSION, CLAUDE_BANNER, ANSI,
+  formatProviderError, VERSION, CLAUDE_BANNER, ANSI, styled,
 } = require('./renderer');
 const { Session, CostTracker } = require('./session');
+const { checkForUpdate, performUpdate, restartProcess } = require('./updater');
 
 const SLASH_COMMANDS = [
   { name: 'help', description: 'Show available commands and shortcuts', aliases: ['h', '?'] },
@@ -39,6 +40,7 @@ const SLASH_COMMANDS = [
   { name: 'vim', description: 'Toggle vim keybindings mode', aliases: [] },
   { name: 'memory', description: 'Manage agent memory', aliases: [], argHint: '[list|read|write|delete] [name]' },
   { name: 'permissions', description: 'View or manage tool permission levels', aliases: ['perm'], argHint: '[status|mode <auto|ask|yolo>|reset]' },
+  { name: 'update', description: 'Check for CLI updates', aliases: [] },
 ];
 
 let themeEnabled = true;
@@ -301,6 +303,7 @@ async function handleSlashCommand(line, context) {
     case 'vim': toggleVim(context); break;
     case 'memory': handleMemoryCommand(args, context); break;
     case 'permissions': handlePermissionsCommand(args, context); break;
+    case 'update': await handleUpdateCheck(context); break;
     default:
       context.screen.write(`${THEME.error}Command not implemented: /${command.name}${ANSI.reset || ''}\n`);
   }
@@ -1002,6 +1005,38 @@ function resolveModelSelection(selection, models) {
 
 function persistAgentSettings(agentSettings) {
   updateUserSettings({ agent: agentSettings });
+}
+
+async function handleUpdateCheck({ screen }) {
+  screen.write(`${THEME.dim}Checking for updates...${ANSI.reset || ''}\n`);
+
+  const result = await checkForUpdate(VERSION, { force: true });
+
+  if (result.error && !result.latestVersion) {
+    screen.write(`${THEME.error}Failed to check for updates: ${result.error}${ANSI.reset || ''}\n`);
+    return;
+  }
+
+  if (!result.hasUpdate) {
+    screen.write(`${styled(THEME.success, `✔ You're on the latest version (v${result.currentVersion})`)}\n\n`);
+    return;
+  }
+
+  screen.write(
+    `${styled(THEME.warning, `⬆ New version available: v${result.currentVersion} → v${result.latestVersion}`)}\n` +
+    `${styled(THEME.dim, '  Updating...')}\n`
+  );
+
+  try {
+    await performUpdate();
+    screen.write(`${styled(THEME.success, '  ✔ Update complete. Restarting...')}\n\n`);
+    setTimeout(() => restartProcess(), 500);
+  } catch (err) {
+    screen.write(
+      `${styled(THEME.error, `  ✖ Update failed: ${err.message}`)}\n` +
+      `${styled(THEME.dim, '  Run manually: npm install -g hax-agent-cli')}\n\n`
+    );
+  }
 }
 
 module.exports = {

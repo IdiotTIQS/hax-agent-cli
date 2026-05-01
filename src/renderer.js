@@ -106,7 +106,7 @@ const SPINNER_VERBS = [
   'Evaluating', 'Generating', 'Considering', 'Examining', 'Planning',
 ];
 
-const VERSION = '1.3.2';
+const VERSION = '1.3.3';
 
 const CLAUDE_BANNER = [
   '',

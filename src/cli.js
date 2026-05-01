@@ -12,8 +12,9 @@ const { loadAllSkills, createSkillifySkill, recordSkillUsage } = require('./skil
 const { PermissionManager, PermissionLevel, PERMISSION_LABELS } = require('./permissions');
 const { Session, InputHistory } = require('./session');
 const { THEME, ANSI, TerminalScreen, MarkdownRenderer, stripAnsi, styled } = require('./renderer');
+const { checkForUpdate, performUpdate, restartProcess, wasRestarted } = require('./updater');
 
-const VERSION = '1.3.2';
+const VERSION = '1.3.3';
 
 const KNOWN_COMMANDS = ['chat', 'models', 'agents', 'team', 'resume', 'sessions', 'help', '--help', '-h'];
 
@@ -389,6 +390,27 @@ async function runShell(args, explicitSession) {
 
   renderStatusLine(screen, session);
   rl.prompt();
+
+  checkForUpdate(VERSION).then(async (result) => {
+    if (!result.hasUpdate) return;
+
+    screen.write(
+      `\n${styled(THEME.warning, `⬆ New version available: v${result.currentVersion} → v${result.latestVersion}`)}\n` +
+      `${styled(THEME.dim, '  Auto-updating...')}\n`
+    );
+
+    try {
+      await performUpdate();
+      screen.write(`${styled(THEME.success, '  ✔ Update complete. Restarting...')}\n\n`);
+      setTimeout(() => restartProcess(), 500);
+    } catch (err) {
+      screen.write(
+        `${styled(THEME.error, `  ✖ Auto-update failed: ${err.message}`)}\n` +
+        `${styled(THEME.dim, '  Run manually: npm install -g hax-agent-cli')}\n\n`
+      );
+      rl.prompt();
+    }
+  }).catch(() => {});
 
   let pendingExitCount = 0;
   let lineQueue = Promise.resolve();
