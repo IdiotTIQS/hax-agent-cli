@@ -2,6 +2,7 @@
 
 const readline = require('node:readline');
 const path = require('node:path');
+const { spawn } = require('node:child_process');
 const { createProvider } = require('./providers');
 const { loadSettings } = require('./config');
 const { loadRecentTranscript, handleChatMessage, renderBanner, renderStatusLine, handleSlashCommand } = require('./slash-commands');
@@ -456,12 +457,39 @@ async function runShell(args, explicitSession) {
 
     if (trimmed.startsWith('!')) {
       const shellLine = trimmed.slice(1).trim();
-      screen.clearLine();
-      screen.write(trimmed + '\n');
+      if (!shellLine) {
+        rl.prompt();
+        return;
+      }
 
-      await handleChatMessage(shellLine, { screen, session, markdown });
-      renderStatusLine(screen, session);
-      rl.prompt();
+      screen.clearLine();
+      screen.write(`${THEME.shellIndicator}!${shellLine}${stripAnsi(THEME.ANSI?.reset || '')}\n`);
+
+      const isWindows = process.platform === 'win32';
+      const shell = isWindows ? 'powershell.exe' : '/bin/bash';
+      const shellArgs = isWindows ? ['-Command', shellLine] : ['-c', shellLine];
+
+      const child = spawn(shell, shellArgs, {
+        stdio: 'inherit',
+        cwd: process.cwd(),
+      });
+
+      await new Promise((resolve) => {
+        child.on('close', (code) => {
+          if (code !== 0) {
+            screen.write(`${THEME.warning}Exit code: ${code}${stripAnsi(THEME.ANSI?.reset || '')}\n`);
+          }
+          renderStatusLine(screen, session);
+          rl.prompt();
+          resolve();
+        });
+        child.on('error', (err) => {
+          screen.write(`${THEME.error}Command error: ${err.message}${stripAnsi(THEME.ANSI?.reset || '')}\n`);
+          renderStatusLine(screen, session);
+          rl.prompt();
+          resolve();
+        });
+      });
       return;
     }
 

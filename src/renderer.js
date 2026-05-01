@@ -95,6 +95,7 @@ const THEME = {
   border: ANSI.dim,
   badge: ANSI.bgBrightBlack + ANSI.brightWhite,
   skillIndicator: ANSI.brightGreen + ANSI.bold,
+  shellIndicator: ANSI.brightYellow,
 };
 
 const SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];

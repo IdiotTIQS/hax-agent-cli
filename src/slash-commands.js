@@ -324,7 +324,7 @@ function showShellHelp({ screen }) {
   screen.write(`${borderLine}\n`);
   screen.write(`  ${THEME.promptPrefix}Ctrl+C${ANSI.reset || ''}       ${THEME.dim}Interrupt or exit${ANSI.reset || ''}\n`);
   screen.write(`  ${THEME.promptPrefix}Ctrl+L${ANSI.reset || ''}       ${THEME.dim}Clear screen${ANSI.reset || ''}\n`);
-  screen.write(`  ${THEME.promptPrefix}�?/ �?{ANSI.reset || ''}         ${THEME.dim}Navigate input history${ANSI.reset || ''}\n`);
+  screen.write(`  ${THEME.promptPrefix}\u2191/\u2193${ANSI.reset || ''}         ${THEME.dim}Navigate input history${ANSI.reset || ''}\n`);
   screen.write(`  ${THEME.promptPrefix}Shift+Tab${ANSI.reset || ''}     ${THEME.dim}Cycle permission mode${ANSI.reset || ''}\n`);
   screen.write(`  ${THEME.promptPrefix}!command${ANSI.reset || ''}      ${THEME.dim}Run a shell command directly${ANSI.reset || ''}\n`);
   screen.write('\n');
