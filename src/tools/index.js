@@ -2,6 +2,7 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
 const { URL } = require('node:url');
+const { PermissionManager } = require('../permissions');
 
 const DEFAULT_MAX_FILE_BYTES = 1024 * 1024;
 const DEFAULT_MAX_RESULTS = 1000;
@@ -24,6 +25,8 @@ class ToolRegistry {
     this.tools = new Map();
     this._singleCallUsed = new Set();
     this._singleCallResults = new Map();
+    this.permissionManager = options.permissionManager || new PermissionManager();
+    this.approvalCallback = options.approvalCallback || null;
   }
 
   register(tool) {
@@ -97,6 +100,18 @@ class ToolRegistry {
 
       if (!tool) {
         throw new ToolExecutionError('TOOL_NOT_FOUND', `Tool "${name}" is not registered.`);
+      }
+
+      const permissionResult = await this.permissionManager.checkPermission(
+        name, args, this.approvalCallback,
+      );
+
+      if (!permissionResult.approved) {
+        throw new ToolExecutionError(
+          'PERMISSION_DENIED',
+          `操作被拒绝: ${permissionResult.reason}`,
+          { level: permissionResult.level, toolName: name },
+        );
       }
 
       const data = await tool.execute(args, {
@@ -1157,13 +1172,41 @@ function assertCommandAllowed(command, policy) {
   }
 }
 
-function runCommand(options) {
+const _winCommandCache = new Map();
+
+function resolveWindowsCommand(command) {
+  if (process.platform !== 'win32') return Promise.resolve(command);
+  if (path.isAbsolute(command)) return Promise.resolve(command);
+  if (command.includes('/') || command.includes('\\')) return Promise.resolve(command);
+
+  const cached = _winCommandCache.get(command);
+  if (cached !== undefined) return Promise.resolve(cached);
+
+  return new Promise((resolve) => {
+    const child = spawn('where', [command], { shell: true, windowsHide: true });
+    let stdout = '';
+    child.stdout.on('data', (d) => { stdout += d; });
+    child.on('close', (code) => {
+      const resolved = code === 0 ? stdout.trim().split(/\r?\n/)[0].trim() : command;
+      _winCommandCache.set(command, resolved);
+      resolve(resolved);
+    });
+    child.on('error', () => {
+      _winCommandCache.set(command, command);
+      resolve(command);
+    });
+  });
+}
+
+async function runCommand(options) {
+  const resolvedCommand = await resolveWindowsCommand(options.command);
+
   return new Promise((resolve, reject) => {
     let stdout = '';
     let stderr = '';
     let timedOut = false;
     let outputExceeded = false;
-    const child = spawn(options.command, options.args, {
+    const child = spawn(resolvedCommand, options.args, {
       cwd: options.cwd,
       env: options.env,
       shell: false,

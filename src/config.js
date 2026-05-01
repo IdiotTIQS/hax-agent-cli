@@ -26,6 +26,9 @@ const DEFAULT_SETTINGS = Object.freeze({
     includeTranscript: true,
     maxTranscriptMessages: 20,
   },
+  permissions: {
+    mode: 'normal',
+  },
   tools: {
     shell: {
       enabled: true,
@@ -33,6 +36,7 @@ const DEFAULT_SETTINGS = Object.freeze({
         'node', 'npm', 'npx', 'yarn', 'pnpm', 'bun',
         'git', 'gh',
         'ls', 'dir', 'cat', 'type', 'echo', 'head', 'tail', 'wc', 'pwd', 'whoami', 'hostname',
+        'which', 'where', 'file', 'stat',
         'mkdir', 'rm', 'cp', 'mv', 'touch', 'rmdir',
         'find', 'grep', 'rg', 'ag',
         'curl', 'wget',
@@ -150,6 +154,7 @@ function readEnvOverrides(env = process.env) {
   setIfDefined(overrides, ['prompts', 'includeMemory'], parseBooleanEnv(env, 'HAX_AGENT_INCLUDE_MEMORY'));
   setIfDefined(overrides, ['prompts', 'includeTranscript'], parseBooleanEnv(env, 'HAX_AGENT_INCLUDE_TRANSCRIPT'));
   setIfDefined(overrides, ['prompts', 'maxTranscriptMessages'], parseNumberEnv(env, 'HAX_AGENT_MAX_TRANSCRIPT_MESSAGES'));
+  setIfDefined(overrides, ['permissions', 'mode'], env.HAX_AGENT_PERMISSIONS_MODE);
   setIfDefined(overrides, ['tools', 'shell', 'enabled'], parseBooleanEnv(env, 'HAX_AGENT_SHELL_ENABLED'));
   setIfDefined(overrides, ['tools', 'shell', 'allowedCommands'], parseListEnv(env, 'HAX_AGENT_SHELL_COMMANDS'));
   setIfDefined(overrides, ['tools', 'shell', 'timeoutMs'], parseNumberEnv(env, 'HAX_AGENT_SHELL_TIMEOUT_MS'));

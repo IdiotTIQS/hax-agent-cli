@@ -12,6 +12,7 @@ const { formatAgentList, formatMessages, formatRunResult, formatTeamList, format
 const { createLocalToolRegistry } = require('./tools');
 const { registerAgentTeamTools } = require('./teams/tools');
 const { loadAllSkills, createSkillifySkill, recordSkillUsage } = require('./skills');
+const { PermissionManager, PermissionLevel, PERMISSION_LABELS, getToolPermission, formatToolDescription } = require('./permissions');
 const { buildSkillSystemPrompt, matchSkillByIntent, getSkillsForSession } = require('./skills/intent-matcher');
 
 const VERSION = '1.3.1';
@@ -155,6 +156,7 @@ const SLASH_COMMANDS = [
   { name: 'theme', description: 'Toggle color theme', aliases: [] },
   { name: 'vim', description: 'Toggle vim keybindings mode', aliases: [] },
   { name: 'memory', description: 'Manage agent memory', aliases: [], argHint: '[list|read|write|delete] [name]' },
+  { name: 'permissions', description: 'View or manage tool permission levels', aliases: ['perm'], argHint: '[status|mode <auto|ask|yolo>|reset]' },
 ];
 
 const AGENTS = [
@@ -950,6 +952,7 @@ class Session {
     this.provider = options.provider;
     this.settings = options.settings;
     this.toolRegistry = options.toolRegistry;
+    this.permissionManager = options.permissionManager || null;
     this.costTracker = new CostTracker();
     this.shouldExit = false;
     this.isStreaming = false;
@@ -974,7 +977,16 @@ class Session {
     const cost = this.costTracker.getCost(model);
     const turns = this.costTracker.turnCount;
     const elapsed = this.getElapsedTime();
-    return `${THEME.dim}${provider}${ANSI.reset} · ${THEME.dim}${model}${ANSI.reset} · ${THEME.cost}$${cost.toFixed(4)}${ANSI.reset} · ${THEME.dim}${turns} turns${ANSI.reset} · ${THEME.dim}${elapsed}${ANSI.reset}`;
+    
+    let permMode = '';
+    if (this.permissionManager) {
+      const mode = this.permissionManager.mode;
+      const modeLabel = mode === 'yolo' ? 'YOLO' : '标准';
+      const modeColor = mode === 'yolo' ? THEME.warning : THEME.success;
+      permMode = ` · ${modeColor}${modeLabel}${ANSI.reset}`;
+    }
+    
+    return `${THEME.dim}${provider}${ANSI.reset} · ${THEME.dim}${model}${ANSI.reset} · ${THEME.cost}$${cost.toFixed(4)}${ANSI.reset} · ${THEME.dim}${turns} turns${ANSI.reset} · ${THEME.dim}${elapsed}${ANSI.reset}${permMode}`;
   }
 }
 
@@ -1016,9 +1028,16 @@ async function runShell(args) {
   const provider = createProvider(settings.agent, process.env);
   const screen = new TerminalScreen();
   const markdown = new MarkdownRenderer(screen.columns);
-  const toolRegistry = createLocalToolRegistry({ root: process.cwd(), shellPolicy: settings.tools?.shell });
+  const permissionManager = new PermissionManager({
+    mode: args.includes('--yolo') ? 'yolo' : (settings.permissions?.mode || 'normal'),
+  });
+  const toolRegistry = createLocalToolRegistry({
+    root: process.cwd(),
+    shellPolicy: settings.tools?.shell,
+    permissionManager,
+  });
   registerAgentTeamTools(toolRegistry, { settings, projectRoot: process.cwd() });
-  const session = new Session({ provider, settings, toolRegistry });
+  const session = new Session({ provider, settings, toolRegistry, permissionManager });
 
   if (!screen.isTTY()) {
     await runNonInteractiveShell(session, screen, markdown);
@@ -1040,10 +1059,78 @@ async function runShell(args) {
 
   rl.setPrompt(`${THEME.promptPrefix}>${ANSI.reset} `);
 
+  function createApprovalPrompt() {
+    return ({ toolName, toolArgs, level, description }) => {
+      return new Promise((resolve) => {
+        const levelLabel = PERMISSION_LABELS[level] || level;
+        const levelColor = level === PermissionLevel.DANGEROUS ? THEME.error
+          : level === PermissionLevel.ASK ? THEME.warning : THEME.success;
+
+        screen.write(`\n${levelColor}╭─ 权限请求 ─────────────────────────────────╮${ANSI.reset}\n`);
+        screen.write(`${levelColor}│${ANSI.reset}  级别: ${levelColor}${levelLabel}${ANSI.reset}\n`);
+        screen.write(`${levelColor}│${ANSI.reset}  操作: ${THEME.bold}${toolName}${ANSI.reset}\n`);
+
+        const descLines = description.split('\n');
+        for (const line of descLines) {
+          screen.write(`${levelColor}│${ANSI.reset}  ${THEME.dim}${line}${ANSI.reset}\n`);
+        }
+
+        screen.write(`${levelColor}│${ANSI.reset}\n`);
+        screen.write(`${levelColor}│${ANSI.reset}  ${THEME.promptPrefix}[Y]${ANSI.reset} 允许    ${THEME.error}[N]${ANSI.reset} 拒绝\n`);
+        screen.write(`${levelColor}│${ANSI.reset}  ${THEME.promptPrefix}[A]${ANSI.reset} 永久允许  ${THEME.error}[D]${ANSI.reset} 永久拒绝\n`);
+        screen.write(`${levelColor}╰──────────────────────────────────────────────╯${ANSI.reset}\n`);
+        screen.write(`${THEME.dim}请选择 (Y/N/A/D):${ANSI.reset} `);
+
+        const onKeyPress = (char, key) => {
+          if (!key) return;
+          const c = (char || '').toLowerCase();
+
+          if (c === 'y' || (key.name === 'return' && !char)) {
+            cleanup();
+            screen.write('Y\n');
+            resolve('approve');
+          } else if (c === 'n') {
+            cleanup();
+            screen.write('N\n');
+            resolve('deny');
+          } else if (c === 'a') {
+            cleanup();
+            screen.write('A\n');
+            resolve('always_allow');
+          } else if (c === 'd') {
+            cleanup();
+            screen.write('D\n');
+            resolve('always_deny');
+          }
+        };
+
+        function cleanup() {
+          process.stdin.removeListener('keypress', onKeyPress);
+          if (process.stdin.isTTY) {
+            process.stdin.setRawMode(false);
+          }
+        }
+
+        if (process.stdin.isTTY) {
+          process.stdin.setRawMode(true);
+        }
+        process.stdin.on('keypress', onKeyPress);
+      });
+    };
+  }
+
+  toolRegistry.approvalCallback = createApprovalPrompt();
+
   renderBanner(screen, session);
 
   if (provider.name === 'mock' || provider.name === 'local') {
     screen.write(`${THEME.warning}⚠ Local mock mode is active. Set /api-url and /api-key to chat with a real model.${ANSI.reset}\n\n`);
+  }
+
+  if (permissionManager.mode === 'yolo') {
+    screen.write(`${THEME.warning}⚠ YOLO 模式已启用 - 所有操作将自动执行，无需确认${ANSI.reset}\n\n`);
+  } else {
+    screen.write(`${THEME.dim}权限模式: ${permissionManager.mode === 'normal' ? '标准' : permissionManager.mode} · 使用 /permissions 管理权限${ANSI.reset}\n\n`);
   }
 
   renderStatusLine(screen, session);
@@ -1104,6 +1191,27 @@ async function runShell(args) {
     rl.prompt();
   });
 
+  function cyclePermissionMode() {
+    const modes = ['normal', 'yolo'];
+    const currentIndex = modes.indexOf(permissionManager.mode);
+    const nextIndex = (currentIndex + 1) % modes.length;
+    const newMode = modes[nextIndex];
+    
+    permissionManager.mode = newMode;
+    
+    const modeLabel = newMode === 'yolo' ? 'YOLO (自动执行)' : '标准 (需确认)';
+    const modeColor = newMode === 'yolo' ? THEME.warning : THEME.success;
+    
+    screen.write(`\n${modeColor}╭────────────────────────────────────╮${ANSI.reset}\n`);
+    screen.write(`${modeColor}│${ANSI.reset}  权限模式已切换: ${modeColor}${THEME.bold}${modeLabel}${ANSI.reset}\n`);
+    screen.write(`${modeColor}│${ANSI.reset}\n`);
+    screen.write(`${modeColor}│${ANSI.reset}  ${THEME.dim}按 Shift+Tab 循环切换模式${ANSI.reset}\n`);
+    screen.write(`${modeColor}╰────────────────────────────────────╯${ANSI.reset}\n\n`);
+    
+    renderStatusLine(screen, session);
+    rl.prompt();
+  }
+
   process.stdin.on('keypress', (char, key) => {
     if (!key) return;
 
@@ -1114,6 +1222,11 @@ async function runShell(args) {
       rl.prompt();
       return;
     }
+
+    if (key.name === 'tab' && key.shift) {
+      cyclePermissionMode();
+      return;
+    }
   });
 
   await new Promise(() => {});
@@ -1121,6 +1234,10 @@ async function runShell(args) {
 
 async function runNonInteractiveShell(session, screen, markdown) {
   const rl = readline.createInterface({ input: process.stdin });
+
+  if (session.permissionManager) {
+    session.permissionManager.mode = 'yolo';
+  }
 
   screen.write(`${THEME.accent}Hax Agent${ANSI.reset} ${THEME.dim}v${VERSION}${ANSI.reset}\n`);
   screen.write(`${THEME.dim}Type /help for commands, /exit to quit${ANSI.reset}\n`);
@@ -1407,6 +1524,7 @@ async function handleSlashCommand(line, context) {
     case 'theme': toggleTheme(context); break;
     case 'vim': toggleVim(context); break;
     case 'memory': handleMemoryCommand(args, context); break;
+    case 'permissions': handlePermissionsCommand(args, context); break;
     default:
       context.screen.write(`${THEME.error}Command not implemented: /${command.name}${ANSI.reset}\n`);
   }
@@ -1525,6 +1643,77 @@ function showSkills(args, { screen, session }) {
     screen.write(`${THEME.error}Unknown skill command: ${subCommand}${ANSI.reset}\n`);
     screen.write(`${THEME.dim}Usage: /skills [list|usage]${ANSI.reset}\n`);
   }
+}
+
+function handlePermissionsCommand(args, { screen, session }) {
+  const pm = session.permissionManager;
+  if (!pm) {
+    screen.write(`${THEME.error}权限管理器未初始化${ANSI.reset}\n`);
+    return;
+  }
+
+  const [subCommand, ...rest] = args;
+
+  if (!subCommand || subCommand === 'status') {
+    const summary = pm.getSummary();
+    const modeLabel = summary.mode === 'yolo' ? 'YOLO (自动执行所有)' : '标准 (需确认危险操作)';
+
+    screen.write(`\n${THEME.heading}权限状态${ANSI.reset}\n`);
+    screen.write(`${THEME.border}──────────────────────────────────${ANSI.reset}\n`);
+    screen.write(`  当前模式: ${THEME.bold}${modeLabel}${ANSI.reset}\n\n`);
+
+    screen.write(`  ${THEME.heading}工具权限等级:${ANSI.reset}\n`);
+    const levelGroups = { auto: [], ask: [], dangerous: [], dynamic: [] };
+    for (const entry of summary.toolPermissions) {
+      const group = entry.level || 'dynamic';
+      if (!levelGroups[group]) levelGroups[group] = [];
+      levelGroups[group].push(entry.tool);
+    }
+
+    for (const [level, tools] of Object.entries(levelGroups)) {
+      if (tools.length === 0) continue;
+      const label = PERMISSION_LABELS[level] || level;
+      const color = level === 'auto' ? THEME.success : level === 'dangerous' ? THEME.error : THEME.warning;
+      screen.write(`    ${color}${label}${ANSI.reset}: ${THEME.dim}${tools.join(', ')}${ANSI.reset}\n`);
+    }
+
+    if (summary.alwaysAllow.length > 0) {
+      screen.write(`\n  ${THEME.success}永久允许:${ANSI.reset} ${THEME.dim}${summary.alwaysAllow.join(', ')}${ANSI.reset}\n`);
+    }
+    if (summary.alwaysDeny.length > 0) {
+      screen.write(`  ${THEME.error}永久拒绝:${ANSI.reset} ${THEME.dim}${summary.alwaysDeny.join(', ')}${ANSI.reset}\n`);
+    }
+
+    screen.write(`\n${THEME.dim}使用 /permissions mode <auto|ask|yolo> 切换模式${ANSI.reset}\n`);
+    screen.write(`${THEME.dim}使用 /permissions reset 重置所有永久设置${ANSI.reset}\n\n`);
+    return;
+  }
+
+  if (subCommand === 'mode') {
+    const newMode = rest[0];
+    if (!newMode || !['auto', 'ask', 'yolo'].includes(newMode)) {
+      screen.write(`${THEME.error}无效模式: ${newMode || '(未指定)'}${ANSI.reset}\n`);
+      screen.write(`${THEME.dim}可用模式: auto, ask, yolo${ANSI.reset}\n`);
+      screen.write(`${THEME.dim}  auto - 自动执行所有操作${ANSI.reset}\n`);
+      screen.write(`${THEME.dim}  ask  - 需要确认危险操作 (默认)${ANSI.reset}\n`);
+      screen.write(`${THEME.dim}  yolo - 自动执行所有操作 (同 auto)${ANSI.reset}\n`);
+      return;
+    }
+
+    pm.mode = newMode;
+    const modeLabel = newMode === 'yolo' ? 'YOLO' : newMode === 'auto' ? '自动' : '标准';
+    screen.write(`${THEME.success}权限模式已切换为: ${modeLabel}${ANSI.reset}\n\n`);
+    return;
+  }
+
+  if (subCommand === 'reset') {
+    pm.resetOverrides();
+    screen.write(`${THEME.success}所有永久允许/拒绝设置已重置${ANSI.reset}\n\n`);
+    return;
+  }
+
+  screen.write(`${THEME.error}未知子命令: ${subCommand}${ANSI.reset}\n`);
+  screen.write(`${THEME.dim}用法: /permissions [status|mode <auto|ask|yolo>|reset]${ANSI.reset}\n`);
 }
 
 async function handleSkillifyCommand(args, { screen, session }) {
