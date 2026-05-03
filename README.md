@@ -73,6 +73,14 @@ hax-agent
 npm start
 ```
 
+首次在真实终端运行 `hax-agent` 时，如果还没有配置文件或 Provider 环境变量，会自动进入初始化向导。也可以随时手动运行：
+
+```bash
+hax-agent init
+```
+
+向导会依次选择 Provider、填写 API Key、配置可选 API Base URL、设置默认模型、选择权限模式，并决定是否启用会话记忆。Provider 和权限模式可用方向键选择，按 Enter 确认。
+
 ### 3. 配置 Provider
 
 在 Shell 中运行时设置：
@@ -99,6 +107,9 @@ hax-agent chat
 
 # 查看帮助
 hax-agent help
+
+# 运行初始化向导
+hax-agent init
 
 # 查看当前 Provider 可用模型
 hax-agent models

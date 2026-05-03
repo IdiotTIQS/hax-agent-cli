@@ -40,7 +40,7 @@ const SLASH_COMMANDS = [
   { name: 'vim', description: 'Toggle vim keybindings mode', aliases: [] },
   { name: 'memory', description: 'Manage agent memory', aliases: [], argHint: '[list|read|write|delete] [name]' },
   { name: 'permissions', description: 'View or manage tool permission levels', aliases: ['perm'], argHint: '[status|mode <auto|ask|yolo>|reset]' },
-  { name: 'update', description: 'Check for CLI updates', aliases: [] },
+  { name: 'update', description: 'Check for CLI updates', aliases: [], argHint: '[install]' },
 ];
 
 let themeEnabled = true;
@@ -303,7 +303,7 @@ async function handleSlashCommand(line, context) {
     case 'vim': toggleVim(context); break;
     case 'memory': handleMemoryCommand(args, context); break;
     case 'permissions': handlePermissionsCommand(args, context); break;
-    case 'update': await handleUpdateCheck(context); break;
+    case 'update': await handleUpdateCheck(args, context); break;
     default:
       context.screen.write(`${THEME.error}Command not implemented: /${command.name}${ANSI.reset || ''}\n`);
   }
@@ -1007,7 +1007,9 @@ function persistAgentSettings(agentSettings) {
   updateUserSettings({ agent: agentSettings });
 }
 
-async function handleUpdateCheck({ screen }) {
+async function handleUpdateCheck(args, { screen }) {
+  const shouldInstall = args[0] === 'install';
+
   screen.write(`${THEME.dim}Checking for updates...${ANSI.reset || ''}\n`);
 
   const result = await checkForUpdate(VERSION, { force: true });
@@ -1023,9 +1025,15 @@ async function handleUpdateCheck({ screen }) {
   }
 
   screen.write(
-    `${styled(THEME.warning, `⬆ New version available: v${result.currentVersion} → v${result.latestVersion}`)}\n` +
-    `${styled(THEME.dim, '  Updating...')}\n`
+    `${styled(THEME.warning, `⬆ New version available: v${result.currentVersion} → v${result.latestVersion}`)}\n`
   );
+
+  if (!shouldInstall) {
+    screen.write(`${styled(THEME.dim, '  Run /update install to update now.')}\n\n`);
+    return;
+  }
+
+  screen.write(`${styled(THEME.dim, '  Updating...')}\n`);
 
   try {
     await performUpdate();
@@ -1053,4 +1061,3 @@ module.exports = {
   persistAgentSettings,
   createCliTeamRuntime,
 };
-

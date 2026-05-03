@@ -2,7 +2,7 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
 const { URL } = require('node:url');
-const { PermissionManager } = require('../permissions');
+const { PermissionManager, isPrivateOrLocalHost } = require('../permissions');
 
 const DEFAULT_MAX_FILE_BYTES = 50 * 1024 * 1024;
 const DEFAULT_MAX_RESULTS = 1000;
@@ -145,7 +145,10 @@ class ToolRegistry {
 }
 
 function createLocalToolRegistry(options = {}) {
-  const registry = new ToolRegistry({ root: options.root });
+  const registry = new ToolRegistry({
+    root: options.root,
+    permissionManager: options.permissionManager,
+  });
   const shellPolicy = normalizeShellPolicy(options.shellPolicy);
 
   registry
@@ -484,7 +487,7 @@ function createWebFetchTool() {
           };
         } catch (error) {
           lastError = error;
-          if (error.code === 'HTTP_ERROR' || error.code === 'INVALID_URL') {
+          if (error.code === 'HTTP_ERROR' || error.code === 'INVALID_URL' || error.code === 'PRIVATE_REDIRECT_BLOCKED') {
             throw error;
           }
           if (attempt < maxRetries) {
@@ -525,9 +528,17 @@ async function fetchUrl({ parsedUrl, method, maxBodyBytes, timeoutMs }) {
         'User-Agent': 'HaxAgent/1.3.0',
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
       },
-      redirect: 'follow',
+      redirect: 'manual',
       signal: controller.signal,
     });
+
+    if (response.status >= 300 && response.status < 400) {
+      const location = response.headers.get('location');
+      if (!location) {
+        throw new ToolExecutionError('HTTP_ERROR', `HTTP ${response.status}: redirect without location`);
+      }
+      return handleRedirect(location, method, maxBodyBytes, timeoutMs, parsedUrl, timeoutId);
+    }
 
     if (!response.ok) {
       throw new ToolExecutionError('HTTP_ERROR', `HTTP ${response.status}: ${response.statusText || 'Error'}`);
@@ -547,14 +558,18 @@ async function fetchUrl({ parsedUrl, method, maxBodyBytes, timeoutMs }) {
   }
 }
 
-async function handleRedirect(location, method, maxBodyBytes, timeoutMs, originalTimeoutId) {
+async function handleRedirect(location, method, maxBodyBytes, timeoutMs, originalUrl, originalTimeoutId) {
   clearTimeout(originalTimeoutId);
 
   let redirectUrl;
   try {
-    redirectUrl = new URL(location);
+    redirectUrl = new URL(location, originalUrl);
   } catch {
     throw new ToolExecutionError('INVALID_REDIRECT', `Invalid redirect URL: ${location}`);
+  }
+
+  if (!isPrivateOrLocalHost(originalUrl.hostname) && isPrivateOrLocalHost(redirectUrl.hostname)) {
+    throw new ToolExecutionError('PRIVATE_REDIRECT_BLOCKED', `Redirect to private or local address blocked: ${redirectUrl.href}`);
   }
 
   return fetchUrl({ parsedUrl: redirectUrl, method, maxBodyBytes, timeoutMs });

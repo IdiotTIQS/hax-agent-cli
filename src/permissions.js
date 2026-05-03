@@ -9,7 +9,7 @@ const TOOL_PERMISSIONS = {
   'file.glob': PermissionLevel.AUTO,
   'file.search': PermissionLevel.AUTO,
   'file.readDirectory': PermissionLevel.AUTO,
-  'web.fetch': PermissionLevel.AUTO,
+  'web.fetch': null,
   'web.search': PermissionLevel.AUTO,
   'file.write': PermissionLevel.ASK,
   'file.edit': PermissionLevel.ASK,
@@ -70,10 +70,55 @@ function getToolPermission(toolName, toolArgs) {
   if (mappedLevel !== undefined && mappedLevel !== null) {
     return mappedLevel;
   }
+  if (toolName === 'web.fetch' && toolArgs?.url) {
+    return getWebFetchPermission(toolArgs.url);
+  }
   if (toolName === 'shell.run' && toolArgs?.command) {
     return getShellCommandPermission(toolArgs.command);
   }
   return PermissionLevel.ASK;
+}
+
+function getWebFetchPermission(url) {
+  let parsed;
+
+  try {
+    parsed = new URL(String(url));
+  } catch {
+    return PermissionLevel.ASK;
+  }
+
+  if (isPrivateOrLocalHost(parsed.hostname)) {
+    return PermissionLevel.ASK;
+  }
+
+  return PermissionLevel.AUTO;
+}
+
+function isPrivateOrLocalHost(hostname) {
+  const host = String(hostname || '').trim().toLowerCase().replace(/^\[|\]$/g, '');
+
+  if (!host) return true;
+  if (host === 'localhost' || host.endsWith('.localhost')) return true;
+
+  if (host === '::1' || host === '0:0:0:0:0:0:0:1') return true;
+  if (host.startsWith('fc') || host.startsWith('fd') || host.startsWith('fe80:')) return true;
+
+  const ipv4 = host.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
+  if (!ipv4) return false;
+
+  const octets = ipv4.slice(1).map(Number);
+  if (octets.some((part) => part < 0 || part > 255)) return true;
+
+  const [first, second] = octets;
+  return (
+    first === 10 ||
+    first === 127 ||
+    first === 0 ||
+    (first === 169 && second === 254) ||
+    (first === 172 && second >= 16 && second <= 31) ||
+    (first === 192 && second === 168)
+  );
 }
 
 function formatToolDescription(toolName, toolArgs) {
@@ -97,6 +142,9 @@ function formatToolDescription(toolName, toolArgs) {
     const command = [toolArgs?.command, ...(Array.isArray(toolArgs?.args) ? toolArgs.args : [])].filter(Boolean).join(' ');
     const cwd = toolArgs?.cwd || '.';
     return `执行命令: ${command}\n  工作目录: ${cwd}`;
+  }
+  if (toolName === 'web.fetch') {
+    return `获取网页: ${toolArgs?.url || 'unknown'}`;
   }
   return `${toolName}: ${JSON.stringify(toolArgs || {})}`;
 }
@@ -186,6 +234,16 @@ class PermissionManager {
     if (toolName === 'shell.run' && toolArgs?.command) {
       return `shell.run:${normalizeCommand(toolArgs.command)}`;
     }
+    if (toolName === 'web.fetch' && toolArgs?.url) {
+      try {
+        const parsed = new URL(String(toolArgs.url));
+        if (isPrivateOrLocalHost(parsed.hostname)) {
+          return `web.fetch:${parsed.hostname.toLowerCase()}`;
+        }
+      } catch {
+        return 'web.fetch:invalid-url';
+      }
+    }
     return toolName;
   }
 
@@ -252,5 +310,7 @@ module.exports = {
   PERMISSION_LABELS,
   getToolPermission,
   getShellCommandPermission,
+  getWebFetchPermission,
+  isPrivateOrLocalHost,
   formatToolDescription,
 };

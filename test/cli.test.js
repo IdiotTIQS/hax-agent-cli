@@ -69,8 +69,32 @@ test('shows help with the help command', () => {
 
   assert.equal(result.status, 0);
   assert.match(plain, /hax-agent/);
+  assert.match(plain, /hax-agent init/);
   assert.match(plain, /hax-agent models/);
   assert.match(plain, /hax-agent team auth-refactor/);
+  assert.equal(result.stderr, '');
+});
+
+test('runs the init wizard and saves settings', () => {
+  const settingsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hax-agent-init-'));
+  const settingsPath = path.join(settingsDir, 'settings.json');
+  const result = spawnSync(process.execPath, [cliPath, 'init'], {
+    encoding: 'utf8',
+    env: createIsolatedEnv({ HAX_AGENT_USER_SETTINGS: settingsPath }),
+    input: '2\nsk-test\nhttps://api.example.test/v1\ncustom-model\n1\nn\n',
+  });
+  const saved = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+
+  assert.equal(result.status, 0);
+  assert.match(result.stdout, /Hax Agent setup/);
+  assert.match(result.stdout, /Setup complete/);
+  assert.equal(saved.setup.initialized, true);
+  assert.equal(saved.agent.provider, 'openai');
+  assert.equal(saved.agent.apiKey, 'sk-test');
+  assert.equal(saved.agent.apiUrl, 'https://api.example.test/v1');
+  assert.equal(saved.agent.model, 'custom-model');
+  assert.equal(saved.permissions.mode, 'normal');
+  assert.equal(saved.memory.enabled, false);
   assert.equal(result.stderr, '');
 });
 
@@ -231,4 +255,16 @@ test('rejects missing team name with usage guidance', () => {
   assert.equal(result.status, 1);
   assert.match(result.stderr, /Usage: hax-agent team/);
   assert.equal(result.stdout, '');
+});
+
+test('update command checks without installing by default', () => {
+  const result = runCli([], {
+    input: '/update\n/exit\n',
+  });
+  const plain = stripAnsi(result.stdout);
+
+  assert.equal(result.status, 0);
+  assert.match(plain, /Checking for updates/);
+  assert.doesNotMatch(plain, /Updating\.\.\./);
+  assert.equal(result.stderr, '');
 });

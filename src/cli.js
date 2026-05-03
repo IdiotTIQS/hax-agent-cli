@@ -13,10 +13,11 @@ const { PermissionManager, PermissionLevel, PERMISSION_LABELS } = require('./per
 const { Session, InputHistory } = require('./session');
 const { THEME, ANSI, TerminalScreen, MarkdownRenderer, stripAnsi, styled } = require('./renderer');
 const { checkForUpdate, performUpdate, restartProcess, wasRestarted } = require('./updater');
+const { runInitWizard, shouldRunFirstRunInit } = require('./init-wizard');
 
 const VERSION = require('../package.json').version;
 
-const KNOWN_COMMANDS = ['chat', 'models', 'agents', 'team', 'resume', 'sessions', 'help', '--help', '-h'];
+const KNOWN_COMMANDS = ['chat', 'init', 'models', 'agents', 'team', 'resume', 'sessions', 'help', '--help', '-h'];
 
 function main(argv = process.argv) {
   const args = argv.slice(2);
@@ -28,6 +29,7 @@ function main(argv = process.argv) {
     case '-h':
       console.log('Hax Agent CLI v' + VERSION);
       console.log('  hax-agent [chat]               Start interactive shell (default)');
+      console.log('  hax-agent init                 Run first-time setup wizard');
       console.log('  hax-agent models               List available models');
       console.log('  hax-agent agents               List agent definitions');
       console.log('  hax-agent team auth-refactor   Print an auth-refactor team plan');
@@ -35,6 +37,7 @@ function main(argv = process.argv) {
       console.log('  hax-agent sessions             List previous sessions');
       console.log('  hax-agent resume [session-id]  Resume a previous session');
       break;
+    case 'init': runInitCommand(args.slice(1)); break;
     case 'models': runModelsCommand(args.slice(1)); break;
     case 'agents': runAgentsCommand(args.slice(1)); break;
     case 'team': runTeamCommand(args.slice(1)); break;
@@ -50,6 +53,18 @@ function main(argv = process.argv) {
       runShell(args);
       break;
   }
+}
+
+function runInitCommand(args) {
+  runInitWizard({
+    env: process.env,
+    input: process.stdin,
+    output: process.stdout,
+    promptToStart: args.includes('--confirm'),
+  }).catch((err) => {
+    console.error(`Failed to initialize: ${err.message}`);
+    process.exit(1);
+  });
 }
 
 function runModelsCommand(args) {
@@ -173,7 +188,24 @@ function runSessionsCommand() {
 }
 
 async function runShell(args, explicitSession) {
-  const settings = loadSettings();
+  let resolvedSettings = require('./config').resolveSettings();
+  if (shouldRunFirstRunInit({
+    env: process.env,
+    args,
+    isTTY: Boolean(process.stdin.isTTY && process.stdout.isTTY),
+    explicitSession: Boolean(explicitSession),
+    sources: resolvedSettings.sources,
+  })) {
+    await runInitWizard({
+      env: process.env,
+      input: process.stdin,
+      output: process.stdout,
+      promptToStart: true,
+    });
+    resolvedSettings = require('./config').resolveSettings();
+  }
+
+  const settings = resolvedSettings.settings;
   const provider = explicitSession ? explicitSession.provider : createProvider(settings.agent, process.env);
   const screen = new TerminalScreen();
   const markdown = new MarkdownRenderer(screen.columns);
@@ -396,9 +428,16 @@ async function runShell(args, explicitSession) {
       if (!result.hasUpdate) return;
 
       screen.write(
-        `\n${styled(THEME.warning, `⬆ New version available: v${result.currentVersion} → v${result.latestVersion}`)}\n` +
-        `${styled(THEME.dim, '  Auto-updating...')}\n`
+        `\n${styled(THEME.warning, `⬆ New version available: v${result.currentVersion} → v${result.latestVersion}`)}\n`
       );
+
+      if (!settings.updates?.autoInstall) {
+        screen.write(`${styled(THEME.dim, '  Run /update install to update now.')}\n\n`);
+        rl.prompt();
+        return;
+      }
+
+      screen.write(`${styled(THEME.dim, '  Auto-install is enabled. Updating...')}\n`);
 
       try {
         await performUpdate();

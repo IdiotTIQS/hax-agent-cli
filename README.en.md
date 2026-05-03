@@ -73,6 +73,14 @@ hax-agent
 npm start
 ```
 
+On first launch in a real terminal, `hax-agent` opens the setup wizard if no settings file or provider environment variables exist. You can also run it manually:
+
+```bash
+hax-agent init
+```
+
+The wizard walks through provider selection, API key entry, optional API base URL, default model, permission mode, and session memory. Provider and permission choices support arrow keys and Enter.
+
 ### 3. Configure Provider
 
 Set up within the Shell at runtime:
@@ -99,6 +107,9 @@ hax-agent chat
 
 # View help
 hax-agent help
+
+# Run setup wizard
+hax-agent init
 
 # List available models for the current provider
 hax-agent models

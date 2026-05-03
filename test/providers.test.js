@@ -7,6 +7,7 @@ const test = require('node:test');
 const { AnthropicProvider, MockProvider } = require('../src/providers');
 const { OpenAIProvider } = require('../src/providers/openai-provider');
 const { ToolRegistry, createLocalToolRegistry, createWebFetchTool, createWebSearchTool, createFileEditTool, createReadDirectoryTool, ToolExecutionError } = require('../src/tools');
+const { PermissionManager } = require('../src/permissions');
 
 test('mock provider explains local mock mode conversationally', async () => {
   const provider = new MockProvider({ model: 'mock-a' });
@@ -526,6 +527,41 @@ test('web fetch tool follows redirects', async () => {
   } finally {
     server.close();
   }
+});
+
+test('web fetch tool blocks public-to-private redirects', async () => {
+  const originalFetch = globalThis.fetch;
+
+  globalThis.fetch = async (url) => {
+    if (url === 'https://example.com/start') {
+      return new Response('', {
+        status: 302,
+        headers: { location: 'http://127.0.0.1/private' },
+      });
+    }
+    return new Response('<html><body>private</body></html>', {
+      status: 200,
+      headers: { 'content-type': 'text/html' },
+    });
+  };
+
+  try {
+    const tool = createWebFetchTool();
+    await assert.rejects(
+      () => tool.execute({ url: 'https://example.com/start' }),
+      { code: 'PRIVATE_REDIRECT_BLOCKED' },
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('local tool registry uses the provided permission manager', () => {
+  const permissionManager = new PermissionManager({ mode: 'yolo' });
+  const registry = createLocalToolRegistry({ root: process.cwd(), permissionManager });
+
+  assert.equal(registry.permissionManager, permissionManager);
+  assert.equal(registry.permissionManager.mode, 'yolo');
 });
 
 test('web fetch tool reports HTTP errors', async () => {

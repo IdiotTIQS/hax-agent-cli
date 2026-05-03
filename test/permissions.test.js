@@ -6,6 +6,8 @@ const {
   TOOL_PERMISSIONS,
   getToolPermission,
   getShellCommandPermission,
+  getWebFetchPermission,
+  isPrivateOrLocalHost,
   formatToolDescription,
 } = require('../src/permissions');
 
@@ -20,6 +22,7 @@ test('TOOL_PERMISSIONS mappings', () => {
   assert.strictEqual(TOOL_PERMISSIONS['file.write'], PermissionLevel.ASK);
   assert.strictEqual(TOOL_PERMISSIONS['file.edit'], PermissionLevel.ASK);
   assert.strictEqual(TOOL_PERMISSIONS['file.delete'], PermissionLevel.DANGEROUS);
+  assert.strictEqual(TOOL_PERMISSIONS['web.fetch'], null);
   assert.strictEqual(TOOL_PERMISSIONS['shell.run'], null);
 });
 
@@ -33,6 +36,8 @@ test('getToolPermission returns correct levels', () => {
   assert.strictEqual(getToolPermission('shell.run', { command: 'curl' }), PermissionLevel.DANGEROUS);
   assert.strictEqual(getToolPermission('shell.run', { command: 'node -e 1' }), PermissionLevel.AUTO);
   assert.strictEqual(getToolPermission('shell.run', { command: 'unknown_command' }), PermissionLevel.ASK);
+  assert.strictEqual(getToolPermission('web.fetch', { url: 'https://example.com' }), PermissionLevel.AUTO);
+  assert.strictEqual(getToolPermission('web.fetch', { url: 'http://127.0.0.1:3000' }), PermissionLevel.ASK);
 });
 
 test('getShellCommandPermission', () => {
@@ -41,6 +46,26 @@ test('getShellCommandPermission', () => {
   assert.strictEqual(getShellCommandPermission('which'), PermissionLevel.AUTO);
   assert.strictEqual(getShellCommandPermission('rm'), PermissionLevel.DANGEROUS);
   assert.strictEqual(getShellCommandPermission('curl'), PermissionLevel.DANGEROUS);
+});
+
+test('getWebFetchPermission flags private and local addresses', () => {
+  assert.strictEqual(getWebFetchPermission('https://example.com'), PermissionLevel.AUTO);
+  assert.strictEqual(getWebFetchPermission('http://localhost:3000'), PermissionLevel.ASK);
+  assert.strictEqual(getWebFetchPermission('http://127.0.0.1:3000'), PermissionLevel.ASK);
+  assert.strictEqual(getWebFetchPermission('http://10.0.0.2'), PermissionLevel.ASK);
+  assert.strictEqual(getWebFetchPermission('http://192.168.1.2'), PermissionLevel.ASK);
+  assert.strictEqual(getWebFetchPermission('http://169.254.1.2'), PermissionLevel.ASK);
+  assert.strictEqual(getWebFetchPermission('http://[::1]/'), PermissionLevel.ASK);
+  assert.strictEqual(getWebFetchPermission('http://[fd00::1]/'), PermissionLevel.ASK);
+  assert.strictEqual(isPrivateOrLocalHost('172.16.0.1'), true);
+  assert.strictEqual(isPrivateOrLocalHost('8.8.8.8'), false);
+});
+
+test('PermissionManager keys private web fetch approvals by host', () => {
+  const pm = new PermissionManager({ mode: 'normal' });
+
+  assert.strictEqual(pm.getToolKey('web.fetch', { url: 'http://127.0.0.1:3000/a' }), 'web.fetch:127.0.0.1');
+  assert.strictEqual(pm.getToolKey('web.fetch', { url: 'https://example.com/a' }), 'web.fetch');
 });
 
 test('PermissionManager with no callback auto-approves', async () => {

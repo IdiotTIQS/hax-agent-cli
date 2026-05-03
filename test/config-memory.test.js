@@ -30,6 +30,7 @@ test('resolves settings from defaults, JSON files, env, and overrides', () => {
       HAX_AGENT_MODEL: 'env-model',
       HAX_AGENT_API_URL: 'https://example.test/v1',
       HAX_AGENT_MEMORY_DIR: 'state/memory',
+      HAX_AGENT_UPDATES_AUTO_INSTALL: 'true',
     },
     overrides: {
       agent: { maxTurns: 7 },
@@ -41,6 +42,7 @@ test('resolves settings from defaults, JSON files, env, and overrides', () => {
   assert.equal(resolved.settings.agent.apiKey, undefined);
   assert.equal(resolved.settings.agent.apiUrl, 'https://example.test/v1');
   assert.equal(resolved.settings.agent.maxTurns, 7);
+  assert.equal(resolved.settings.updates.autoInstall, true);
   assert.equal(resolved.settings.memory.maxItems, 5);
   assert.equal(resolved.settings.sessions.transcriptLimit, 10);
   assert.equal(resolved.settings.memory.directory, path.join(projectRoot, 'state', 'memory'));
