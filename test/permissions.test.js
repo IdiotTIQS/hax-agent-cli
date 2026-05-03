@@ -72,7 +72,7 @@ test('PermissionManager with no callback auto-approves', async () => {
   const pm = new PermissionManager({ mode: 'normal' });
   const result = await pm.checkPermission('file.write', { path: 'test.txt', content: 'x' }, null);
   assert.strictEqual(result.approved, true);
-  assert.strictEqual(result.reason, '无交互环境，自动批准');
+  assert.strictEqual(result.reason, 'non-interactive environment, auto-approved');
 });
 
 test('PermissionManager yolo mode auto-approves', async () => {
@@ -80,7 +80,7 @@ test('PermissionManager yolo mode auto-approves', async () => {
   const result = await pm.checkPermission('file.write', { path: 'test.txt', content: 'x' }, null);
   assert.strictEqual(result.approved, true);
   assert.strictEqual(result.level, PermissionLevel.AUTO);
-  assert.strictEqual(result.reason, 'yolo模式');
+  assert.strictEqual(result.reason, 'yolo mode');
 });
 
 test('PermissionManager always_allow', async () => {
@@ -90,7 +90,7 @@ test('PermissionManager always_allow', async () => {
 
   const result = await pm.checkPermission('file.write', { path: 'test.txt' }, null);
   assert.strictEqual(result.approved, true);
-  assert.strictEqual(result.reason, '用户已永久允许');
+  assert.strictEqual(result.reason, 'permanently allowed by user');
 });
 
 test('PermissionManager always_deny', () => {
@@ -100,7 +100,7 @@ test('PermissionManager always_deny', () => {
 
   return pm.checkPermission('shell.run', { command: 'rm' }, null).then((result) => {
     assert.strictEqual(result.approved, false);
-    assert.strictEqual(result.reason, '已被用户永久拒绝');
+    assert.strictEqual(result.reason, 'permanently denied by user');
   });
 });
 
@@ -122,11 +122,16 @@ test('formatToolDescription for file.write', () => {
 test('formatToolDescription for file.delete', () => {
   const desc = formatToolDescription('file.delete', { path: 'config.json' });
   assert.ok(desc.includes('config.json'));
-  assert.ok(desc.includes('删除'));
+  assert.ok(desc.includes('Delete'));
 });
 
 test('formatToolDescription for shell.run', () => {
   const desc = formatToolDescription('shell.run', { command: 'git', args: ['push'] });
   assert.ok(desc.includes('push'));
-  assert.ok(desc.includes('工作目录'));
+  assert.ok(desc.includes('Working directory'));
+});
+
+test('formatToolDescription supports Chinese locale', () => {
+  const desc = formatToolDescription('file.delete', { path: 'config.json' }, 'zh-CN');
+  assert.ok(desc.includes('删除'));
 });

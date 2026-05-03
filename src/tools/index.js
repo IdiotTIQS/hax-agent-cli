@@ -112,7 +112,7 @@ class ToolRegistry {
       if (!permissionResult.approved) {
         throw new ToolExecutionError(
           'PERMISSION_DENIED',
-          `操作被拒绝: ${permissionResult.reason}`,
+          `Operation denied: ${permissionResult.reason}`,
           { level: permissionResult.level, toolName: name },
         );
       }

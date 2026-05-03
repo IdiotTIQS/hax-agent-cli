@@ -1,5 +1,6 @@
 const readline = require('node:readline');
 const { updateUserSettings } = require('./config');
+const { DEFAULT_LOCALE, createTranslator, listLocales, normalizeLocale } = require('./i18n');
 
 const PROVIDERS = [
   { value: 'anthropic', label: 'Anthropic (Claude)', defaultModel: 'claude-sonnet-4-20250514' },
@@ -44,6 +45,8 @@ async function runInitWizard(options = {}) {
   const input = options.input || process.stdin;
   const output = options.output || process.stdout;
   const env = options.env || process.env;
+  const initialLocale = normalizeLocale(options.locale || env.HAX_AGENT_LOCALE || env.HAX_AGENT_LANGUAGE || DEFAULT_LOCALE);
+  let t = createTranslator(initialLocale);
   const { question, close } = createQuestioner({ input, output, ask: options.ask });
   const selector = createSelector({
     input,
@@ -53,24 +56,25 @@ async function runInitWizard(options = {}) {
   });
 
   try {
-    output.write('\nHax Agent setup\n');
-    output.write('Configure a provider, default model, permissions, and memory.\n\n');
+    output.write(`\n${t('init.title')}\n`);
+    output.write(`${t('init.subtitle')}\n\n`);
 
     if (options.promptToStart) {
-      const answer = await question('Run setup now? [Y/n] ');
+      const answer = await question(t('init.runNow'));
       if (!readYesNo(answer, true)) {
         const saved = updateUserSettings({ setup: { initialized: true } }, { env });
-        output.write(`Setup skipped. Saved preference to ${saved.path}\n\n`);
+        output.write(`${t('init.skipped', { path: saved.path })}\n\n`);
         return { skipped: true, path: saved.path };
       }
       output.write('\n');
     }
 
     const provider = await chooseOption(question, output, {
-      name: 'Provider',
+      name: t('init.provider'),
       options: PROVIDERS,
       defaultValue: detectProviderDefault(env),
       selector,
+      t,
     });
 
   const providerInfo = PROVIDERS.find((item) => item.value === provider);
@@ -81,33 +85,44 @@ async function runInitWizard(options = {}) {
 
   if (provider !== 'mock') {
     const keyHint = detectedApiKey
-      ? 'API key detected in environment. Leave blank to keep using it.'
-      : 'Leave blank to configure it later with /api-key.';
+      ? t('init.keyDetected')
+      : t('init.keyLater');
     output.write(`${keyHint}\n`);
-    apiKey = (await question(`${providerInfo.label} API key: `)).trim();
+    apiKey = (await question(t('init.apiKeyPrompt', { provider: providerInfo.label }))).trim();
 
     const urlHint = detectedApiUrl
-      ? `API base URL [${detectedApiUrl}]: `
-      : 'API base URL [official default]: ';
+      ? t('init.apiUrlPromptDetected', { url: detectedApiUrl })
+      : t('init.apiUrlPromptDefault');
     apiUrl = (await question(urlHint)).trim();
   }
 
-    const modelInput = (await question(`Default model [${providerInfo.defaultModel}]: `)).trim();
+    const modelInput = (await question(t('init.defaultModel', { model: providerInfo.defaultModel }))).trim();
     const model = modelInput || providerInfo.defaultModel;
 
+    const locale = await chooseOption(question, output, {
+      name: t('init.language'),
+      options: listLocales(),
+      defaultValue: initialLocale,
+      selector,
+      t,
+    });
+    t = createTranslator(locale);
+
     const permissionMode = await chooseOption(question, output, {
-      name: 'Permission mode',
+      name: t('init.permissionMode'),
       options: PERMISSION_MODES,
       defaultValue: 'normal',
       selector,
+      t,
     });
 
-    const memoryAnswer = await question('Enable session memory? [Y/n] ');
+    const memoryAnswer = await question(t('init.memory'));
     const memoryEnabled = readYesNo(memoryAnswer, true);
 
     const updates = {
       setup: { initialized: true },
       agent: { provider, model },
+      ui: { locale },
       permissions: { mode: permissionMode },
       memory: { enabled: memoryEnabled },
     };
@@ -120,8 +135,8 @@ async function runInitWizard(options = {}) {
   }
 
     const saved = updateUserSettings(updates, { env });
-    output.write(`\nSetup complete. Saved settings to ${saved.path}\n`);
-    output.write('Start chatting with hax-agent, or adjust later with /provider, /model, /api-key, and /permissions.\n\n');
+    output.write(`\n${t('init.complete', { path: saved.path })}\n`);
+    output.write(`${t('init.next')}\n\n`);
 
     return {
       saved: true,
@@ -198,6 +213,7 @@ function normalizeAnswerLines(content) {
 
 async function chooseOption(question, output, options) {
   const choices = options.options;
+  const t = options.t || createTranslator(DEFAULT_LOCALE);
   const defaultIndex = Math.max(0, choices.findIndex((choice) => choice.value === options.defaultValue));
 
   if (options.selector) {
@@ -205,6 +221,7 @@ async function chooseOption(question, output, options) {
       name: options.name,
       options: choices,
       defaultIndex,
+      t,
     });
   }
 
@@ -215,7 +232,7 @@ async function chooseOption(question, output, options) {
   });
 
   while (true) {
-    const answer = (await question(`Choose ${options.name.toLowerCase()} [${defaultIndex + 1}]: `)).trim().toLowerCase();
+    const answer = (await question(t('select.choose', { name: String(options.name).toLowerCase(), index: defaultIndex + 1 }))).trim().toLowerCase();
     if (!answer) return choices[defaultIndex].value;
 
     const numeric = Number(answer);
@@ -226,7 +243,7 @@ async function chooseOption(question, output, options) {
     const matched = choices.find((choice) => choice.value === answer || choice.label.toLowerCase().startsWith(answer));
     if (matched) return matched.value;
 
-    output.write(`Please choose 1-${choices.length} or one of: ${choices.map((choice) => choice.value).join(', ')}.\n`);
+    output.write(`${t('select.invalid', { count: choices.length, values: choices.map((choice) => choice.value).join(', ') })}\n`);
   }
 }
 
@@ -234,6 +251,7 @@ function chooseOptionWithArrows(options) {
   const input = options.input;
   const output = options.output;
   const choices = options.options;
+  const t = options.t || createTranslator(DEFAULT_LOCALE);
   let selectedIndex = options.defaultIndex;
 
   return new Promise((resolve) => {
@@ -244,7 +262,7 @@ function chooseOptionWithArrows(options) {
     input.resume?.();
 
     output.write(`${options.name}:\n`);
-    output.write(`${ANSI.dim}Use ↑/↓ and Enter. Press 1-${choices.length} for quick select.${ANSI.reset}\n`);
+    output.write(`${ANSI.dim}${t('select.hint', { count: choices.length })}${ANSI.reset}\n`);
     output.write(ANSI.hideCursor);
 
     function render() {
@@ -361,6 +379,7 @@ function readBooleanEnv(value) {
 module.exports = {
   PROVIDERS,
   PERMISSION_MODES,
+  chooseOptionWithArrows,
   shouldRunFirstRunInit,
   runInitWizard,
   detectProviderDefault,

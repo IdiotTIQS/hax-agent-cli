@@ -3,6 +3,7 @@ const PermissionLevel = Object.freeze({
   ASK: 'ask',
   DANGEROUS: 'dangerous',
 });
+const { createTranslator } = require('./i18n');
 
 const TOOL_PERMISSIONS = {
   'file.read': PermissionLevel.AUTO,
@@ -35,9 +36,9 @@ const DANGEROUS_SHELL_COMMANDS = new Set([
 ]);
 
 const PERMISSION_LABELS = {
-  [PermissionLevel.AUTO]: '自动执行',
-  [PermissionLevel.ASK]: '需要确认',
-  [PermissionLevel.DANGEROUS]: '危险操作',
+  [PermissionLevel.AUTO]: 'auto',
+  [PermissionLevel.ASK]: 'ask',
+  [PermissionLevel.DANGEROUS]: 'dangerous',
 };
 
 const PERMISSION_COLORS = {
@@ -121,30 +122,31 @@ function isPrivateOrLocalHost(hostname) {
   );
 }
 
-function formatToolDescription(toolName, toolArgs) {
+function formatToolDescription(toolName, toolArgs, locale) {
+  const t = createTranslator(locale);
   if (toolName === 'file.write') {
     const filePath = toolArgs?.path || 'unknown';
     const content = toolArgs?.content || '';
     const bytes = Buffer.byteLength(content, 'utf8');
-    return `写入文件: ${filePath} (${bytes} 字节)`;
+    return t('permission.desc.fileWrite', { path: filePath, bytes });
   }
   if (toolName === 'file.edit') {
     const filePath = toolArgs?.path || 'unknown';
     const oldStr = (toolArgs?.oldStr || '').slice(0, 60);
     const newStr = (toolArgs?.newStr || '').slice(0, 60);
-    return `编辑文件: ${filePath}\n  替换: "${oldStr}" -> "${newStr}"`;
+    return t('permission.desc.fileEdit', { path: filePath, oldStr, newStr });
   }
   if (toolName === 'file.delete') {
     const filePath = toolArgs?.path || 'unknown';
-    return `删除文件: ${filePath}`;
+    return t('permission.desc.fileDelete', { path: filePath });
   }
   if (toolName === 'shell.run') {
     const command = [toolArgs?.command, ...(Array.isArray(toolArgs?.args) ? toolArgs.args : [])].filter(Boolean).join(' ');
     const cwd = toolArgs?.cwd || '.';
-    return `执行命令: ${command}\n  工作目录: ${cwd}`;
+    return t('permission.desc.shellRun', { command, cwd });
   }
   if (toolName === 'web.fetch') {
-    return `获取网页: ${toolArgs?.url || 'unknown'}`;
+    return t('permission.desc.webFetch', { url: toolArgs?.url || 'unknown' });
   }
   return `${toolName}: ${JSON.stringify(toolArgs || {})}`;
 }
@@ -152,6 +154,7 @@ function formatToolDescription(toolName, toolArgs) {
 class PermissionManager {
   constructor(options = {}) {
     this.globalMode = options.mode || 'normal';
+    this.locale = options.locale;
     this._alwaysAllow = new Set();
     this._alwaysDeny = new Set();
     this._persistPath = options.persistPath || null;
@@ -248,44 +251,45 @@ class PermissionManager {
   }
 
   async checkPermission(toolName, toolArgs, promptFn) {
+    const t = createTranslator(this.locale);
     if (this.globalMode === 'yolo') {
-      return { approved: true, level: PermissionLevel.AUTO, reason: 'yolo模式' };
+      return { approved: true, level: PermissionLevel.AUTO, reason: t('permission.reason.yolo') };
     }
 
     const level = getToolPermission(toolName, toolArgs);
     const toolKey = this.getToolKey(toolName, toolArgs);
 
     if (level === PermissionLevel.AUTO) {
-      return { approved: true, level, reason: '自动执行' };
+      return { approved: true, level, reason: t('permission.reason.auto') };
     }
 
     if (this.isAlwaysDenied(toolKey)) {
-      return { approved: false, level, reason: '已被用户永久拒绝' };
+      return { approved: false, level, reason: t('permission.reason.alwaysDenied') };
     }
 
     if (this.isAlwaysAllowed(toolKey)) {
-      return { approved: true, level, reason: '用户已永久允许' };
+      return { approved: true, level, reason: t('permission.reason.alwaysAllowed') };
     }
 
     if (!promptFn) {
-      return { approved: true, level, reason: '无交互环境，自动批准' };
+      return { approved: true, level, reason: t('permission.reason.noPrompt') };
     }
 
-    const description = formatToolDescription(toolName, toolArgs);
+    const description = formatToolDescription(toolName, toolArgs, this.locale);
     const result = await promptFn({ toolName, toolArgs, level, description, toolKey });
 
     if (result === 'always_allow') {
       this.setAlwaysAllow(toolKey);
-      return { approved: true, level, reason: '用户永久允许' };
+      return { approved: true, level, reason: t('permission.reason.alwaysAllowed') };
     }
     if (result === 'always_deny') {
       this.setAlwaysDeny(toolKey);
-      return { approved: false, level, reason: '用户永久拒绝' };
+      return { approved: false, level, reason: t('permission.reason.alwaysDenied') };
     }
     if (result === 'approve') {
-      return { approved: true, level, reason: '用户批准' };
+      return { approved: true, level, reason: t('permission.reason.approved') };
     }
-    return { approved: false, level, reason: '用户拒绝' };
+    return { approved: false, level, reason: t('permission.reason.denied') };
   }
 
   getSummary() {

@@ -6,6 +6,7 @@ const { spawn } = require('node:child_process');
 const { createProvider } = require('./providers');
 const { loadSettings } = require('./config');
 const { loadRecentTranscript, handleChatMessage, renderBanner, renderStatusLine, handleSlashCommand } = require('./slash-commands');
+const { suggestCommand } = require('./command-suggestions');
 const { createLocalToolRegistry } = require('./tools');
 const { registerAgentTeamTools } = require('./teams/tools');
 const { loadAllSkills, createSkillifySkill, recordSkillUsage } = require('./skills');
@@ -14,10 +15,14 @@ const { Session, InputHistory } = require('./session');
 const { THEME, ANSI, TerminalScreen, MarkdownRenderer, stripAnsi, styled } = require('./renderer');
 const { checkForUpdate, performUpdate, restartProcess, wasRestarted } = require('./updater');
 const { runInitWizard, shouldRunFirstRunInit } = require('./init-wizard');
+const { createTranslator } = require('./i18n');
 
 const VERSION = require('../package.json').version;
 
 const KNOWN_COMMANDS = ['chat', 'init', 'models', 'agents', 'team', 'resume', 'sessions', 'help', '--help', '-h'];
+const TOP_LEVEL_COMMAND_SUGGESTIONS = KNOWN_COMMANDS
+  .filter((command) => !command.startsWith('-'))
+  .map((command) => ({ match: command, suggest: command }));
 
 function main(argv = process.argv) {
   const args = argv.slice(2);
@@ -45,7 +50,9 @@ function main(argv = process.argv) {
     case 'sessions': runSessionsCommand(args.slice(1)); break;
     default:
       if (primary && !KNOWN_COMMANDS.includes(primary)) {
+        const suggestion = suggestCommand(primary, TOP_LEVEL_COMMAND_SUGGESTIONS);
         console.error(`Unknown command: ${primary}`);
+        if (suggestion) console.error(`Did you mean: hax-agent ${suggestion}?`);
         console.log('Usage: hax-agent <command>');
         console.log('  hax-agent help   Show available commands');
         process.exit(1);
@@ -214,6 +221,7 @@ async function runShell(args, explicitSession) {
     ? explicitSession.permissionManager
     : new PermissionManager({
       mode: args.includes('--yolo') ? 'yolo' : (settings.permissions?.mode || 'normal'),
+      locale: settings.ui?.locale,
       persistPath: path.join(process.cwd(), '.hax-agent', 'permissions.json'),
     });
 
@@ -230,8 +238,13 @@ async function runShell(args, explicitSession) {
     toolRegistry,
     permissionManager,
   });
+  permissionManager.locale = settings.ui?.locale;
+  if (session.permissionManager) {
+    session.permissionManager.locale = settings.ui?.locale;
+  }
 
   const history = new InputHistory();
+  const t = (key, values) => createTranslator(session.settings?.ui?.locale)(key, values);
 
   if (!explicitSession) {
     loadRecentTranscript(session);
@@ -253,6 +266,7 @@ async function runShell(args, explicitSession) {
 
   process.stdin.on('keypress', (_char, key) => {
     if (!key) return;
+    if (session.interactivePromptActive) return;
 
     if (vimMode && (key.name === 'escape' || (key.ctrl && key.name === 'c'))) {
       vimCommandBuffer = '';
@@ -352,9 +366,9 @@ async function runShell(args, explicitSession) {
         const levelColor = level === PermissionLevel.DANGEROUS ? THEME.error
           : level === PermissionLevel.ASK ? THEME.warning : THEME.success;
 
-        screen.write(`\n${levelColor}╭─ 权限请求 ─────────────────────────────────╮${ANSI.reset}\n`);
-        screen.write(`${levelColor}│${ANSI.reset}  级别: ${styled(levelColor, levelLabel)}\n`);
-        screen.write(`${levelColor}│${ANSI.reset}  操作: ${styled(THEME.bold, toolName)}\n`);
+        screen.write(`\n${levelColor}╭─ ${t('approval.title')} ─────────────────────────────────╮${ANSI.reset}\n`);
+        screen.write(`${levelColor}│${ANSI.reset}  ${t('approval.level')}: ${styled(levelColor, levelLabel)}\n`);
+        screen.write(`${levelColor}│${ANSI.reset}  ${t('approval.operation')}: ${styled(THEME.bold, toolName)}\n`);
 
         const descLines = description.split('\n');
         for (const line of descLines) {
@@ -362,10 +376,10 @@ async function runShell(args, explicitSession) {
         }
 
         screen.write(`${levelColor}│${ANSI.reset}\n`);
-        screen.write(`${levelColor}│${ANSI.reset}  ${styled(THEME.promptPrefix, '[Y]')} 允许    ${styled(THEME.error, '[N]')} 拒绝\n`);
-        screen.write(`${levelColor}│${ANSI.reset}  ${styled(THEME.promptPrefix, '[A]')} 永久允许  ${styled(THEME.error, '[D]')} 永久拒绝\n`);
+        screen.write(`${levelColor}│${ANSI.reset}  ${styled(THEME.promptPrefix, '[Y]')} ${t('approval.allow')}    ${styled(THEME.error, '[N]')} ${t('approval.deny')}\n`);
+        screen.write(`${levelColor}│${ANSI.reset}  ${styled(THEME.promptPrefix, '[A]')} ${t('approval.alwaysAllow')}  ${styled(THEME.error, '[D]')} ${t('approval.alwaysDeny')}\n`);
         screen.write(`${levelColor}╰──────────────────────────────────────────────╯${ANSI.reset}\n`);
-        screen.write(styled(THEME.dim, '请选择 (Y/N/A/D):') + ' ');
+        screen.write(styled(THEME.dim, t('approval.prompt')) + ' ');
 
         let resolved = false;
 
@@ -410,14 +424,14 @@ async function runShell(args, explicitSession) {
   renderBanner(screen, session);
 
   if (session.provider.name === 'mock' || session.provider.name === 'local') {
-    screen.write(styled(THEME.warning, '⚠ Local mock mode is active. Set /api-url and /api-key to chat with a real model.') + '\n\n');
+    screen.write(styled(THEME.warning, `! ${t('shell.mockMode')}`) + '\n\n');
   }
 
   if (session.permissionManager.mode === 'yolo') {
-    screen.write(styled(THEME.warning, '⚠ YOLO 模式已启用 - 所有操作将自动执行，无需确认') + '\n\n');
+    screen.write(styled(THEME.warning, `! ${t('shell.yoloMode')}`) + '\n\n');
   } else {
-    const permLabel = session.permissionManager.mode === 'normal' ? '标准' : session.permissionManager.mode;
-    screen.write(styled(THEME.dim, `权限模式: ${permLabel} · 使用 /permissions 管理权限`) + '\n\n');
+    const permLabel = session.permissionManager.mode === 'normal' ? t('common.mode.standard') : session.permissionManager.mode;
+    screen.write(styled(THEME.dim, t('shell.permissionMode', { mode: permLabel })) + '\n\n');
   }
 
   renderStatusLine(screen, session);
@@ -441,7 +455,7 @@ async function runShell(args, explicitSession) {
 
       try {
         await performUpdate();
-        screen.write(`${styled(THEME.success, '  ✔ Update complete. Restarting...')}\n\n`);
+        screen.write(`${styled(THEME.success, '  OK Update complete. Restarting...')}\n\n`);
         setTimeout(() => restartProcess(), 500);
       } catch (err) {
         screen.write(
@@ -455,6 +469,7 @@ async function runShell(args, explicitSession) {
 
   let pendingExitCount = 0;
   let lineQueue = Promise.resolve();
+  session.interactivePromptActive = false;
 
   rl.on('line', (line) => {
     lineQueue = lineQueue.then(() => processLine(line));
@@ -470,7 +485,7 @@ async function runShell(args, explicitSession) {
         screen.write(trimmed + '\n');
         session.shouldExit = true;
         const cost = session.costTracker.getCost(session.provider?.model);
-        screen.write(`${styled(THEME.success, 'Session ended.')} ${styled(THEME.dim, `Cost: $${cost.toFixed(4)} · Turns: ${session.costTracker.turnCount}`)}\n`);
+          screen.write(`${styled(THEME.success, t('shell.sessionEnded'))} ${styled(THEME.dim, t('shell.sessionStats', { cost: cost.toFixed(4), turns: session.costTracker.turnCount }))}\n`);
         screen.deactivate();
         process.exit(0);
       }
@@ -480,7 +495,7 @@ async function runShell(args, explicitSession) {
         vimInsertMode = true;
         screen.clearLine();
         screen.write(trimmed + '\n');
-        screen.write(styled(THEME.success, `Vim mode ${vimMode ? 'enabled' : 'disabled'}.`) + '\n');
+        screen.write(styled(THEME.success, t('shell.vimMode', { state: vimMode ? t('common.enabled') : t('common.disabled') })) + '\n');
         rl.prompt();
         return;
       }
@@ -494,7 +509,7 @@ async function runShell(args, explicitSession) {
         session.costTracker = new (require('./session').CostTracker)();
         screen.clear();
         renderBanner(screen, session);
-        screen.write(styled(THEME.success, 'Context cleared.') + '\n\n');
+        screen.write(styled(THEME.success, t('shell.contextCleared')) + '\n\n');
         rl.prompt();
         return;
       }
@@ -502,14 +517,14 @@ async function runShell(args, explicitSession) {
       screen.clearLine();
       screen.write(trimmed + '\n');
 
-      await handleSlashCommand(trimmed, { screen, session, markdown, rl });
+      await handleSlashCommand(trimmed, { screen, session, markdown, rl, input: process.stdin, output: process.stdout });
       renderStatusLine(screen, session);
       rl.prompt();
       return;
     }
 
     if (session.isStreaming) {
-      screen.write(styled(THEME.warning, 'Cannot send while the assistant is generating a response.') + '\n');
+      screen.write(styled(THEME.warning, t('shell.cannotSend')) + '\n');
       rl.prompt();
       return;
     }
@@ -580,6 +595,7 @@ async function runShell(args, explicitSession) {
 
   process.stdin.on('keypress', (char, key) => {
     if (!key) return;
+    if (session.interactivePromptActive) return;
 
     if (key.name === 'c' && key.ctrl) {
       if (session.isStreaming) {
@@ -593,7 +609,7 @@ async function runShell(args, explicitSession) {
 
       pendingExitCount += 1;
       if (pendingExitCount === 1) {
-        screen.write('\n' + styled(THEME.warning, 'Press Ctrl+C again to exit.') + '\n');
+        screen.write('\n' + styled(THEME.warning, t('shell.ctrlCExit')) + '\n');
         renderStatusLine(screen, session);
         rl.prompt();
         setTimeout(() => { pendingExitCount = 0; }, 2000);
@@ -619,13 +635,13 @@ async function runShell(args, explicitSession) {
       const newMode = modes[(currentIndex + 1) % modes.length];
       session.permissionManager.mode = newMode;
 
-      const modeLabel = newMode === 'yolo' ? 'YOLO (自动执行)' : '标准 (需确认)';
+      const modeLabel = newMode === 'yolo' ? 'YOLO' : t('common.mode.standard');
       const modeColor = newMode === 'yolo' ? THEME.warning : THEME.success;
 
       screen.write(`\n${modeColor}╭────────────────────────────────────╮${ANSI.reset}\n`);
-      screen.write(`${modeColor}│${ANSI.reset}  权限模式已切换: ${styled(modeColor + THEME.bold, modeLabel)}\n`);
+      screen.write(`${modeColor}│${ANSI.reset}  ${t('shell.permissionSwitched', { mode: styled(modeColor + THEME.bold, modeLabel) })}\n`);
       screen.write(`${modeColor}│${ANSI.reset}\n`);
-      screen.write(`${modeColor}│${ANSI.reset}  ${styled(THEME.dim, '按 Shift+Tab 循环切换模式')}\n`);
+      screen.write(`${modeColor}│${ANSI.reset}  ${styled(THEME.dim, t('shell.permissionShortcut'))}\n`);
       screen.write(`${modeColor}╰────────────────────────────────────╯${ANSI.reset}\n\n`);
 
       renderStatusLine(screen, session);

@@ -53,7 +53,7 @@ test('manual init stores settings in the requested user settings path', async ()
   const { runInitWizard } = require('../src/init-wizard');
   const settingsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hax-agent-init-unit-'));
   const settingsPath = path.join(settingsDir, 'settings.json');
-  const answers = ['3', 'key-google', 'https://google.example/v1', '', '2', 'y'];
+  const answers = ['3', 'key-google', 'https://google.example/v1', '', '1', '2', 'y'];
 
   await runInitWizard({
     ask: async () => answers.shift() || '',
@@ -67,6 +67,7 @@ test('manual init stores settings in the requested user settings path', async ()
   assert.equal(saved.agent.apiKey, 'key-google');
   assert.equal(saved.agent.apiUrl, 'https://google.example/v1');
   assert.equal(saved.agent.model, 'gemini-2.5-flash-preview-05-20');
+  assert.equal(saved.ui.locale, 'en');
   assert.equal(saved.permissions.mode, 'yolo');
   assert.equal(saved.memory.enabled, true);
 });
@@ -78,7 +79,9 @@ test('manual init can use an injected selector for interactive choices', async (
   const answers = ['key-openai', '', '', 'n'];
   const selections = {
     Provider: 'openai',
+    Language: 'zh-CN',
     'Permission mode': 'normal',
+    '权限模式': 'normal',
   };
 
   await runInitWizard({
@@ -93,6 +96,7 @@ test('manual init can use an injected selector for interactive choices', async (
   assert.equal(saved.agent.apiKey, 'key-openai');
   assert.equal(saved.agent.apiUrl, undefined);
   assert.equal(saved.agent.model, 'gpt-4.1');
+  assert.equal(saved.ui.locale, 'zh-CN');
   assert.equal(saved.permissions.mode, 'normal');
   assert.equal(saved.memory.enabled, false);
 });

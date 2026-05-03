@@ -15,46 +15,119 @@ const {
 } = require('./renderer');
 const { Session, CostTracker } = require('./session');
 const { checkForUpdate, performUpdate, restartProcess } = require('./updater');
+const { PROVIDERS, chooseOptionWithArrows } = require('./init-wizard');
+const { createTranslator, getLocaleLabel, listLocales, normalizeLocale } = require('./i18n');
+const { suggestCommand } = require('./command-suggestions');
 
 const SLASH_COMMANDS = [
-  { name: 'help', description: 'Show available commands and shortcuts', aliases: ['h', '?'] },
-  { name: 'exit', description: 'Exit the session', aliases: ['q', 'quit'] },
-  { name: 'clear', description: 'Clear conversation and start fresh', aliases: ['c'] },
-  { name: 'compact', description: 'Compact conversation to reduce context', aliases: [] },
-  { name: 'tools', description: 'List available tools', aliases: ['t'] },
-  { name: 'skills', description: 'List or manage skills', aliases: ['skill'], argHint: '[list|usage]' },
-  { name: 'skillify', description: 'Capture this session as a reusable skill', aliases: [], argHint: '[description]' },
-  { name: 'agents', description: 'List available agents', aliases: ['a'] },
-  { name: 'team', description: 'Manage agent teams and teammates', aliases: ['teams'], argHint: '[new|spawn|task|run|status|send|inbox|agents]' },
-  { name: 'models', description: 'List available models', aliases: ['m'] },
-  { name: 'model', description: 'Switch the active model', aliases: [], argHint: '<model-id-or-number>' },
-  { name: 'provider', description: 'Show or switch the AI provider', aliases: ['p'], argHint: '<anthropic|openai|google>' },
-  { name: 'api-url', description: 'Show or set the API base URL', aliases: [], argHint: '<base-url>' },
-  { name: 'api-key', description: 'Show or set the API key', aliases: [], argHint: '<key>' },
-  { name: 'cost', description: 'Show token usage and cost for this session', aliases: [] },
-  { name: 'sessions', description: 'List previous sessions', aliases: ['s'] },
-  { name: 'resume', description: 'Resume a previous session', aliases: ['r'], argHint: '<session-id>' },
-  { name: 'config', description: 'Show current configuration', aliases: [] },
-  { name: 'doctor', description: 'Run diagnostics and check setup', aliases: [] },
-  { name: 'theme', description: 'Toggle color theme', aliases: [] },
-  { name: 'vim', description: 'Toggle vim keybindings mode', aliases: [] },
-  { name: 'memory', description: 'Manage agent memory', aliases: [], argHint: '[list|read|write|delete] [name]' },
-  { name: 'permissions', description: 'View or manage tool permission levels', aliases: ['perm'], argHint: '[status|mode <auto|ask|yolo>|reset]' },
-  { name: 'update', description: 'Check for CLI updates', aliases: [], argHint: '[install]' },
+  { name: 'help', descriptionKey: 'cmd.help', description: 'Show available commands and shortcuts', aliases: ['h', '?'] },
+  { name: 'exit', descriptionKey: 'cmd.exit', description: 'Exit the session', aliases: ['q', 'quit'] },
+  { name: 'clear', descriptionKey: 'cmd.clear', description: 'Clear conversation and start fresh', aliases: ['c'] },
+  { name: 'compact', descriptionKey: 'cmd.compact', description: 'Compact conversation to reduce context', aliases: [] },
+  { name: 'tools', descriptionKey: 'cmd.tools', description: 'List available tools', aliases: ['t'] },
+  { name: 'skills', descriptionKey: 'cmd.skills', description: 'List or manage skills', aliases: ['skill'], argHint: '[list|usage]' },
+  { name: 'skillify', descriptionKey: 'cmd.skillify', description: 'Capture this session as a reusable skill', aliases: [], argHint: '[description]' },
+  { name: 'agents', descriptionKey: 'cmd.agents', description: 'List available agents', aliases: ['a'] },
+  { name: 'team', descriptionKey: 'cmd.team', description: 'Manage agent teams and teammates', aliases: ['teams'], argHint: '[new|spawn|task|run|status|send|inbox|agents]' },
+  { name: 'models', descriptionKey: 'cmd.models', description: 'List available models', aliases: ['m'] },
+  { name: 'model', descriptionKey: 'cmd.model', description: 'Switch the active model', aliases: [], argHint: '<model-id-or-number>' },
+  { name: 'provider', descriptionKey: 'cmd.provider', description: 'Show or switch the AI provider', aliases: ['p'], argHint: '<anthropic|openai|google>' },
+  { name: 'api-url', descriptionKey: 'cmd.apiUrl', description: 'Show or set the API base URL', aliases: [], argHint: '<base-url>' },
+  { name: 'api-key', descriptionKey: 'cmd.apiKey', description: 'Show or set the API key', aliases: [], argHint: '<key>' },
+  { name: 'language', descriptionKey: 'cmd.language', description: 'Show or switch the CLI language', aliases: ['lang', 'locale'], argHint: '<en|zh-CN|zh-TW|ru>' },
+  { name: 'cost', descriptionKey: 'cmd.cost', description: 'Show token usage and cost for this session', aliases: [] },
+  { name: 'sessions', descriptionKey: 'cmd.sessions', description: 'List previous sessions', aliases: ['s'] },
+  { name: 'resume', descriptionKey: 'cmd.resume', description: 'Resume a previous session', aliases: ['r'], argHint: '<session-id>' },
+  { name: 'config', descriptionKey: 'cmd.config', description: 'Show current configuration', aliases: [] },
+  { name: 'doctor', descriptionKey: 'cmd.doctor', description: 'Run diagnostics and check setup', aliases: [] },
+  { name: 'theme', descriptionKey: 'cmd.theme', description: 'Toggle color theme', aliases: [] },
+  { name: 'vim', descriptionKey: 'cmd.vim', description: 'Toggle vim keybindings mode', aliases: [] },
+  { name: 'memory', descriptionKey: 'cmd.memory', description: 'Manage agent memory', aliases: [], argHint: '[list|read|write|delete] [name]' },
+  { name: 'permissions', descriptionKey: 'cmd.permissions', description: 'View or manage tool permission levels', aliases: ['perm'], argHint: '[status|mode <auto|ask|yolo>|reset]' },
+  { name: 'update', descriptionKey: 'cmd.update', description: 'Check for CLI updates', aliases: [], argHint: '[install]' },
+];
+
+const SKILLS_SUBCOMMANDS = ['list', 'usage'];
+const PERMISSIONS_SUBCOMMANDS = ['status', 'mode', 'reset'];
+const MEMORY_SUBCOMMANDS = ['list', 'read', 'write', 'delete'];
+const TEAM_SUBCOMMANDS = [
+  'help',
+  'agents',
+  'list',
+  'new',
+  'create',
+  'spawn',
+  'add-agent',
+  'task',
+  'add-task',
+  'run',
+  'status',
+  'show',
+  'send',
+  'inbox',
 ];
 
 let themeEnabled = true;
 let vimMode = false;
 
+function getTranslator(session) {
+  return createTranslator(session?.settings?.ui?.locale);
+}
+
+function getSlashCommandSuggestion(commandName) {
+  const candidates = SLASH_COMMANDS.flatMap((command) => [
+    { match: command.name, suggest: command.name },
+    ...(command.aliases || []).map((alias) => ({ match: alias, suggest: command.name })),
+  ]);
+  return suggestCommand(commandName, candidates);
+}
+
+function getSubcommandSuggestion(commandName, subCommand) {
+  const candidatesByCommand = {
+    skills: SKILLS_SUBCOMMANDS,
+    permissions: PERMISSIONS_SUBCOMMANDS,
+    memory: MEMORY_SUBCOMMANDS,
+    team: TEAM_SUBCOMMANDS,
+  };
+  const suggestion = suggestCommand(subCommand, candidatesByCommand[commandName] || []);
+  return suggestion ? `/${commandName} ${suggestion}` : null;
+}
+
+function writeCommandSuggestion(screen, t, suggestion) {
+  if (!suggestion) return;
+  screen.write(`${THEME.dim}${t('errors.didYouMean', { command: suggestion })}${ANSI.reset || ''}\n`);
+}
+
+async function promptForOption({ screen, session, name, options, defaultValue, t }) {
+  if (!screen.isTTY()) return null;
+
+  const defaultIndex = Math.max(0, options.findIndex((option) => option.value === defaultValue));
+  session.interactivePromptActive = true;
+
+  try {
+    return await chooseOptionWithArrows({
+      input: process.stdin,
+      output: process.stdout,
+      name,
+      options,
+      defaultIndex,
+      t,
+    });
+  } finally {
+    session.interactivePromptActive = false;
+  }
+}
+
 function renderBanner(screen, session) {
+  const t = getTranslator(session);
   for (const line of CLAUDE_BANNER) {
     screen.write(`${line}\n`);
   }
 
   const provider = session.provider?.name || 'provider';
   const model = session.provider?.model || 'model';
-  screen.write(`${THEME.dim}  Model: ${model} · Provider: ${provider}${ANSI.reset || ''}\n`);
-  screen.write(`${THEME.dim}  Type /help for commands, /exit to quit${ANSI.reset || ''}\n\n`);
+  screen.write(`${THEME.dim}  ${t('banner.modelProvider', { model, provider })}${ANSI.reset || ''}\n`);
+  screen.write(`${THEME.dim}  ${t('banner.help')}${ANSI.reset || ''}\n\n`);
 }
 
 function renderStatusLine(screen, session) {
@@ -274,8 +347,13 @@ async function handleSlashCommand(line, context) {
       return;
     }
 
-    context.screen.write(`${THEME.error}Unknown command: /${commandName}${ANSI.reset || ''}\n`);
-    context.screen.write(`${THEME.dim}Type /help for available commands.${ANSI.reset || ''}\n`);
+    const t = getTranslator(context.session);
+    const suggestion = getSlashCommandSuggestion(commandName);
+    context.screen.write(`${THEME.error}${t('errors.unknownCommand', { command: commandName })}${ANSI.reset || ''}\n`);
+    if (suggestion) {
+      context.screen.write(`${THEME.dim}${t('errors.didYouMean', { command: `/${suggestion}` })}${ANSI.reset || ''}\n`);
+    }
+    context.screen.write(`${THEME.dim}${t('errors.typeHelp')}${ANSI.reset || ''}\n`);
     return;
   }
 
@@ -294,6 +372,7 @@ async function handleSlashCommand(line, context) {
     case 'provider': await switchProvider(args, context); break;
     case 'api-url': await switchApiUrl(args, context); break;
     case 'api-key': await switchApiKey(args, context); break;
+    case 'language': await switchLanguage(args, context); break;
     case 'cost': showCost(context); break;
     case 'sessions': await showSessions(context); break;
     case 'resume': await resumeSession(args, context); break;
@@ -302,50 +381,53 @@ async function handleSlashCommand(line, context) {
     case 'theme': toggleTheme(context); break;
     case 'vim': toggleVim(context); break;
     case 'memory': handleMemoryCommand(args, context); break;
-    case 'permissions': handlePermissionsCommand(args, context); break;
+    case 'permissions': await handlePermissionsCommand(args, context); break;
     case 'update': await handleUpdateCheck(args, context); break;
     default:
       context.screen.write(`${THEME.error}Command not implemented: /${command.name}${ANSI.reset || ''}\n`);
   }
 }
 
-function showShellHelp({ screen }) {
+function showShellHelp({ screen, session }) {
+  const t = getTranslator(session);
   const width = Math.min(screen.columns || 80, 80);
   const borderLine = THEME.border + '─'.repeat(width - 2) + (ANSI.reset || '');
 
-  screen.write(`\n${THEME.heading}Commands${ANSI.reset || ''}\n`);
+  screen.write(`\n${THEME.heading}${t('help.commands')}${ANSI.reset || ''}\n`);
   screen.write(`${borderLine}\n`);
 
   for (const cmd of SLASH_COMMANDS) {
     const aliases = cmd.aliases.length > 0 ? ` ${THEME.dim}(${cmd.aliases.map(a => `/${a}`).join(', ')})${ANSI.reset || ''}` : '';
     const argHint = cmd.argHint ? ` ${THEME.dim}${cmd.argHint}${ANSI.reset || ''}` : '';
     const nameCol = `/${cmd.name}`.padEnd(14);
-    screen.write(`  ${THEME.promptPrefix}${nameCol}${ANSI.reset || ''} ${cmd.description}${aliases}${argHint}\n`);
+    screen.write(`  ${THEME.promptPrefix}${nameCol}${ANSI.reset || ''} ${t(cmd.descriptionKey)}${aliases}${argHint}\n`);
   }
 
-  screen.write(`\n${THEME.heading}Keyboard Shortcuts${ANSI.reset || ''}\n`);
+  screen.write(`\n${THEME.heading}${t('help.shortcuts')}${ANSI.reset || ''}\n`);
   screen.write(`${borderLine}\n`);
-  screen.write(`  ${THEME.promptPrefix}Ctrl+C${ANSI.reset || ''}       ${THEME.dim}Interrupt or exit${ANSI.reset || ''}\n`);
-  screen.write(`  ${THEME.promptPrefix}Ctrl+L${ANSI.reset || ''}       ${THEME.dim}Clear screen${ANSI.reset || ''}\n`);
-  screen.write(`  ${THEME.promptPrefix}\u2191/\u2193${ANSI.reset || ''}         ${THEME.dim}Navigate input history${ANSI.reset || ''}\n`);
-  screen.write(`  ${THEME.promptPrefix}Shift+Tab${ANSI.reset || ''}     ${THEME.dim}Cycle permission mode${ANSI.reset || ''}\n`);
-  screen.write(`  ${THEME.promptPrefix}!command${ANSI.reset || ''}      ${THEME.dim}Run a shell command directly${ANSI.reset || ''}\n`);
+  screen.write(`  ${THEME.promptPrefix}Ctrl+C${ANSI.reset || ''}       ${THEME.dim}${t('help.ctrlC')}${ANSI.reset || ''}\n`);
+  screen.write(`  ${THEME.promptPrefix}Ctrl+L${ANSI.reset || ''}       ${THEME.dim}${t('help.ctrlL')}${ANSI.reset || ''}\n`);
+  screen.write(`  ${THEME.promptPrefix}\u2191/\u2193${ANSI.reset || ''}         ${THEME.dim}${t('help.history')}${ANSI.reset || ''}\n`);
+  screen.write(`  ${THEME.promptPrefix}Shift+Tab${ANSI.reset || ''}     ${THEME.dim}${t('help.shiftTab')}${ANSI.reset || ''}\n`);
+  screen.write(`  ${THEME.promptPrefix}!command${ANSI.reset || ''}      ${THEME.dim}${t('help.bang')}${ANSI.reset || ''}\n`);
   screen.write('\n');
 }
 
 function exitShell({ screen, session }) {
+  const t = getTranslator(session);
   session.shouldExit = true;
   const cost = session.costTracker.getCost(session.provider?.model);
-  screen.write(`${THEME.success}Session ended.${ANSI.reset || ''} ${THEME.dim}Cost: $${cost.toFixed(4)} · Turns: ${session.costTracker.turnCount}${ANSI.reset || ''}\n`);
+  screen.write(`${THEME.success}${t('shell.sessionEnded')}${ANSI.reset || ''} ${THEME.dim}${t('shell.sessionStats', { cost: cost.toFixed(4), turns: session.costTracker.turnCount })}${ANSI.reset || ''}\n`);
 }
 
 function clearShell({ screen, session }) {
+  const t = getTranslator(session);
   session.messages = [];
   session.id = createSessionId();
   session.costTracker = new CostTracker();
   screen.clear();
   renderBanner(screen, session);
-  screen.write(`${THEME.success}Context cleared.${ANSI.reset || ''}\n\n`);
+  screen.write(`${THEME.success}${t('shell.contextCleared')}${ANSI.reset || ''}\n\n`);
 }
 
 function compactShell({ screen, session }) {
@@ -356,7 +438,8 @@ function compactShell({ screen, session }) {
 }
 
 function showTools({ screen, session }) {
-  screen.write(`\n${THEME.heading}Available Tools${ANSI.reset || ''}\n`);
+  const t = getTranslator(session);
+  screen.write(`\n${THEME.heading}${t('tools.title')}${ANSI.reset || ''}\n`);
   screen.write(`${THEME.border}──────────────────────────────────${ANSI.reset || ''}\n`);
 
   for (const tool of session.toolRegistry.list()) {
@@ -367,6 +450,7 @@ function showTools({ screen, session }) {
 }
 
 function showSkills(args, { screen, session }) {
+  const t = getTranslator(session);
   const [subCommand] = args;
 
   if (!subCommand || subCommand === 'list') {
@@ -374,7 +458,7 @@ function showSkills(args, { screen, session }) {
     const skillify = createSkillifySkill(session.messages);
     const allSkills = [skillify, ...skills];
 
-    screen.write(`\n${THEME.heading}Available Skills${ANSI.reset || ''}\n`);
+    screen.write(`\n${THEME.heading}${t('skills.title')}${ANSI.reset || ''}\n`);
     screen.write(`${THEME.border}──────────────────────────────────${ANSI.reset || ''}\n`);
 
     for (const skill of allSkills) {
@@ -386,21 +470,21 @@ function showSkills(args, { screen, session }) {
     }
 
     if (allSkills.length === 0) {
-      screen.write(`  ${THEME.dim}No skills available.${ANSI.reset || ''}\n`);
+      screen.write(`  ${THEME.dim}${t('skills.none')}${ANSI.reset || ''}\n`);
     }
 
-    screen.write(`\n${THEME.dim}Use /skillify to capture a session as a skill.${ANSI.reset || ''}\n\n`);
+    screen.write(`\n${THEME.dim}${t('skills.skillifyHint')}${ANSI.reset || ''}\n\n`);
   } else if (subCommand === 'usage') {
     const { getSkillUsageStats } = require('./skills');
     const stats = getSkillUsageStats();
     const skillNames = Object.keys(stats);
 
     if (skillNames.length === 0) {
-      screen.write(`${THEME.dim}No skill usage recorded yet.${ANSI.reset || ''}\n`);
+      screen.write(`${THEME.dim}${t('skills.noUsage')}${ANSI.reset || ''}\n`);
       return;
     }
 
-    screen.write(`\n${THEME.heading}Skill Usage Statistics${ANSI.reset || ''}\n`);
+    screen.write(`\n${THEME.heading}${t('skills.usageTitle')}${ANSI.reset || ''}\n`);
     screen.write(`${THEME.border}──────────────────────────────────${ANSI.reset || ''}\n`);
 
     const sorted = skillNames.sort((a, b) => {
@@ -418,29 +502,53 @@ function showSkills(args, { screen, session }) {
     }
     screen.write('\n');
   } else {
-    screen.write(`${THEME.error}Unknown skill command: ${subCommand}${ANSI.reset || ''}\n`);
-    screen.write(`${THEME.dim}Usage: /skills [list|usage]${ANSI.reset || ''}\n`);
+    const suggestion = getSubcommandSuggestion('skills', subCommand);
+    screen.write(`${THEME.error}${t('skills.unknownCommand', { command: subCommand })}${ANSI.reset || ''}\n`);
+    writeCommandSuggestion(screen, t, suggestion);
+    screen.write(`${THEME.dim}${t('skills.usage')}${ANSI.reset || ''}\n`);
   }
 }
 
-function handlePermissionsCommand(args, { screen, session }) {
+async function handlePermissionsCommand(args, { screen, session }) {
+  const t = getTranslator(session);
   const pm = session.permissionManager;
   if (!pm) {
-    screen.write(`${THEME.error}权限管理器未初始�?{ANSI.reset || ''}\n`);
+    screen.write(`${THEME.error}${t('permissions.notInitialized')}${ANSI.reset || ''}\n`);
     return;
   }
 
   const [subCommand, ...rest] = args;
 
+  if (!subCommand) {
+    const selected = await promptForOption({
+      screen,
+      session,
+      name: t('permissions.actionPrompt'),
+      options: [
+        { value: 'status', label: t('permissions.actionStatus') },
+        { value: 'mode:normal', label: t('permissions.actionNormal') },
+        { value: 'mode:yolo', label: t('permissions.actionYolo') },
+        { value: 'reset', label: t('permissions.actionReset') },
+      ],
+      defaultValue: 'status',
+      t,
+    });
+    if (selected) {
+      const [nextCommand, nextValue] = selected.split(':');
+      await handlePermissionsCommand(nextValue ? [nextCommand, nextValue] : [nextCommand], { screen, session });
+      return;
+    }
+  }
+
   if (!subCommand || subCommand === 'status') {
     const summary = pm.getSummary();
-    const modeLabel = summary.mode === 'yolo' ? 'YOLO (自动执行所�?' : '标准 (需确认危险操作)';
+    const modeLabel = summary.mode === 'yolo' ? 'YOLO' : t('common.mode.standard');
 
-    screen.write(`\n${THEME.heading}权限状�?{ANSI.reset || ''}\n`);
+    screen.write(`\n${THEME.heading}${t('permissions.status')}${ANSI.reset || ''}\n`);
     screen.write(`${THEME.border}──────────────────────────────────${ANSI.reset || ''}\n`);
-    screen.write(`  当前模式: ${THEME.bold}${modeLabel}${ANSI.reset || ''}\n\n`);
+    screen.write(`  ${t('permissions.currentMode')}: ${THEME.bold}${modeLabel}${ANSI.reset || ''}\n\n`);
 
-    screen.write(`  ${THEME.heading}工具权限等级:${ANSI.reset || ''}\n`);
+    screen.write(`  ${THEME.heading}${t('permissions.toolLevels')}${ANSI.reset || ''}\n`);
     const levelGroups = { auto: [], ask: [], dangerous: [], dynamic: [] };
     for (const entry of summary.toolPermissions) {
       const group = entry.level || 'dynamic';
@@ -456,39 +564,59 @@ function handlePermissionsCommand(args, { screen, session }) {
     }
 
     if (summary.alwaysAllow.length > 0) {
-      screen.write(`\n  ${THEME.success}永久允许:${ANSI.reset || ''} ${THEME.dim}${summary.alwaysAllow.join(', ')}${ANSI.reset || ''}\n`);
+      screen.write(`\n  ${THEME.success}${t('permissions.alwaysAllow')}${ANSI.reset || ''} ${THEME.dim}${summary.alwaysAllow.join(', ')}${ANSI.reset || ''}\n`);
     }
     if (summary.alwaysDeny.length > 0) {
-      screen.write(`  ${THEME.error}永久拒绝:${ANSI.reset || ''} ${THEME.dim}${summary.alwaysDeny.join(', ')}${ANSI.reset || ''}\n`);
+      screen.write(`  ${THEME.error}${t('permissions.alwaysDeny')}${ANSI.reset || ''} ${THEME.dim}${summary.alwaysDeny.join(', ')}${ANSI.reset || ''}\n`);
     }
 
-    screen.write(`\n${THEME.dim}使用 /permissions mode <auto|ask|yolo> 切换模式${ANSI.reset || ''}\n`);
-    screen.write(`${THEME.dim}使用 /permissions reset 重置所有永久设�?{ANSI.reset || ''}\n\n`);
+    screen.write(`\n${THEME.dim}${t('permissions.switchHint')}${ANSI.reset || ''}\n`);
+    screen.write(`${THEME.dim}${t('permissions.resetHint')}${ANSI.reset || ''}\n\n`);
     return;
   }
 
   if (subCommand === 'mode') {
-    const newMode = rest[0];
+    let newMode = rest[0];
+    if (!newMode) {
+      newMode = await promptForOption({
+        screen,
+        session,
+        name: t('permissions.modePrompt'),
+        options: [
+          { value: 'normal', label: t('permissions.actionNormal') },
+          { value: 'yolo', label: t('permissions.actionYolo') },
+        ],
+        defaultValue: pm.mode === 'yolo' ? 'yolo' : 'normal',
+        t,
+      });
+      if (!newMode) {
+        screen.write(`${THEME.error}${t('permissions.invalidMode', { mode: '(missing)' })}${ANSI.reset || ''}\n`);
+        screen.write(`${THEME.dim}${t('permissions.availableModes')}${ANSI.reset || ''}\n`);
+        return;
+      }
+    }
     if (!newMode || !['auto', 'ask', 'yolo'].includes(newMode)) {
-      screen.write(`${THEME.error}无效模式: ${newMode || '(未指�?'}${ANSI.reset || ''}\n`);
-      screen.write(`${THEME.dim}可用模式: auto, ask, yolo${ANSI.reset || ''}\n`);
+      screen.write(`${THEME.error}${t('permissions.invalidMode', { mode: newMode || '(missing)' })}${ANSI.reset || ''}\n`);
+      screen.write(`${THEME.dim}${t('permissions.availableModes')}${ANSI.reset || ''}\n`);
       return;
     }
 
     pm.mode = newMode;
-    const modeLabel = newMode === 'yolo' ? 'YOLO' : newMode === 'auto' ? '自动' : '标准';
-    screen.write(`${THEME.success}权限模式已切换为: ${modeLabel}${ANSI.reset || ''}\n\n`);
+    const modeLabel = newMode === 'yolo' ? 'YOLO' : newMode === 'auto' ? t('common.mode.auto') : t('common.mode.standard');
+    screen.write(`${THEME.success}${t('permissions.modeSwitched', { mode: modeLabel })}${ANSI.reset || ''}\n\n`);
     return;
   }
 
   if (subCommand === 'reset') {
     pm.resetOverrides();
-    screen.write(`${THEME.success}所有永久允�?拒绝设置已重�?{ANSI.reset || ''}\n\n`);
+    screen.write(`${THEME.success}${t('permissions.resetDone')}${ANSI.reset || ''}\n\n`);
     return;
   }
 
-  screen.write(`${THEME.error}未知子命�? ${subCommand}${ANSI.reset || ''}\n`);
-  screen.write(`${THEME.dim}用法: /permissions [status|mode <auto|ask|yolo>|reset]${ANSI.reset || ''}\n`);
+  const suggestion = getSubcommandSuggestion('permissions', subCommand);
+  screen.write(`${THEME.error}${t('permissions.unknownSubcommand', { command: subCommand })}${ANSI.reset || ''}\n`);
+  writeCommandSuggestion(screen, t, suggestion);
+  screen.write(`${THEME.dim}${t('permissions.usage')}${ANSI.reset || ''}\n`);
 }
 
 async function handleSkillifyCommand(args, { screen, session }) {
@@ -582,12 +710,25 @@ async function showModels({ screen, session }) {
 }
 
 async function switchProvider(args, { screen, session }) {
+  const t = getTranslator(session);
   const [providerName] = args;
 
   if (!providerName) {
-    screen.write(`${THEME.dim}Current provider: ${ANSI.reset || ''}${THEME.bold}${session.provider.name}${ANSI.reset || ''}\n`);
-    screen.write(`${THEME.dim}Available: anthropic, openai, google${ANSI.reset || ''}\n`);
-    screen.write(`${THEME.dim}Usage: /provider <anthropic|openai|google>${ANSI.reset || ''}\n`);
+    const selectedProvider = await promptForOption({
+      screen,
+      session,
+      name: 'Provider',
+      options: PROVIDERS.filter((provider) => provider.value !== 'mock'),
+      defaultValue: session.provider.name,
+      t,
+    });
+    if (!selectedProvider) {
+      screen.write(`${THEME.dim}${t('provider.current', { provider: '' })}${ANSI.reset || ''}${THEME.bold}${session.provider.name}${ANSI.reset || ''}\n`);
+      screen.write(`${THEME.dim}${t('provider.available')}${ANSI.reset || ''}\n`);
+      screen.write(`${THEME.dim}${t('provider.usage')}${ANSI.reset || ''}\n`);
+      return;
+    }
+    await switchProvider([selectedProvider], { screen, session });
     return;
   }
 
@@ -595,7 +736,7 @@ async function switchProvider(args, { screen, session }) {
   const validProviders = ['anthropic', 'claude', 'openai', 'gpt', 'google', 'gemini'];
 
   if (!validProviders.includes(normalized)) {
-    screen.write(`${THEME.error}Unknown provider: ${providerName}${ANSI.reset || ''}\n`);
+    screen.write(`${THEME.error}${t('provider.unknown', { provider: providerName })}${ANSI.reset || ''}\n`);
     return;
   }
 
@@ -613,44 +754,75 @@ async function switchProvider(args, { screen, session }) {
     model: session.provider.model,
   });
   session.availableModels = undefined;
-  screen.write(`${THEME.success}Switched provider to ${session.provider.name}${ANSI.reset || ''}\n`);
+  screen.write(`${THEME.success}${t('provider.switched', { provider: session.provider.name })}${ANSI.reset || ''}\n`);
 }
 
 async function switchModel(args, { screen, session }) {
+  const t = getTranslator(session);
   const [selection] = args;
 
   if (!selection) {
-    screen.write(`${THEME.dim}Current model: ${ANSI.reset || ''}${THEME.bold}${session.provider.model || 'unknown'}${ANSI.reset || ''}\n`);
-    screen.write(`${THEME.dim}Usage: /model <model-id-or-number>${ANSI.reset || ''}\n`);
+    let models = session.availableModels;
+    if (!Array.isArray(models) || models.length === 0) {
+      try {
+        models = await session.provider.listModels();
+        session.availableModels = models;
+      } catch (error) {
+        screen.write(`${THEME.error}${error.message}${ANSI.reset || ''}\n`);
+        return;
+      }
+    }
+
+    const selectedModel = await promptForOption({
+      screen,
+      session,
+      name: t('config.model').replace(/:$/, ''),
+      options: models.map((model) => ({
+        value: model.id,
+        label: model.name && model.name !== model.id ? `${model.id} (${model.name})` : model.id,
+      })),
+      defaultValue: session.provider.model,
+      t,
+    });
+    if (selectedModel) {
+      await switchModel([selectedModel], { screen, session });
+      return;
+    }
+
+    screen.write(`${THEME.dim}${t('model.current', { model: '' })}${ANSI.reset || ''}${THEME.bold}${session.provider.model || t('common.unknown')}${ANSI.reset || ''}\n`);
+    screen.write(`${THEME.dim}${t('model.usage')}${ANSI.reset || ''}\n`);
     return;
   }
 
   const model = resolveModelSelection(selection, session.availableModels || []);
   session.provider.setModel(model);
-  screen.write(`${THEME.success}Switched model to ${session.provider.model}${ANSI.reset || ''}\n`);
+  screen.write(`${THEME.success}${t('model.switched', { model: session.provider.model })}${ANSI.reset || ''}\n`);
 }
 
 async function switchApiUrl(args, { screen, session }) {
+  const t = getTranslator(session);
   const [apiUrl] = args;
 
   if (!apiUrl) {
-    screen.write(`${THEME.dim}Current API URL: ${ANSI.reset || ''}${session.provider.apiUrl || 'default'}\n`);
-    screen.write(`${THEME.dim}Usage: /api-url <base-url>${ANSI.reset || ''}\n`);
+    screen.write(`${THEME.dim}${t('apiUrl.current', { url: session.provider.apiUrl || t('common.default') })}${ANSI.reset || ''}\n`);
+    screen.write(`${THEME.dim}${t('apiUrl.usage')}${ANSI.reset || ''}\n`);
     return;
   }
 
   session.provider.setApiUrl(apiUrl);
   persistAgentSettings({ apiUrl: session.provider.apiUrl });
   session.availableModels = undefined;
-  screen.write(`${THEME.success}Switched API URL to ${session.provider.apiUrl || 'default'}${ANSI.reset || ''}\n`);
+  screen.write(`${THEME.success}${t('apiUrl.switched', { url: session.provider.apiUrl || t('common.default') })}${ANSI.reset || ''}\n`);
 }
 
 async function switchApiKey(args, { screen, session }) {
+  const t = getTranslator(session);
   const [apiKey] = args;
 
   if (!apiKey) {
-    screen.write(`${THEME.dim}API key: ${ANSI.reset || ''}${session.provider.apiKey ? `${THEME.success}set${ANSI.reset || ''}` : `${THEME.warning}not set${ANSI.reset || ''}`}\n`);
-    screen.write(`${THEME.dim}Usage: /api-key <key>${ANSI.reset || ''}\n`);
+    const state = session.provider.apiKey ? `${THEME.success}${t('common.set')}${ANSI.reset || ''}` : `${THEME.warning}${t('common.notSet')}${ANSI.reset || ''}`;
+    screen.write(`${THEME.dim}${t('apiKey.status', { state })}${ANSI.reset || ''}\n`);
+    screen.write(`${THEME.dim}${t('apiKey.usage')}${ANSI.reset || ''}\n`);
     return;
   }
 
@@ -672,7 +844,48 @@ async function switchApiKey(args, { screen, session }) {
     model: session.provider.model,
   });
   session.availableModels = undefined;
-  screen.write(`${THEME.success}API key set for ${session.provider.name}.${ANSI.reset || ''}\n`);
+  screen.write(`${THEME.success}${t('apiKey.switched', { provider: session.provider.name })}${ANSI.reset || ''}\n`);
+}
+
+async function switchLanguage(args, { screen, session }) {
+  const t = getTranslator(session);
+  const [localeInput] = args;
+  const currentLocale = normalizeLocale(session.settings.ui?.locale);
+
+  if (!localeInput) {
+    const selectedLocale = await promptForOption({
+      screen,
+      session,
+      name: t('init.language'),
+      options: listLocales(),
+      defaultValue: currentLocale,
+      t,
+    });
+    if (!selectedLocale) {
+      screen.write(`${THEME.dim}${t('language.current', { language: getLocaleLabel(currentLocale), locale: currentLocale })}${ANSI.reset || ''}\n`);
+      screen.write(`${THEME.dim}${t('language.available', { locales: listLocales().map((locale) => `${locale.value}=${locale.label}`).join(', ') })}${ANSI.reset || ''}\n`);
+      screen.write(`${THEME.dim}${t('language.usage')}${ANSI.reset || ''}\n`);
+      return;
+    }
+    await switchLanguage([selectedLocale], { screen, session });
+    return;
+  }
+
+  const locale = normalizeLocale(localeInput);
+  const supported = listLocales().some((item) => item.value === locale);
+  if (!supported || (locale === 'en' && !/^en|english$/i.test(localeInput) && localeInput !== 'en')) {
+    screen.write(`${THEME.error}${t('language.unknown', { locale: localeInput })}${ANSI.reset || ''}\n`);
+    screen.write(`${THEME.dim}${t('language.available', { locales: listLocales().map((item) => item.value).join(', ') })}${ANSI.reset || ''}\n`);
+    return;
+  }
+
+  session.settings.ui = { ...(session.settings.ui || {}), locale };
+  if (session.permissionManager) {
+    session.permissionManager.locale = locale;
+  }
+  updateUserSettings({ ui: { locale } });
+  const nextT = getTranslator(session);
+  screen.write(`${THEME.success}${nextT('language.switched', { language: getLocaleLabel(locale), locale })}${ANSI.reset || ''}\n`);
 }
 
 function showCost({ screen, session }) {
@@ -680,13 +893,14 @@ function showCost({ screen, session }) {
 }
 
 async function showSessions({ screen, session }) {
+  const t = getTranslator(session);
   const sessions = listSessions(session.settings);
   if (sessions.length === 0) {
-    screen.write(`${THEME.dim}No previous sessions found.${ANSI.reset || ''}\n`);
+    screen.write(`${THEME.dim}${t('sessions.none')}${ANSI.reset || ''}\n`);
     return;
   }
 
-  screen.write(`\n${THEME.heading}Previous Sessions${ANSI.reset || ''}\n`);
+  screen.write(`\n${THEME.heading}${t('sessions.title')}${ANSI.reset || ''}\n`);
   screen.write(`${THEME.border}──────────────────────────────────${ANSI.reset || ''}\n`);
 
   for (const s of sessions.slice(0, 20)) {
@@ -701,11 +915,12 @@ async function showSessions({ screen, session }) {
 }
 
 async function resumeSession(args, { screen, session }) {
+  const t = getTranslator(session);
   const [sessionId] = args;
   const sessions = listSessions(session.settings);
 
   if (sessions.length === 0) {
-    screen.write(`${THEME.warning}No previous sessions found.${ANSI.reset || ''}\n`);
+    screen.write(`${THEME.warning}${t('sessions.none')}${ANSI.reset || ''}\n`);
     return;
   }
 
@@ -713,11 +928,24 @@ async function resumeSession(args, { screen, session }) {
   if (sessionId) {
     targetSession = sessions.find(s => s.id.startsWith(sessionId));
   } else {
-    targetSession = sessions[0];
+    const selectedSessionId = await promptForOption({
+      screen,
+      session,
+      name: t('sessions.title'),
+      options: sessions.slice(0, 20).map((candidate) => ({
+        value: candidate.id,
+        label: formatSessionOption(candidate),
+      })),
+      defaultValue: sessions[0]?.id,
+      t,
+    });
+    targetSession = selectedSessionId
+      ? sessions.find(s => s.id === selectedSessionId)
+      : sessions[0];
   }
 
   if (!targetSession) {
-    screen.write(`${THEME.error}Session not found: ${sessionId}${ANSI.reset || ''}\n`);
+    screen.write(`${THEME.error}${t('sessions.notFound', { id: sessionId })}${ANSI.reset || ''}\n`);
     return;
   }
 
@@ -730,37 +958,52 @@ async function resumeSession(args, { screen, session }) {
 
   session.messages = restored;
   session.id = targetSession.id;
-  screen.write(`${THEME.success}Resumed session ${targetSession.id.slice(0, 20)}${ANSI.reset || ''} ${THEME.dim}(${restored.length} messages restored)${ANSI.reset || ''}\n\n`);
+  screen.write(`${THEME.success}${t('sessions.resumed', { id: targetSession.id.slice(0, 20), count: restored.length })}${ANSI.reset || ''}\n\n`);
+}
+
+function formatSessionOption(session) {
+  const entries = session.entries();
+  const userMessages = entries.filter(e => e.role === 'user');
+  const firstMsg = userMessages[0]?.content || '(empty)';
+  const preview = firstMsg.length > 48 ? firstMsg.slice(0, 45) + '...' : firstMsg;
+  const date = new Date(session.updatedAt).toLocaleString();
+  return `${session.id.slice(0, 12)}  ${date}  ${preview}`;
 }
 
 function showConfig({ screen, session }) {
-  screen.write(`\n${THEME.heading}Configuration${ANSI.reset || ''}\n`);
+  const t = getTranslator(session);
+  const locale = normalizeLocale(session.settings.ui?.locale);
+  screen.write(`\n${THEME.heading}${t('config.title')}${ANSI.reset || ''}\n`);
   screen.write(`${THEME.border}──────────────────────────────────${ANSI.reset || ''}\n`);
-  screen.write(`  ${THEME.dim}Provider:${ANSI.reset || ''}     ${session.provider.name}\n`);
-  screen.write(`  ${THEME.dim}Model:${ANSI.reset || ''}       ${session.provider.model}\n`);
-  screen.write(`  ${THEME.dim}API URL:${ANSI.reset || ''}     ${session.provider.apiUrl || 'default'}\n`);
-  screen.write(`  ${THEME.dim}API Key:${ANSI.reset || ''}     ${session.provider.apiKey ? '●●●●●●●●' : 'not set'}\n`);
-  screen.write(`  ${THEME.dim}Max Turns:${ANSI.reset || ''}    ${session.settings.agent?.maxTurns || 20}\n`);
-  screen.write(`  ${THEME.dim}Temperature:${ANSI.reset || ''}  ${session.settings.agent?.temperature || 0.2}\n`);
-  screen.write(`  ${THEME.dim}Project Root:${ANSI.reset || ''} ${session.settings.projectRoot || process.cwd()}\n`);
-  screen.write(`  ${THEME.dim}Shell:${ANSI.reset || ''}        ${session.settings.tools?.shell?.enabled ? 'enabled' : 'disabled'}\n`);
+  screen.write(`  ${THEME.dim}${t('config.provider')}${ANSI.reset || ''}     ${session.provider.name}\n`);
+  screen.write(`  ${THEME.dim}${t('config.model')}${ANSI.reset || ''}       ${session.provider.model}\n`);
+  screen.write(`  ${THEME.dim}${t('config.apiUrl')}${ANSI.reset || ''}     ${session.provider.apiUrl || t('common.default')}\n`);
+  screen.write(`  ${THEME.dim}${t('config.apiKey')}${ANSI.reset || ''}     ${session.provider.apiKey ? '********' : t('common.notSet')}\n`);
+  screen.write(`  ${THEME.dim}${t('config.language')}${ANSI.reset || ''}     ${getLocaleLabel(locale)} (${locale})\n`);
+  screen.write(`  ${THEME.dim}${t('config.maxTurns')}${ANSI.reset || ''}    ${session.settings.agent?.maxTurns || 20}\n`);
+  screen.write(`  ${THEME.dim}${t('config.temperature')}${ANSI.reset || ''}  ${session.settings.agent?.temperature || 0.2}\n`);
+  screen.write(`  ${THEME.dim}${t('config.projectRoot')}${ANSI.reset || ''} ${session.settings.projectRoot || process.cwd()}\n`);
+  screen.write(`  ${THEME.dim}${t('config.shell')}${ANSI.reset || ''}        ${session.settings.tools?.shell?.enabled ? t('common.enabled') : t('common.disabled')}\n`);
   screen.write('\n');
 }
 
 function runDoctor({ screen, session }) {
-  screen.write(`\n${THEME.heading}Diagnostics${ANSI.reset || ''}\n`);
+  const t = getTranslator(session);
+  const locale = normalizeLocale(session.settings.ui?.locale);
+  screen.write(`\n${THEME.heading}${t('doctor.title')}${ANSI.reset || ''}\n`);
   screen.write(`${THEME.border}──────────────────────────────────${ANSI.reset || ''}\n`);
 
   const checks = [
-    { name: 'Node.js', check: () => process.version },
-    { name: 'Provider', check: () => session.provider.name },
-    { name: 'Model', check: () => session.provider.model },
-    { name: 'API Key', check: () => session.provider.apiKey ? `${THEME.success}�?set${ANSI.reset || ''}` : `${THEME.error}�?not set${ANSI.reset || ''}` },
-    { name: 'API URL', check: () => session.provider.apiUrl || 'default' },
-    { name: 'Shell Tool', check: () => session.settings.tools?.shell?.enabled ? `${THEME.success}�?enabled${ANSI.reset || ''}` : `${THEME.warning}�?disabled${ANSI.reset || ''}` },
-    { name: 'TTY', check: () => new TerminalScreen().isTTY() ? `${THEME.success}�?yes${ANSI.reset || ''}` : `${THEME.warning}�?no${ANSI.reset || ''}` },
-    { name: 'Terminal', check: () => `${process.stdout.columns}x${process.stdout.rows}` },
-    { name: 'Session ID', check: () => session.id.slice(0, 20) },
+    { name: t('doctor.node'), check: () => process.version },
+    { name: t('doctor.provider'), check: () => session.provider.name },
+    { name: t('doctor.model'), check: () => session.provider.model },
+    { name: t('doctor.apiKey'), check: () => session.provider.apiKey ? `${THEME.success}${t('doctor.okSet')}${ANSI.reset || ''}` : `${THEME.error}${t('doctor.missing')}${ANSI.reset || ''}` },
+    { name: t('doctor.apiUrl'), check: () => session.provider.apiUrl || t('common.default') },
+    { name: t('doctor.language'), check: () => `${getLocaleLabel(locale)} (${locale})` },
+    { name: t('doctor.shellTool'), check: () => session.settings.tools?.shell?.enabled ? `${THEME.success}${t('common.enabled')}${ANSI.reset || ''}` : `${THEME.warning}${t('common.disabled')}${ANSI.reset || ''}` },
+    { name: t('doctor.tty'), check: () => new TerminalScreen().isTTY() ? `${THEME.success}${t('common.yes')}${ANSI.reset || ''}` : `${THEME.warning}${t('common.no')}${ANSI.reset || ''}` },
+    { name: t('doctor.terminal'), check: () => `${process.stdout.columns}x${process.stdout.rows}` },
+    { name: t('doctor.sessionId'), check: () => session.id.slice(0, 20) },
   ];
 
   for (const { name, check } of checks) {
@@ -782,6 +1025,7 @@ function toggleVim({ screen }) {
 
 function handleMemoryCommand(args, { screen, session }) {
   const { listMemories, readMemory, writeMemory, deleteMemory } = require('./memory');
+  const t = getTranslator(session);
   const [subCommand, ...subArgs] = args;
 
   switch (subCommand) {
@@ -835,6 +1079,7 @@ function handleMemoryCommand(args, { screen, session }) {
     }
     default:
       screen.write(`${THEME.error}Unknown memory command: ${subCommand}${ANSI.reset || ''}\n`);
+      writeCommandSuggestion(screen, t, getSubcommandSuggestion('memory', subCommand));
       screen.write(`${THEME.dim}Usage: /memory [list|read|write|delete]${ANSI.reset || ''}\n`);
   }
 }
@@ -842,6 +1087,7 @@ function handleMemoryCommand(args, { screen, session }) {
 async function handleTeamCommand(args, { screen, session }) {
   const runtime = createCliTeamRuntime(session.settings);
   const [subCommand = 'status', ...subArgs] = args;
+  const t = getTranslator(session);
 
   try {
     const output = await executeTeamCommand(runtime, subCommand, subArgs, { settings: session.settings, session });
@@ -850,6 +1096,7 @@ async function handleTeamCommand(args, { screen, session }) {
     }
   } catch (error) {
     screen.write(`${THEME.error}Error: ${error.message}${ANSI.reset || ''}\n`);
+    writeCommandSuggestion(screen, t, getSubcommandSuggestion('team', subCommand));
   }
 }
 
@@ -980,8 +1227,9 @@ async function executeTeamCommand(runtime, subCommand, args, context = {}) {
 
 async function printModels(provider, output) {
   const models = await provider.listModels();
+  const t = createTranslator(loadSettings().ui?.locale);
 
-  output.write(`\n${THEME.heading}Available Models for ${provider.name}${ANSI.reset || ''}\n`);
+  output.write(`\n${THEME.heading}${t('models.title', { provider: provider.name })}${ANSI.reset || ''}\n`);
   output.write(`${THEME.border}──────────────────────────────────${ANSI.reset || ''}\n`);
 
   models.forEach((model, index) => {
@@ -1003,8 +1251,8 @@ function resolveModelSelection(selection, models) {
   return selection;
 }
 
-function persistAgentSettings(agentSettings) {
-  updateUserSettings({ agent: agentSettings });
+function persistAgentSettings(agentSettings, settings = {}) {
+  updateUserSettings({ agent: agentSettings }, { env: settings.env });
 }
 
 async function handleUpdateCheck(args, { screen }) {
@@ -1060,4 +1308,6 @@ module.exports = {
   resolveModelSelection,
   persistAgentSettings,
   createCliTeamRuntime,
+  getSlashCommandSuggestion,
+  getSubcommandSuggestion,
 };

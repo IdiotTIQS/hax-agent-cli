@@ -1,4 +1,5 @@
 const { createSessionId } = require('./memory');
+const { createTranslator } = require('./i18n');
 
 class InputHistory {
   constructor(maxSize = 1000) {
@@ -145,6 +146,7 @@ class Session {
   }
 
   getStatusLine() {
+    const t = createTranslator(this.settings?.ui?.locale);
     const provider = this.provider?.name || 'provider';
     const model = this.provider?.model || 'model';
     const cost = this.costTracker.getCost(model);
@@ -154,7 +156,7 @@ class Session {
     let permMode = '';
     if (this.permissionManager) {
       const mode = this.permissionManager.mode;
-      const modeLabel = mode === 'yolo' ? 'YOLO' : '标准';
+      const modeLabel = mode === 'yolo' ? 'YOLO' : t('common.mode.standard');
       const modeColor = mode === 'yolo' ? '\x1B[93m' : '\x1B[92m';
       permMode = ` · ${modeColor}${modeLabel}\x1B[0m`;
     }

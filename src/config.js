@@ -32,6 +32,9 @@ const DEFAULT_SETTINGS = Object.freeze({
   updates: {
     autoInstall: false,
   },
+  ui: {
+    locale: 'en',
+  },
   tools: {
     shell: {
       enabled: true,
@@ -159,6 +162,7 @@ function readEnvOverrides(env = process.env) {
   setIfDefined(overrides, ['prompts', 'maxTranscriptMessages'], parseNumberEnv(env, 'HAX_AGENT_MAX_TRANSCRIPT_MESSAGES'));
   setIfDefined(overrides, ['permissions', 'mode'], env.HAX_AGENT_PERMISSIONS_MODE);
   setIfDefined(overrides, ['updates', 'autoInstall'], parseBooleanEnv(env, 'HAX_AGENT_UPDATES_AUTO_INSTALL'));
+  setIfDefined(overrides, ['ui', 'locale'], env.HAX_AGENT_LOCALE || env.HAX_AGENT_LANGUAGE);
   setIfDefined(overrides, ['tools', 'shell', 'enabled'], parseBooleanEnv(env, 'HAX_AGENT_SHELL_ENABLED'));
   setIfDefined(overrides, ['tools', 'shell', 'allowedCommands'], parseListEnv(env, 'HAX_AGENT_SHELL_COMMANDS'));
   setIfDefined(overrides, ['tools', 'shell', 'timeoutMs'], parseNumberEnv(env, 'HAX_AGENT_SHELL_TIMEOUT_MS'));

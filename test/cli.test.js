@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
+const { getSlashCommandSuggestion, getSubcommandSuggestion } = require('../src/slash-commands');
 
 const cliPath = path.join(__dirname, '..', 'src', 'cli.js');
 
@@ -81,7 +82,7 @@ test('runs the init wizard and saves settings', () => {
   const result = spawnSync(process.execPath, [cliPath, 'init'], {
     encoding: 'utf8',
     env: createIsolatedEnv({ HAX_AGENT_USER_SETTINGS: settingsPath }),
-    input: '2\nsk-test\nhttps://api.example.test/v1\ncustom-model\n1\nn\n',
+    input: '2\nsk-test\nhttps://api.example.test/v1\ncustom-model\n1\n1\nn\n',
   });
   const saved = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
 
@@ -93,6 +94,7 @@ test('runs the init wizard and saves settings', () => {
   assert.equal(saved.agent.apiKey, 'sk-test');
   assert.equal(saved.agent.apiUrl, 'https://api.example.test/v1');
   assert.equal(saved.agent.model, 'custom-model');
+  assert.equal(saved.ui.locale, 'en');
   assert.equal(saved.permissions.mode, 'normal');
   assert.equal(saved.memory.enabled, false);
   assert.equal(result.stderr, '');
@@ -249,12 +251,93 @@ test('rejects unknown commands', () => {
   assert.match(stripAnsi(result.stdout), /Usage/);
 });
 
+test('suggests close top-level commands', () => {
+  const result = runCli(['modles']);
+  const plain = stripAnsi(result.stderr);
+
+  assert.equal(result.status, 1);
+  assert.match(plain, /Unknown command: modles/);
+  assert.match(plain, /Did you mean: hax-agent models\?/);
+});
+
+test('suggests close slash commands in the interactive shell', () => {
+  const result = runCli([], {
+    input: '/modle\n/exit\n',
+  });
+  const plain = stripAnsi(result.stdout);
+
+  assert.equal(result.status, 0);
+  assert.match(plain, /Unknown command: \/modle/);
+  assert.match(plain, /Did you mean \/model\?/);
+  assert.equal(result.stderr, '');
+});
+
+test('suggests close slash commands across the command set', () => {
+  const cases = [
+    ['modle', 'model'],
+    ['provder', 'provider'],
+    ['langauge', 'language'],
+    ['permissons', 'permissions'],
+    ['resuem', 'resume'],
+    ['sesions', 'sessions'],
+    ['docter', 'doctor'],
+    ['updtae', 'update'],
+    ['memroy', 'memory'],
+    ['skils', 'skills'],
+    ['skilify', 'skillify'],
+    ['agnts', 'agents'],
+    ['apiurl', 'api-url'],
+    ['apikey', 'api-key'],
+  ];
+
+  for (const [input, expected] of cases) {
+    assert.equal(getSlashCommandSuggestion(input), expected);
+  }
+});
+
+test('suggests close slash subcommands', () => {
+  const cases = [
+    ['permissions', 'stats', '/permissions status'],
+    ['permissions', 'rest', '/permissions reset'],
+    ['permissions', 'mdoe', '/permissions mode'],
+    ['memory', 'lsit', '/memory list'],
+    ['memory', 'raed', '/memory read'],
+    ['memory', 'delte', '/memory delete'],
+    ['skills', 'usgae', '/skills usage'],
+    ['team', 'agnets', '/team agents'],
+    ['team', 'stats', '/team status'],
+    ['team', 'spwan', '/team spawn'],
+    ['team', 'inbx', '/team inbox'],
+  ];
+
+  for (const [command, input, expected] of cases) {
+    assert.equal(getSubcommandSuggestion(command, input), expected);
+  }
+});
+
 test('rejects missing team name with usage guidance', () => {
   const result = runCli(['team']);
 
   assert.equal(result.status, 1);
   assert.match(result.stderr, /Usage: hax-agent team/);
   assert.equal(result.stdout, '');
+});
+
+test('switches language in the interactive shell', () => {
+  const result = runCli([], {
+    input: '/language\n/language zh-CN\n/config\n/language zh-TW\n/config\n/language ru\n/config\n/exit\n',
+  });
+  const plain = stripAnsi(result.stdout);
+
+  assert.equal(result.status, 0);
+  assert.match(plain, /Current language: English \(en\)/);
+  assert.match(plain, /语言已切换为 中文简体 \(zh-CN\)/);
+  assert.match(plain, /语言:\s+中文简体 \(zh-CN\)/);
+  assert.match(plain, /語言已切換為 中文繁體（台灣地區） \(zh-TW\)/);
+  assert.match(plain, /語言:\s+中文繁體（台灣地區） \(zh-TW\)/);
+  assert.match(plain, /Язык переключен на Русский \(ru\)/);
+  assert.match(plain, /Язык:\s+Русский \(ru\)/);
+  assert.equal(result.stderr, '');
 });
 
 test('update command checks without installing by default', () => {
