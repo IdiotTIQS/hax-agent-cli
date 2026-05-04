@@ -1,13 +1,13 @@
-# Hax Agent CLI
+# Hax Agent
 
-> — Lightweight, Claude-like Local Agent CLI · Developed by [IdiotTIQS](https://github.com/IdiotTIQS)
+> Lightweight, Claude-like local agent tooling with CLI as the primary entry point and an Electron + Vue desktop app · Developed by [IdiotTIQS](https://github.com/IdiotTIQS)
 
 [![Node.js](https://img.shields.io/badge/Node.js-%3E%3D18-brightgreen)](https://nodejs.org)
 [![License](https://img.shields.io/badge/License-MIT-blue)](#license)
 [![PRs](https://img.shields.io/badge/PRs-welcome-brightgreen)](#development--contributing)
 [![npm](https://img.shields.io/npm/v/hax-agent-cli)](https://www.npmjs.com/package/hax-agent-cli)
 
-Hax Agent CLI is an AI coding assistant for developers, offering a Claude-like terminal experience. It supports three major AI providers — Anthropic, OpenAI, and Google — and features interactive chat, multi-provider switching, local file tools, session memory management, and multi-agent team collaboration plan generation.
+Hax Agent is an AI coding assistant for developers, with CLI as the primary entry point and an Electron + Vue desktop app alongside it. It supports three major AI providers — Anthropic, OpenAI, and Google — and features interactive chat, multi-provider switching, local file tools, session memory management, recent session recovery, and multi-agent team collaboration plan generation.
 
 ---
 
@@ -16,6 +16,7 @@ Hax Agent CLI is an AI coding assistant for developers, offering a Claude-like t
 - [Features](#features)
 - [Prerequisites](#prerequisites)
 - [Quick Start](#quick-start)
+- [Desktop App](#desktop-app)
 - [Usage](#usage)
 - [Interactive Commands](#interactive-commands)
 - [Skills System](#skills-system)
@@ -32,6 +33,7 @@ Hax Agent CLI is an AI coding assistant for developers, offering a Claude-like t
 ## Features
 
 - **Interactive Agent Shell** — Enters chat mode by default, supporting continuous contextual conversations, slash commands, and streaming output.
+- **Desktop GUI** — Electron + Vue interface that keeps the CLI workflow intact while adding session lists, file tree browsing, a right-side status panel, and session recovery.
 - **Multi-Provider Support** — Built-in Anthropic (Claude), OpenAI (GPT), and Google (Gemini) providers with runtime switching.
 - **Model Management** — View available models and switch models at runtime.
 - **Local Toolset** — File read/write, search, glob matching, and allowlist-restricted shell command execution.
@@ -96,6 +98,22 @@ Set up within the Shell at runtime:
 
 Or pre-configure via environment variables (see [Configuration](#configuration)).
 
+## Desktop App
+
+The desktop app shares the same configuration, session storage, and tool layer as the CLI.
+
+### Start the dev build
+
+```bash
+npm run desktop:dev
+```
+
+### Build the desktop app
+
+```bash
+npm run desktop:build
+```
+
 ---
 
 ## Usage
@@ -127,6 +145,8 @@ hax-agent            # Available from any directory
 | Command | Description |
 |---------|-------------|
 | `npm start` | Start the CLI (`node src/cli.js`) |
+| `npm run desktop:dev` | Start the Electron + Vue desktop app in development mode |
+| `npm run desktop:build` | Build the desktop frontend assets |
 | `npm run auth:team` | Output the auth-refactor team plan |
 | `npm test` | Run the test suite |
 
@@ -389,6 +409,13 @@ src/
 │
 └── formatters/                   # Output formatting
     └── team-plan.js              #   Team plan formatting
+
+desktop/
+├── main/                         # Electron main process
+├── preload/                      # Preload script
+└── renderer/                     # Vue desktop frontend
+    ├── src/
+    └── vite.config.js
 ```
 
 ### Core Module Responsibilities
@@ -402,6 +429,7 @@ src/
 | `runtime/` | Session management, agent role orchestration, task scheduling, command parsing |
 | `teams/auth-refactor.js` | Multi-agent collaboration plan definition (architect, developer, reviewer, etc.) |
 | `tools/index.js` | Tool registry, path security validation, execution sandbox |
+| `desktop/` | Electron main process, preload script, and Vue desktop UI |
 
 ---
 
@@ -421,6 +449,7 @@ All session transcripts are saved as JSONL files in the configuration directory:
 - Each record is a single line of JSON, containing `timestamp`, `role`, `content`, and other fields.
 - New sessions automatically generate filenames based on timestamp + random suffix.
 - On startup, the most recent transcript is automatically loaded as context.
+- The desktop app's "Recent Sessions" list reads from the same transcript files and can resume historical conversations.
 
 ### Memory Storage
 
@@ -484,6 +513,7 @@ test/
 ### Directory Conventions
 
 - `src/` — Source code, following CommonJS module conventions
+- `desktop/` — Desktop app source, sharing the same core layer as the CLI
 - `test/` — Test files, one-to-one mapping with tested modules
 - `.hax-agent/` — Runtime data (sessions, memories, settings), already in `.gitignore`
 

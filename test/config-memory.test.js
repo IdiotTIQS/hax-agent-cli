@@ -9,6 +9,7 @@ const {
   context,
   memory,
 } = require('../src');
+const { CostTracker } = require('../src/session');
 
 function createTempProject() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'hax-agent-'));
@@ -89,6 +90,29 @@ test('stores and reads persistent memories and session transcripts', () => {
 
   assert.deepEqual(memory.readTranscript(sessionId, settings).map((entry) => entry.content), ['hello', 'hi']);
   assert.equal(memory.listSessions(settings).length, 1);
+});
+
+test('appends to resumed transcript ids without adding another hash suffix', () => {
+  const projectRoot = createTempProject();
+  const settings = config.loadSettings({ projectRoot, env: {} });
+  const sessionId = memory.createSessionId(new Date('2026-04-28T10:00:00.000Z'));
+
+  memory.appendTranscriptEntry(sessionId, { role: 'user', content: 'first' }, settings);
+  const storedSessionId = memory.listSessions(settings)[0].id;
+  memory.appendTranscriptEntry(storedSessionId, { role: 'assistant', content: 'second' }, settings);
+
+  assert.equal(memory.listSessions(settings).length, 1);
+  assert.deepEqual(memory.readTranscript(storedSessionId, settings).map((entry) => entry.content), ['first', 'second']);
+});
+
+test('cost tracker accepts camelCase usage and model family pricing fallbacks', () => {
+  const tracker = new CostTracker();
+
+  tracker.addUsage({ inputTokens: 1000, outputTokens: 500 }, 'claude-sonnet-4-6');
+
+  assert.equal(tracker.inputTokens, 1000);
+  assert.equal(tracker.outputTokens, 500);
+  assert.ok(tracker.getCost('claude-sonnet-4-6') > 0);
 });
 
 test('assembles prompt context from settings, memory, transcript, and user prompt', () => {

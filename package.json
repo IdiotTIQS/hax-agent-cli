@@ -8,6 +8,9 @@
   },
   "scripts": {
     "start": "node src/cli.js",
+    "desktop:dev": "node desktop/scripts/dev.js",
+    "desktop:start": "electron desktop/main/index.js",
+    "desktop:build": "vite build --config desktop/renderer/vite.config.js",
     "auth:team": "node src/cli.js team auth-refactor",
     "test": "node --test test/*.test.js",
     "prepublishOnly": "npm test"
@@ -43,6 +46,12 @@
     "@anthropic-ai/sdk": "latest",
     "@google/generative-ai": "^0.24.1",
     "openai": "^6.35.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.2.4",
+    "electron": "^37.5.1",
+    "vite": "^6.3.6",
+    "vue": "^3.5.22"
   },
   "engines": {
     "node": ">=18"

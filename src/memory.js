@@ -137,6 +137,15 @@ function deleteMemory(name, options = {}) {
 
 function getSessionTranscriptPath(sessionId, options = {}) {
   const storage = createStorage(options);
+  const transcriptId = String(sessionId || '').trim();
+
+  if (isFileSafeName(transcriptId)) {
+    const directPath = path.join(storage.sessionDirectory, `${transcriptId}.jsonl`);
+
+    if (fs.existsSync(directPath) || isGeneratedTranscriptId(transcriptId)) {
+      return directPath;
+    }
+  }
 
   return path.join(storage.sessionDirectory, `${toFileSafeName(sessionId, 'session id')}.jsonl`);
 }
@@ -193,6 +202,14 @@ function toFileSafeName(value, label) {
   const hash = crypto.createHash('sha256').update(text).digest('hex').slice(0, 8);
 
   return `${slug || 'item'}-${hash}`;
+}
+
+function isFileSafeName(value) {
+  return /^[a-zA-Z0-9._-]+$/.test(value) && value === path.basename(value);
+}
+
+function isGeneratedTranscriptId(value) {
+  return /^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z-[a-f0-9]{8}-[a-f0-9]{8}$/i.test(value);
 }
 
 module.exports = {

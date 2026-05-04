@@ -18,6 +18,7 @@ const { checkForUpdate, performUpdate, restartProcess } = require('./updater');
 const { PROVIDERS, chooseOptionWithArrows } = require('./init-wizard');
 const { createTranslator, getLocaleLabel, listLocales, normalizeLocale } = require('./i18n');
 const { suggestCommand } = require('./command-suggestions');
+const { AgentEngine, AgentEventType } = require('./agent-engine');
 
 const SLASH_COMMANDS = [
   { name: 'help', descriptionKey: 'cmd.help', description: 'Show available commands and shortcuts', aliases: ['h', '?'] },
@@ -160,172 +161,75 @@ function loadRecentTranscript(session) {
 }
 
 async function handleChatMessage(content, { screen, session, markdown }) {
-  const skillMatch = content.match(/^\/(\S+)(?:\s+(.*))?$/);
-
-  if (skillMatch) {
-    const skillName = skillMatch[1];
-    const skillArgs = skillMatch[2] ? skillMatch[2].split(/\s+/) : [];
-    const skills = loadAllSkills(session.settings.projectRoot || process.cwd());
-    const skillify = createSkillifySkill(session.messages);
-    const allSkills = [skillify, ...skills];
-    const matchedSkill = allSkills.find((s) => s.name === skillName && !s.isHidden);
-
-    if (matchedSkill) {
-      recordSkillUsage(matchedSkill.name);
-      await handleSkillInvocation(matchedSkill, skillArgs, { screen, session, markdown });
-      return;
-    }
-  }
-
-  const skills = getSkillsForSession(session.settings.projectRoot, session.messages);
-  const intentMatchedSkill = matchSkillByIntent(content, skills);
-
-  if (intentMatchedSkill) {
-    recordSkillUsage(intentMatchedSkill.name);
-    screen.write(`${THEME.dim}Auto-invoking skill: ${intentMatchedSkill.displayName || intentMatchedSkill.name}${ANSI.reset || ''}\n`);
-    await handleSkillInvocation(intentMatchedSkill, [], { screen, session, markdown });
-    return;
-  }
-
-  const skillSystemPrompt = buildSkillSystemPrompt(skills);
-  const userMessage = { role: 'user', content };
-  const abortController = new AbortController();
   const renderer = new ResponseRenderer(screen, markdown);
-  let assistantText = '';
+  const engine = new AgentEngine({ session, projectRoot: session.settings.projectRoot });
 
-  session.toolRegistry.resetSingleCallTracking();
-  session.messages.push(userMessage);
-  session.isStreaming = true;
-  session.responseInterrupted = false;
-  session.responseAbortController = abortController;
-  session.responseRenderer = renderer;
-  renderer.startWaiting();
-  const turnInputTokens = session.costTracker.inputTokens;
-  const turnOutputTokens = session.costTracker.outputTokens;
-
-  try {
-    for await (const chunk of session.provider.stream({
-      messages: session.messages,
-      toolRegistry: session.toolRegistry,
-      signal: abortController.signal,
-      system: skillSystemPrompt,
-    })) {
-      if (session.responseInterrupted) break;
-
-      if (chunk.type === 'text') {
-        assistantText += chunk.delta;
-        renderer.writeText(chunk.delta);
-
-        if (process.env.HAX_AGENT_TEST_INTERRUPT_AFTER_TEXT === '1') {
-          session.responseInterrupted = true;
-          renderer.interrupt();
-          break;
-        }
-      } else if (chunk.type === 'thinking') {
-        renderer.thinking(chunk);
-      } else if (chunk.type === 'tool_start') {
-        session.costTracker.addToolCall();
-        renderer.startTool(chunk);
-      } else if (chunk.type === 'tool_result') {
-        renderer.finishTool(chunk);
-      } else if (chunk.type === 'tool_limit') {
-        renderer.notice(`Tool turn limit reached after ${chunk.maxToolTurns} turns. Type /continue if you need more.`);
-      } else if (chunk.type === 'usage') {
-        session.costTracker.addUsage(chunk, session.provider.model);
-      }
-    }
-  } catch (error) {
-    if (session.responseInterrupted || error?.name === 'AbortError') {
-      session.messages.pop();
-      return;
-    }
-
-    renderer.fail(formatProviderError(error, session.provider));
-    session.messages.pop();
-    return;
-  } finally {
-    session.isStreaming = false;
-    session.responseAbortController = null;
-    session.responseRenderer = null;
+  for await (const event of engine.sendMessage(content)) {
+    renderAgentEvent(event, { screen, session, renderer });
   }
-
-  if (session.responseInterrupted) {
-    session.messages.pop();
-    return;
-  }
-
-  const turnUsage = {
-    inputTokens: session.costTracker.inputTokens - turnInputTokens,
-    outputTokens: session.costTracker.outputTokens - turnOutputTokens,
-  };
-
-  renderer.complete(turnUsage);
-  session.messages.push({ role: 'assistant', content: assistantText });
-  appendTranscriptEntry(session.id, userMessage, session.settings);
-  appendTranscriptEntry(session.id, { role: 'assistant', content: assistantText }, session.settings);
 }
 
 async function handleSkillInvocation(skill, args, { screen, session, markdown }) {
-  screen.write(`${THEME.skillIndicator}Skill${ANSI.reset || ''} ${THEME.accent}${skill.displayName || skill.name}${ANSI.reset || ''}\n`);
+  const renderer = new ResponseRenderer(screen, markdown);
+  const engine = new AgentEngine({ session, projectRoot: session.settings.projectRoot });
 
-  try {
-    const promptBlocks = await skill.getPromptForCommand(args);
-    const skillContent = promptBlocks.map((b) => b.text).join('\n');
-
-    const userMessage = { role: 'user', content: skillContent };
-    session.messages.push(userMessage);
-
-    const abortController = new AbortController();
-    const renderer = new ResponseRenderer(screen, markdown);
-    let assistantText = '';
-
-    session.isStreaming = true;
-    session.responseInterrupted = false;
-    session.responseAbortController = abortController;
-    session.responseRenderer = renderer;
-    renderer.startWaiting();
-
-    const otherSkills = getSkillsForSession(session.settings.projectRoot, session.messages).filter((s) => s.name !== skill.name);
-    const skillSystemPrompt = buildSkillSystemPrompt(otherSkills);
-
-    for await (const chunk of session.provider.stream({
-      messages: session.messages,
-      toolRegistry: session.toolRegistry,
-      signal: abortController.signal,
-      system: skillSystemPrompt,
-    })) {
-      if (session.responseInterrupted) break;
-
-      if (chunk.type === 'text') {
-        assistantText += chunk.delta;
-        renderer.writeText(chunk.delta);
-      } else if (chunk.type === 'thinking') {
-        renderer.thinking(chunk);
-      } else if (chunk.type === 'tool_start') {
-        session.costTracker.addToolCall();
-        renderer.startTool(chunk);
-      } else if (chunk.type === 'tool_result') {
-        renderer.finishTool(chunk);
-      } else if (chunk.type === 'usage') {
-        session.costTracker.addUsage(chunk, session.provider.model);
-      }
-    }
-
-    if (!session.responseInterrupted) {
-      renderer.complete({ inputTokens: 0, outputTokens: 0 });
-      session.messages.push({ role: 'assistant', content: assistantText });
-      appendTranscriptEntry(session.id, userMessage, session.settings);
-      appendTranscriptEntry(session.id, { role: 'assistant', content: assistantText }, session.settings);
-    } else {
-      session.messages.pop();
-    }
-  } catch (error) {
-    screen.write(`${THEME.error}Skill execution failed: ${error.message}${ANSI.reset || ''}\n`);
-  } finally {
-    session.isStreaming = false;
-    session.responseAbortController = null;
-    session.responseRenderer = null;
+  for await (const event of engine.invokeSkill(skill, args)) {
+    renderAgentEvent(event, { screen, session, renderer });
   }
+}
+
+function renderAgentEvent(event, { screen, session, renderer }) {
+  switch (event.type) {
+    case AgentEventType.skillMatched:
+      screen.write(`${THEME.dim}Auto-invoking skill: ${event.skill.displayName || event.skill.name}${ANSI.reset || ''}\n`);
+      break;
+    case AgentEventType.skillStart:
+      screen.write(`${THEME.skillIndicator}Skill${ANSI.reset || ''} ${THEME.accent}${event.skill.displayName || event.skill.name}${ANSI.reset || ''}\n`);
+      break;
+    case AgentEventType.started:
+      session.responseRenderer = renderer;
+      renderer.startWaiting();
+      break;
+    case AgentEventType.messageDelta:
+      renderer.writeText(event.delta);
+      break;
+    case AgentEventType.thinking:
+      renderer.thinking(event);
+      break;
+    case AgentEventType.toolStart:
+      renderer.startTool(toProviderChunk('tool_start', event));
+      break;
+    case AgentEventType.toolResult:
+      renderer.finishTool(toProviderChunk('tool_result', event));
+      break;
+    case AgentEventType.toolLimit:
+      renderer.notice(`Tool turn limit reached after ${event.maxToolTurns} turns. Type /continue if you need more.`);
+      break;
+    case AgentEventType.completed:
+      renderer.complete(event.usage);
+      break;
+    case AgentEventType.interrupted:
+      renderer.interrupt();
+      break;
+    case AgentEventType.failed:
+      if (event.skill && !event.provider) {
+        screen.write(`${THEME.error}Skill execution failed: ${event.error.message}${ANSI.reset || ''}\n`);
+      } else {
+        renderer.fail(formatProviderError(event.error, session.provider));
+      }
+      break;
+    default:
+      break;
+  }
+}
+
+function toProviderChunk(type, event) {
+  const chunk = { ...event, type };
+  delete chunk.sessionId;
+  delete chunk.timestamp;
+  delete chunk.provider;
+  delete chunk.status;
+  return chunk;
 }
 
 async function handleSlashCommand(line, context) {

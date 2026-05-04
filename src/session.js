@@ -63,23 +63,32 @@ class CostTracker {
     this.startTime = Date.now();
     this.pricing = {
       'claude-sonnet-4-20250514': { input: 3.0, output: 15.0, cacheWrite: 3.75, cacheRead: 0.3 },
+      'claude-opus-4-20250514': { input: 15.0, output: 75.0, cacheWrite: 18.75, cacheRead: 1.5 },
       'claude-opus-4-7': { input: 15.0, output: 75.0, cacheWrite: 18.75, cacheRead: 1.5 },
       'claude-haiku-3-5-20241022': { input: 0.8, output: 4.0, cacheWrite: 1.0, cacheRead: 0.08 },
+      'claude-3-5-sonnet-20241022': { input: 3.0, output: 15.0, cacheWrite: 3.75, cacheRead: 0.3 },
+      'claude-3-opus-20240229': { input: 15.0, output: 75.0, cacheWrite: 18.75, cacheRead: 1.5 },
       'claude-sonnet-4-7-20250501': { input: 3.0, output: 15.0, cacheWrite: 3.75, cacheRead: 0.3 },
       'gpt-4o': { input: 2.5, output: 10.0 },
       'gpt-4o-mini': { input: 0.15, output: 0.6 },
       'gpt-4.1': { input: 2.0, output: 8.0 },
+      'gpt-4.1-mini': { input: 0.4, output: 1.6 },
+      'o3-mini': { input: 1.1, output: 4.4 },
       'gemini-2.5-pro-exp-03-25': { input: 1.25, output: 10.0 },
+      'gemini-2.5-pro-preview-06-05': { input: 1.25, output: 10.0 },
       'gemini-2.5-flash-preview-04-17': { input: 0.15, output: 0.6 },
+      'gemini-2.5-flash-preview-05-20': { input: 0.15, output: 0.6 },
+      'gemini-2.0-flash': { input: 0.1, output: 0.4 },
+      'gemini-2.0-flash-lite': { input: 0.075, output: 0.3 },
     };
   }
 
   addUsage(usage, model) {
     if (!usage) return;
-    this.inputTokens += usage.input_tokens || 0;
-    this.outputTokens += usage.output_tokens || 0;
-    this.cacheCreationTokens += usage.cache_creation_input_tokens || 0;
-    this.cacheReadTokens += usage.cache_read_input_tokens || 0;
+    this.inputTokens += readUsageNumber(usage, 'input_tokens', 'inputTokens', 'prompt_tokens', 'promptTokens') || 0;
+    this.outputTokens += readUsageNumber(usage, 'output_tokens', 'outputTokens', 'completion_tokens', 'completionTokens') || 0;
+    this.cacheCreationTokens += readUsageNumber(usage, 'cache_creation_input_tokens', 'cacheCreationInputTokens') || 0;
+    this.cacheReadTokens += readUsageNumber(usage, 'cache_read_input_tokens', 'cacheReadInputTokens') || 0;
     this.turnCount += 1;
   }
 
@@ -88,13 +97,31 @@ class CostTracker {
   }
 
   getCost(model) {
-    const p = this.pricing[model];
+    const p = this.getPricing(model);
     if (!p) return 0;
     const inputCost = (this.inputTokens / 1_000_000) * p.input;
     const outputCost = (this.outputTokens / 1_000_000) * p.output;
     const cacheWriteCost = p.cacheWrite ? (this.cacheCreationTokens / 1_000_000) * p.cacheWrite : 0;
     const cacheReadCost = p.cacheRead ? (this.cacheReadTokens / 1_000_000) * p.cacheRead : 0;
     return inputCost + outputCost + cacheWriteCost + cacheReadCost;
+  }
+
+  getPricing(model) {
+    const key = String(model || '').toLowerCase();
+    if (this.pricing[key]) return this.pricing[key];
+    if (/claude.*opus/.test(key)) return this.pricing['claude-opus-4-7'];
+    if (/claude.*haiku/.test(key)) return this.pricing['claude-haiku-3-5-20241022'];
+    if (/claude.*sonnet/.test(key)) return this.pricing['claude-sonnet-4-20250514'];
+    if (/gpt-4\.1.*mini/.test(key)) return this.pricing['gpt-4.1-mini'];
+    if (/gpt-4\.1/.test(key)) return this.pricing['gpt-4.1'];
+    if (/gpt-4o.*mini/.test(key)) return this.pricing['gpt-4o-mini'];
+    if (/gpt-4o/.test(key)) return this.pricing['gpt-4o'];
+    if (/o3.*mini/.test(key)) return this.pricing['o3-mini'];
+    if (/gemini-2\.5.*pro/.test(key)) return this.pricing['gemini-2.5-pro-preview-06-05'];
+    if (/gemini-2\.5.*flash/.test(key)) return this.pricing['gemini-2.5-flash-preview-05-20'];
+    if (/gemini-2\.0.*flash.*lite/.test(key)) return this.pricing['gemini-2.0-flash-lite'];
+    if (/gemini-2\.0.*flash/.test(key)) return this.pricing['gemini-2.0-flash'];
+    return null;
   }
 
   formatSummary(model) {
@@ -117,6 +144,16 @@ class CostTracker {
       `  Estimated cost: $${cost.toFixed(4)}`,
     ].filter(Boolean).join('\n');
   }
+}
+
+function readUsageNumber(usage, ...keys) {
+  for (const key of keys) {
+    if (Number.isFinite(usage[key])) {
+      return usage[key];
+    }
+  }
+
+  return 0;
 }
 
 class Session {

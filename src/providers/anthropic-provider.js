@@ -120,6 +120,9 @@ class AnthropicProvider extends ChatProvider {
         }
         return;
       }
+      if (response.usage) {
+        yield createUsageChunk(response.usage);
+      }
 
       const toolUses = extractToolUses(response.content);
       const isDsm = toolUses.some((u) => String(u.id).startsWith("dsml_"));
@@ -444,6 +447,16 @@ function parseDsmToolCalls(text) {
 async function executeToolUse(toolRegistry, toolUse) {
   const result = await toolRegistry.execute(toRegistryToolName(toolUse.name), toolUse.input || {});
   return createToolResultBlock(toolUse.id, result);
+}
+
+function createUsageChunk(usage) {
+  return {
+    type: "usage",
+    inputTokens: usage.input_tokens || usage.inputTokens || 0,
+    outputTokens: usage.output_tokens || usage.outputTokens || 0,
+    cacheCreationInputTokens: usage.cache_creation_input_tokens || usage.cacheCreationInputTokens || 0,
+    cacheReadInputTokens: usage.cache_read_input_tokens || usage.cacheReadInputTokens || 0,
+  };
 }
 
 function extractText(content) {

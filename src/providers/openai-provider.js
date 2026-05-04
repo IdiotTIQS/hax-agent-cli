@@ -56,12 +56,16 @@ class OpenAIProvider extends ChatProvider {
     const stream = await this.client.chat.completions.create({
       ...this.createRequest(request),
       stream: true,
+      stream_options: { include_usage: true },
     });
 
     for await (const chunk of stream) {
       const delta = chunk.choices?.[0]?.delta;
       if (delta?.content) {
         yield createTextChunk(delta.content);
+      }
+      if (chunk.usage) {
+        yield createUsageChunk(chunk.usage);
       }
     }
   }
@@ -101,6 +105,9 @@ class OpenAIProvider extends ChatProvider {
       if (stream?.[Symbol.asyncIterator]) {
         for await (const event of stream) {
           const delta = event.choices?.[0]?.delta;
+          if (event.usage) {
+            yield createUsageChunk(event.usage);
+          }
           if (delta?.content) {
             fullContent += delta.content;
           }
@@ -130,6 +137,9 @@ class OpenAIProvider extends ChatProvider {
         }
       } else {
         const choice = stream?.choices?.[0];
+        if (stream?.usage) {
+          yield createUsageChunk(stream.usage);
+        }
         finishReason = choice?.finish_reason;
         fullContent = choice?.message?.content || "";
         reasoningContent = choice?.message?.reasoning_content || "";
@@ -316,6 +326,10 @@ class OpenAIProvider extends ChatProvider {
 
     if (toolDefinitions.length > 0) {
       payload.tools = toolDefinitions;
+    }
+
+    if (payload.stream) {
+      payload.stream_options = { include_usage: true };
     }
 
     if (request.tool_choice) {
@@ -536,6 +550,15 @@ function parseResultData(data) {
     }
   }
   return data;
+}
+
+function createUsageChunk(usage) {
+  return {
+    type: "usage",
+    inputTokens: usage.prompt_tokens || usage.input_tokens || 0,
+    outputTokens: usage.completion_tokens || usage.output_tokens || 0,
+    totalTokens: usage.total_tokens || usage.totalTokens || 0,
+  };
 }
 
 function extractText(response) {

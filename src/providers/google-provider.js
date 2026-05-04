@@ -105,6 +105,13 @@ class GoogleProvider extends ChatProvider {
       if (text) {
         yield createTextChunk(text);
       }
+      const usage = extractUsage(response);
+      if (usage) {
+        yield {
+          type: "usage",
+          ...usage,
+        };
+      }
 
       const functionCalls = extractFunctionCalls(response);
       if (forceTextResponse || !toolRegistry || functionCalls.length === 0) {

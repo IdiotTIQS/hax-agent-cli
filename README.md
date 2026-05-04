@@ -1,13 +1,13 @@
-# Hax Agent CLI
+# Hax Agent
 
-> 轻量级、Claude-like 的本地 Agent 命令行工具 · 由 [IdiotTIQS](https://github.com/IdiotTIQS) 开发
+> 轻量级、Claude-like 的本地 Agent 工具，CLI 仍是一等入口，同时提供 Electron + Vue 桌面端 · 由 [IdiotTIQS](https://github.com/IdiotTIQS) 开发
 
 [![Node.js](https://img.shields.io/badge/Node.js-%3E%3D18-brightgreen)](https://nodejs.org)
 [![License](https://img.shields.io/badge/License-MIT-blue)](#license)
 [![PRs](https://img.shields.io/badge/PRs-welcome-brightgreen)](#开发与贡献)
 [![npm](https://img.shields.io/npm/v/hax-agent-cli)](https://www.npmjs.com/package/hax-agent-cli)
 
-Hax Agent CLI 是一个面向开发者的 AI 编码助手，提供类似 Claude 的终端体验。支持 Anthropic、OpenAI、Google 三大主流 AI 提供商，支持交互式对话、多 Provider 切换、本地文件工具、会话记忆管理以及多 Agent 团队协作计划生成。
+Hax Agent 是一个面向开发者的 AI 编码助手，CLI 仍是一等入口，同时提供 Electron + Vue 桌面端。支持 Anthropic、OpenAI、Google 三大主流 AI 提供商，支持交互式对话、多 Provider 切换、本地文件工具、会话记忆管理、最近会话恢复以及多 Agent 团队协作计划生成。
 
 ---
 
@@ -16,6 +16,7 @@ Hax Agent CLI 是一个面向开发者的 AI 编码助手，提供类似 Claude 
 - [功能特性](#功能特性)
 - [环境要求](#环境要求)
 - [快速开始](#快速开始)
+- [桌面端](#桌面端)
 - [使用方式](#使用方式)
 - [交互式命令](#交互式命令)
 - [Skills 技能系统](#skills-技能系统)
@@ -32,6 +33,7 @@ Hax Agent CLI 是一个面向开发者的 AI 编码助手，提供类似 Claude 
 ## 功能特性
 
 - **交互式 Agent Shell** — 默认进入聊天模式，支持持续上下文对话、斜杠命令和流式输出。
+- **桌面 GUI** — Electron + Vue 界面，保留 CLI 工作流，同时提供会话列表、文件树、右侧状态面板和会话恢复。
 - **多 Provider 支持** — 内置 Anthropic（Claude）、OpenAI（GPT）、Google（Gemini）三大主流 Provider，支持运行时切换。
 - **模型管理** — 运行时查看可用模型、动态切换模型。
 - **本地工具集** — 文件读写、搜索、Glob 匹配以及受 allowlist 限制的 shell 命令执行。
@@ -96,6 +98,22 @@ hax-agent init
 
 或通过环境变量预配置（见[配置说明](#配置说明)）。
 
+## 桌面端
+
+桌面端与 CLI 共用同一套配置、会话存储和工具层。
+
+### 启动开发版
+
+```bash
+npm run desktop:dev
+```
+
+### 构建桌面端
+
+```bash
+npm run desktop:build
+```
+
 ---
 
 ## 使用方式
@@ -127,6 +145,8 @@ hax-agent            # 任意目录下可用
 | 命令 | 说明 |
 |------|------|
 | `npm start` | 启动 CLI（`node src/cli.js`） |
+| `npm run desktop:dev` | 启动 Electron + Vue 桌面端开发模式 |
+| `npm run desktop:build` | 构建桌面端前端资源 |
 | `npm run auth:team` | 输出认证重构团队计划 |
 | `npm test` | 运行测试套件 |
 
@@ -389,6 +409,13 @@ src/
 │
 └── formatters/                   # 输出格式化
     └── team-plan.js              #   团队计划格式化
+
+desktop/
+├── main/                         # Electron 主进程
+├── preload/                      # 预加载脚本
+└── renderer/                     # Vue 桌面端前端
+    ├── src/
+    └── vite.config.js
 ```
 
 ### 核心模块职责
@@ -402,6 +429,7 @@ src/
 | `runtime/` | 会话管理、Agent 角色编排、任务调度、命令解析 |
 | `teams/auth-refactor.js` | 多 Agent 协作计划定义（架构师、开发者、审查者等角色） |
 | `tools/index.js` | 工具注册表、路径安全验证、执行沙箱 |
+| `desktop/` | Electron 主进程、预加载脚本、Vue 桌面端界面 |
 
 ---
 
@@ -421,6 +449,7 @@ src/
 - 每条记录一行 JSON，包含 `timestamp`、`role`、`content` 等字段。
 - 新会话会自动按时间戳 + 随机后缀生成文件名。
 - 启动时自动加载最近 transcript 作为上下文。
+- 桌面端“最近会话”列表直接读取这些 transcript，可恢复历史会话继续对话。
 
 ### 记忆存储
 
@@ -484,6 +513,7 @@ test/
 ### 目录规范
 
 - `src/` — 源码，遵循 CommonJS 模块规范
+- `desktop/` — 桌面端源码，与 CLI 共用核心层
 - `test/` — 测试文件，与被测模块一一对应
 - `.hax-agent/` — 运行时数据（会话、记忆、设置），已加入 `.gitignore`
 
