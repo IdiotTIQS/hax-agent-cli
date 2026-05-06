@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref } from 'vue';
+import { ref } from 'vue';
 import FileTreeNode from './FileTreeNode.vue';
 
 const props = defineProps({
@@ -8,6 +8,7 @@ const props = defineProps({
   fileTree: { type: Array, default: () => [] },
   activeNav: { type: String, default: 'chat' },
   isBusy: { type: Boolean, default: false },
+  navCounts: { type: Object, default: () => ({}) },
 });
 
 const emit = defineEmits([
@@ -27,11 +28,11 @@ const navItems = [
 ];
 
 function toggleSection(key) {
-  collapsedSections[key] = !collapsedSections[key];
+  collapsedSections.value[key] = !collapsedSections.value[key];
 }
 
 function sectionArrow(key) {
-  return collapsedSections[key] ? 'collapsed' : '';
+  return collapsedSections.value[key] ? 'collapsed' : '';
 }
 </script>
 
@@ -57,7 +58,7 @@ function sectionArrow(key) {
       >
         <span class="nav-icon">{{ item.icon }}</span>
         {{ item.label }}
-        <span v-if="item.key === 'skills'" class="nav-badge">3</span>
+        <span v-if="navCounts[item.key] !== undefined" class="nav-badge">{{ navCounts[item.key] }}</span>
       </button>
       <div class="nav-separator"></div>
       <button class="nav-item" @click="emit('new-task')" :disabled="isBusy">

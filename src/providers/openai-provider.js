@@ -17,6 +17,8 @@ const {
   extractToolError,
   parseToolResultContent,
   getPermissionLevel,
+  stripToolCallMarkup,
+  parseDsmlToolCalls,
 } = require("./shared");
 
 const DEFAULT_MODEL = "gpt-4.1";
@@ -150,13 +152,19 @@ class OpenAIProvider extends ChatProvider {
         }
       }
 
-      if (fullContent) {
-        yield createTextChunk(fullContent);
-      }
-
-      const sortedToolCalls = [...toolCalls.entries()]
+      let sortedToolCalls = [...toolCalls.entries()]
         .sort(([a], [b]) => a - b)
         .map(([, tc]) => tc);
+      const dsmlToolCalls = sortedToolCalls.length === 0 ? createDsmlToolCalls(fullContent, turn + 1) : [];
+      const hasDsmlToolCalls = dsmlToolCalls.length > 0;
+      if (hasDsmlToolCalls) {
+        sortedToolCalls = dsmlToolCalls;
+      }
+      const displayContent = hasDsmlToolCalls ? stripToolCallMarkup(fullContent) : fullContent;
+
+      if (displayContent) {
+        yield createTextChunk(displayContent);
+      }
 
       if (finishReason === "length" && sortedToolCalls.length === 0) {
         return;
@@ -172,7 +180,7 @@ class OpenAIProvider extends ChatProvider {
 
       const message = {
         role: "assistant",
-        content: fullContent || null,
+        content: hasDsmlToolCalls ? (displayContent || null) : (fullContent || null),
         tool_calls: sortedToolCalls.length > 0 ? sortedToolCalls.map(tc => ({
           id: tc.id,
           type: tc.type,
@@ -358,13 +366,25 @@ class OpenAIProvider extends ChatProvider {
       response = await withRetry(() => this.client.chat.completions.create(requestPayload))();
 
       const message = response.choices?.[0]?.message;
-      const toolCalls = message?.tool_calls || [];
+      let toolCalls = message?.tool_calls || [];
+      const fullContent = typeof message?.content === "string" ? message.content : "";
+      const dsmlToolCalls = toolCalls.length === 0 ? createDsmlToolCalls(fullContent, turn + 1) : [];
+      const hasDsmlToolCalls = dsmlToolCalls.length > 0;
+      if (hasDsmlToolCalls) {
+        toolCalls = dsmlToolCalls;
+      }
 
       if (forceTextResponse || !toolRegistry || toolCalls.length === 0) {
         return response;
       }
 
-      messages.push(message);
+      messages.push(hasDsmlToolCalls
+        ? {
+            role: "assistant",
+            content: stripToolCallMarkup(fullContent) || null,
+            tool_calls: toolCalls,
+          }
+        : message);
 
       const toolResults = [];
       for (const toolCall of toolCalls) {
@@ -519,6 +539,17 @@ function toOpenAIToolName(name) {
 
 function toRegistryToolName(name) {
   return String(name).replace(/_/g, ".");
+}
+
+function createDsmlToolCalls(text, turn) {
+  return parseDsmlToolCalls(text).map((call, index) => ({
+    id: `dsml_${turn}_${index}`,
+    type: "function",
+    function: {
+      name: toOpenAIToolName(call.name),
+      arguments: JSON.stringify(call.parameters || {}),
+    },
+  }));
 }
 
 function createToolResultBlock(toolCallId, isError, content) {

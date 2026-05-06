@@ -842,6 +842,82 @@ test('openai provider preserves tool results and forces text after repeated sing
   assert.match(secondRequestToolMessage.content, /Baidu home page/);
 });
 
+test('openai provider executes DSML tool markup without streaming it as text', async () => {
+  const requests = [];
+  let executions = 0;
+  const registry = new ToolRegistry();
+
+  registry.register({
+    name: 'file.read',
+    description: 'Read a file.',
+    inputSchema: {
+      type: 'object',
+      required: ['path'],
+      properties: { path: { type: 'string' } },
+    },
+    async execute(args) {
+      executions += 1;
+      return { content: `read ${args.path}` };
+    },
+  });
+
+  const provider = new OpenAIProvider({
+    client: {
+      chat: {
+        completions: {
+          create(request) {
+            requests.push(request);
+
+            if (requests.length === 1) {
+              return createOpenAIStream([
+                {
+                  choices: [{
+                    delta: {
+                      content: [
+                        '我先读取文件。',
+                        '<｜｜DSML｜｜tool_calls>',
+                        '<｜｜DSML｜｜invoke name="file.read">',
+                        '<｜｜DSML｜｜parameter name="path" string="true">package.json</｜｜DSML｜｜parameter>',
+                        '</｜｜DSML｜｜invoke>',
+                        '</｜｜DSML｜｜tool_calls>',
+                      ].join('\n'),
+                    },
+                  }],
+                },
+              ]);
+            }
+
+            return createOpenAIStream([
+              { choices: [{ delta: { content: '读取完成。' } }] },
+            ]);
+          },
+        },
+      },
+    },
+  });
+
+  const chunks = [];
+  for await (const chunk of provider.stream({ prompt: '检查项目', toolRegistry: registry, maxToolTurns: 3 })) {
+    chunks.push(chunk);
+  }
+
+  assert.equal(executions, 1);
+  assert.equal(requests.length, 2);
+  assert.equal(chunks[0].type, 'text');
+  assert.equal(chunks[0].delta, '我先读取文件。');
+  assert.equal(chunks.some((chunk) => chunk.type === 'text' && /DSML|file\.read|package\.json/.test(chunk.delta)), false);
+  assert.equal(chunks[1].type, 'tool_start');
+  assert.equal(chunks[1].name, 'file.read');
+  assert.deepEqual(chunks[1].input, { path: 'package.json' });
+  assert.equal(chunks[2].type, 'tool_result');
+  assert.equal(chunks.at(-1).type, 'text');
+  assert.equal(chunks.at(-1).delta, '读取完成。');
+
+  const toolMessage = requests[1].messages.find((message) => message.role === 'tool');
+  assert.ok(toolMessage);
+  assert.match(toolMessage.content, /read package\.json/);
+});
+
 function createOpenAIStream(events) {
   return {
     async *[Symbol.asyncIterator]() {

@@ -52,6 +52,10 @@ const DEFAULT_SYSTEM_PROMPT = [
   "- Acknowledge limitations when you are uncertain about something.",
 ].join("\n");
 
+const DSML_TOOL_CALLS_PATTERN = /<\uFF5C\uFF5CDSML\uFF5C\uFF5Ctool_calls\b[^>]*>[\s\S]*?<\/\uFF5C\uFF5CDSML\uFF5C\uFF5Ctool_calls>/g;
+const DSML_INVOKE_PATTERN = /<\uFF5C\uFF5CDSML\uFF5C\uFF5Cinvoke\s+name="([^"]+)"[^>]*>([\s\S]*?)<\/\uFF5C\uFF5CDSML\uFF5C\uFF5Cinvoke>/g;
+const DSML_PARAMETER_PATTERN = /<\uFF5C\uFF5CDSML\uFF5C\uFF5Cparameter\s+name="([^"]+)"([^>]*)>([\s\S]*?)<\/\uFF5C\uFF5CDSML\uFF5C\uFF5Cparameter>/g;
+
 function withRetry(fn, maxRetries = 3, baseDelayMs = 1000) {
   return async (...args) => {
     for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
@@ -226,6 +230,57 @@ function getPermissionLevel(toolRegistry, toolName) {
   return toolRegistry.getPermissionLevel(toolName);
 }
 
+function stripToolCallMarkup(text) {
+  return String(text || "")
+    .replace(DSML_TOOL_CALLS_PATTERN, "")
+    .replace(/<([A-Za-z][\w.-]*)\b[^>]*>[\s\S]*?<\/\1>/g, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function parseDsmlToolCalls(text) {
+  if (!text || typeof text !== "string") {
+    return [];
+  }
+
+  const calls = [];
+  let callMatch;
+  DSML_INVOKE_PATTERN.lastIndex = 0;
+
+  while ((callMatch = DSML_INVOKE_PATTERN.exec(text)) !== null) {
+    const parameters = {};
+    const body = callMatch[2];
+    let paramMatch;
+    DSML_PARAMETER_PATTERN.lastIndex = 0;
+
+    while ((paramMatch = DSML_PARAMETER_PATTERN.exec(body)) !== null) {
+      parameters[paramMatch[1]] = parseDsmlParameterValue(paramMatch[3], paramMatch[2]);
+    }
+
+    calls.push({ name: callMatch[1], parameters });
+  }
+
+  return calls;
+}
+
+function parseDsmlParameterValue(value, attributes = "") {
+  const text = String(value || "");
+  if (/string="false"/.test(attributes)) {
+    if (/^-?\d+(?:\.\d+)?$/.test(text.trim())) {
+      return Number(text);
+    }
+    if (text.trim() === "true") return true;
+    if (text.trim() === "false") return false;
+    try {
+      return JSON.parse(text);
+    } catch {
+      return text;
+    }
+  }
+
+  return text;
+}
+
 module.exports = {
   DEFAULT_SYSTEM_PROMPT,
   DEFAULT_MAX_TOOL_TURNS,
@@ -246,4 +301,6 @@ module.exports = {
   formatInputPart,
   joinInputParts,
   getPermissionLevel,
+  stripToolCallMarkup,
+  parseDsmlToolCalls,
 };

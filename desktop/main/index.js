@@ -3,7 +3,7 @@
 const path = require("node:path");
 const fs = require("node:fs");
 const { spawn } = require("node:child_process");
-const { app, BrowserWindow, ipcMain } = require("electron");
+const electron = require("electron");
 
 const { AgentEngine } = require("../../src/agent-engine");
 const {
@@ -12,11 +12,27 @@ const {
   updateUserSettings,
 } = require("../../src/config");
 const { listSessions } = require("../../src/memory");
-const { PermissionManager } = require("../../src/permissions");
+const {
+  PermissionManager,
+  TOOL_PERMISSIONS,
+  SAFE_SHELL_COMMANDS,
+  DANGEROUS_SHELL_COMMANDS,
+} = require("../../src/permissions");
+const {
+  loadAllSkills,
+  createSkillifySkill,
+  getSkillUsageStats,
+} = require("../../src/skills");
 const { createProvider } = require("../../src/providers");
 const { Session } = require("../../src/session");
+const { createTeamRuntime } = require("../../src/teams/runtime");
 const { registerAgentTeamTools } = require("../../src/teams/tools");
 const { createLocalToolRegistry } = require("../../src/tools");
+
+const app = electron.app;
+const BrowserWindow = electron.BrowserWindow;
+const ipcMain = electron.ipcMain;
+const shell = electron.shell;
 
 let mainWindow = null;
 const sessions = new Map();
@@ -27,6 +43,7 @@ const MAX_RECENT_SESSIONS = 30;
 const MOCK_ASSISTANT_PREFIX = "I’m in local mock mode right now";
 
 function isDevMode() {
+  if (process.env.HAX_AGENT_DESKTOP_MODE === "production") return false;
   return Boolean(process.env.HAX_AGENT_DESKTOP_URL) || !app.isPackaged;
 }
 
@@ -39,6 +56,10 @@ function getRendererDistIndex() {
 }
 
 function createMainWindow() {
+  if (!BrowserWindow) {
+    throw new Error("createMainWindow requires the Electron runtime.");
+  }
+
   mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
@@ -59,6 +80,11 @@ function createMainWindow() {
 
   mainWindow.on("closed", () => {
     mainWindow = null;
+  });
+
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    openExternalUrl(url).catch(() => {});
+    return { action: "deny" };
   });
 
   if (isDevMode()) {
@@ -162,13 +188,17 @@ function serializeError(error) {
   };
 }
 
-function registerIpcHandlers() {
-  ipcMain.handle("agent:createSession", async (_event, options = {}) => {
+function registerIpcHandlers(ipc = ipcMain) {
+  if (!ipc || typeof ipc.handle !== "function") {
+    throw new TypeError("registerIpcHandlers requires an Electron ipcMain-like object.");
+  }
+
+  ipc.handle("agent:createSession", async (_event, options = {}) => {
     const { session } = createDesktopSession(options);
     return serializeSession(session);
   });
 
-  ipcMain.handle("agent:resumeSession", async (_event, payload = {}) => {
+  ipc.handle("agent:resumeSession", async (_event, payload = {}) => {
     const projectRoot = path.resolve(payload.projectRoot || process.cwd());
     const settings = loadSettings({ projectRoot });
     const transcriptSession = findTranscriptSession(settings, payload.sessionId);
@@ -189,7 +219,7 @@ function registerIpcHandlers() {
     return serializeSession(session);
   });
 
-  ipcMain.handle("agent:sendMessage", async (event, payload = {}) => {
+  ipc.handle("agent:sendMessage", async (event, payload = {}) => {
     const { sessionId, options } = payload;
     const content = payload.content ?? payload.message;
     const record = getSessionRecord(sessionId);
@@ -217,13 +247,13 @@ function registerIpcHandlers() {
     }
   });
 
-  ipcMain.handle("agent:interrupt", async (_event, payload = {}) => {
+  ipc.handle("agent:interrupt", async (_event, payload = {}) => {
     const record = getSessionRecord(payload.sessionId);
     record.engine.interrupt();
     return serializeSession(record.session);
   });
 
-  ipcMain.handle("settings:get", async (_event, options = {}) => {
+  ipc.handle("settings:get", async (_event, options = {}) => {
     const resolved = resolveSettings({
       projectRoot: options.projectRoot || process.cwd(),
     });
@@ -234,7 +264,7 @@ function registerIpcHandlers() {
     };
   });
 
-  ipcMain.handle("settings:update", async (_event, updates = {}) => {
+  ipc.handle("settings:update", async (_event, updates = {}) => {
     const saved = updateUserSettings(normalizeSettingsUpdates(updates));
     const resolved = resolveSettings();
 
@@ -245,7 +275,7 @@ function registerIpcHandlers() {
     };
   });
 
-  ipcMain.handle("workspace:getSnapshot", async (_event, options = {}) => {
+  ipc.handle("workspace:getSnapshot", async (_event, options = {}) => {
     const projectRoot = path.resolve(options.projectRoot || process.cwd());
     const settings = loadSettings({ projectRoot });
 
@@ -256,6 +286,31 @@ function registerIpcHandlers() {
       sessions: readSessionList(settings),
     };
   });
+
+  ipc.handle("skills:getSnapshot", async (_event, options = {}) => {
+    const projectRoot = path.resolve(options.projectRoot || process.cwd());
+    return readSkillsSnapshot(projectRoot);
+  });
+
+  ipc.handle("tools:getSnapshot", async (_event, options = {}) => {
+    const projectRoot = path.resolve(options.projectRoot || process.cwd());
+    const settings = loadSettings({ projectRoot });
+    return readToolSnapshot(projectRoot, settings);
+  });
+
+  ipc.handle("permissions:getSnapshot", async (_event, options = {}) => {
+    const projectRoot = path.resolve(options.projectRoot || process.cwd());
+    const settings = loadSettings({ projectRoot });
+    return readPermissionSnapshot(projectRoot, settings);
+  });
+
+  ipc.handle("team:getSnapshot", async (_event, options = {}) => {
+    const projectRoot = path.resolve(options.projectRoot || process.cwd());
+    const settings = loadSettings({ projectRoot });
+    return readTeamSnapshot(projectRoot, settings);
+  });
+
+  ipc.handle("shell:openExternal", async (_event, url) => openExternalUrl(url));
 }
 
 function findTranscriptSession(settings, sessionId) {
@@ -412,6 +467,125 @@ function readGitStatus(projectRoot) {
   });
 }
 
+function readSkillsSnapshot(projectRoot) {
+  const skillify = createSkillifySkill([]);
+  const usageStats = getSkillUsageStats();
+  const skills = [skillify, ...loadAllSkills(projectRoot)].map((skill) => {
+    const usage = usageStats[skill.name] || {};
+    return {
+      name: skill.name,
+      displayName: skill.displayName || skill.name,
+      description: skill.description || '',
+      whenToUse: skill.whenToUse || '',
+      allowedTools: Array.isArray(skill.allowedTools) ? skill.allowedTools : [],
+      source: skill.source || 'custom',
+      baseDir: skill.baseDir || '',
+      isHidden: Boolean(skill.isHidden),
+      userInvocable: skill.userInvocable !== false,
+      usageCount: Number(usage.usageCount || 0),
+      lastUsedAt: usage.lastUsedAt || null,
+      usageScore: Number((usage.usageCount || 0)),
+    };
+  });
+
+  skills.sort((left, right) => {
+    if (right.usageScore !== left.usageScore) return right.usageScore - left.usageScore;
+    return left.displayName.localeCompare(right.displayName);
+  });
+
+  return {
+    projectRoot,
+    total: skills.length,
+    visible: skills.filter((skill) => !skill.isHidden).length,
+    skills,
+  };
+}
+
+function readToolSnapshot(projectRoot, settings) {
+  const registry = createLocalToolRegistry({
+    root: projectRoot,
+    shellPolicy: settings.tools?.shell,
+  });
+
+  const tools = registry.list().map((tool) => ({
+    name: tool.name,
+    description: tool.description || '',
+    inputSchema: tool.inputSchema || null,
+  }));
+
+  return {
+    projectRoot,
+    total: tools.length,
+    tools,
+  };
+}
+
+function readPermissionSnapshot(projectRoot, settings) {
+  const persistPath = path.join(projectRoot, ".hax-agent", "permissions.json");
+  const manager = new PermissionManager({
+    mode: settings.permissions?.mode || "normal",
+    locale: settings.ui?.locale,
+    persistPath,
+  });
+
+  try {
+    const raw = fs.readFileSync(persistPath, "utf8");
+    const persisted = JSON.parse(raw);
+    if (persisted && typeof persisted === "object") {
+      if (persisted.mode) manager.mode = persisted.mode;
+      if (Array.isArray(persisted.alwaysAllow)) {
+        manager._alwaysAllow = new Set(persisted.alwaysAllow);
+      }
+      if (Array.isArray(persisted.alwaysDeny)) {
+        manager._alwaysDeny = new Set(persisted.alwaysDeny);
+      }
+    }
+  } catch {
+    // No persisted overrides yet.
+  }
+
+  const summary = manager.getSummary();
+
+  return {
+    projectRoot,
+    ...summary,
+    counts: {
+      auto: summary.toolPermissions.filter((item) => item.level === "auto").length,
+      dynamic: summary.toolPermissions.filter((item) => item.level === "dynamic").length,
+      ask: summary.toolPermissions.filter((item) => item.level === "ask").length,
+      dangerous: summary.toolPermissions.filter((item) => item.level === "dangerous").length,
+    },
+    shellCommands: {
+      safe: Array.from(SAFE_SHELL_COMMANDS).sort(),
+      dangerous: Array.from(DANGEROUS_SHELL_COMMANDS).sort(),
+    },
+    toolPermissions: summary.toolPermissions.map((item) => ({
+      tool: item.tool,
+      level: item.level,
+    })),
+  };
+}
+
+function readTeamSnapshot(projectRoot, settings) {
+  const runtime = createTeamRuntime({ projectRoot, settings });
+  const teams = runtime.listTeams();
+  let activeTeam = null;
+
+  if (teams.length > 0) {
+    try {
+      activeTeam = runtime.loadTeam(teams[0].name);
+    } catch {
+      activeTeam = null;
+    }
+  }
+
+  return {
+    projectRoot,
+    teams,
+    activeTeam,
+  };
+}
+
 function runGit(cwd, args) {
   return new Promise((resolve) => {
     const child = spawn("git", args, {
@@ -477,19 +651,65 @@ function normalizeSettingsUpdates(updates = {}) {
   return next;
 }
 
-app.whenReady().then(() => {
-  registerIpcHandlers();
-  createMainWindow();
+async function openExternalUrl(rawUrl, opener = shell) {
+  const url = new URL(String(rawUrl || ""));
 
-  app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      createMainWindow();
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new Error(`Unsupported external URL protocol: ${url.protocol || "unknown"}`);
+  }
+
+  if (!opener || typeof opener.openExternal !== "function") {
+    throw new Error("Opening external URLs requires the Electron runtime.");
+  }
+
+  await opener.openExternal(url.href);
+  return { opened: true, url: url.href };
+}
+
+function startElectronApp() {
+  if (!app || typeof app.whenReady !== "function") {
+    throw new Error("startElectronApp requires the Electron runtime.");
+  }
+
+  app.whenReady().then(() => {
+    registerIpcHandlers();
+    createMainWindow();
+
+    app.on("activate", () => {
+      if (BrowserWindow.getAllWindows().length === 0) {
+        createMainWindow();
+      }
+    });
+  });
+
+  app.on("window-all-closed", () => {
+    if (process.platform !== "darwin") {
+      app.quit();
     }
   });
-});
+}
 
-app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") {
-    app.quit();
-  }
-});
+if (app && typeof app.whenReady === "function" && (require.main === module || process.versions?.electron)) {
+  startElectronApp();
+}
+
+module.exports = {
+  createDesktopSession,
+  createMainWindow,
+  findTranscriptSession,
+  getDevUrl,
+  getRendererDistIndex,
+  isDevMode,
+  normalizeSettingsUpdates,
+  openExternalUrl,
+  readSessionList,
+  readSkillsSnapshot,
+  readToolSnapshot,
+  readPermissionSnapshot,
+  readTeamSnapshot,
+  readWorkspaceTree,
+  registerIpcHandlers,
+  serializeSession,
+  startElectronApp,
+  summarizeTranscriptEntries,
+};

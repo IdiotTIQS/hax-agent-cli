@@ -13,6 +13,7 @@
     "desktop:build": "vite build --config desktop/renderer/vite.config.js",
     "auth:team": "node src/cli.js team auth-refactor",
     "test": "node --test test/*.test.js",
+    "test:desktop": "npm run desktop:build && node --test test/desktop-*.test.js test/desktop-smoke.smoke.js",
     "prepublishOnly": "npm test"
   },
   "files": [
@@ -45,11 +46,16 @@
   "dependencies": {
     "@anthropic-ai/sdk": "latest",
     "@google/generative-ai": "^0.24.1",
+    "dompurify": "^3.4.2",
+    "markdown-it": "^14.1.1",
     "openai": "^6.35.0"
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "^5.2.4",
+    "@vue/test-utils": "^2.4.10",
     "electron": "^37.5.1",
+    "jsdom": "^24.1.3",
+    "playwright-core": "^1.59.1",
     "vite": "^6.3.6",
     "vue": "^3.5.22"
   },

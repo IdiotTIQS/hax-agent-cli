@@ -1,5 +1,6 @@
 <script setup>
-import { computed, nextTick, onMounted, onUpdated, ref, watch } from 'vue';
+import { nextTick, onMounted, onUpdated, ref, watch } from 'vue';
+import { renderMarkdown } from '../markdown.mjs';
 
 const props = defineProps({
   messages: { type: Array, default: () => [] },
@@ -22,62 +23,6 @@ onMounted(() => scrollToBottom());
 onUpdated(() => scrollToBottom());
 watch(() => props.messages.length, () => scrollToBottom());
 
-// ── Strip <tool_name>...</tool_name> XML blocks ──
-function stripToolCalls(text) {
-  // Remove paired XML-like tool call blocks: <read>, <bash>, <write>, etc.
-  return text.replace(/<(\w+)>[\s\S]*?<\/\1>/g, '').replace(/\n{3,}/g, '\n\n').trim();
-}
-
-// ── Markdown → HTML ──
-function renderMarkdown(content) {
-  const src = stripToolCalls(String(content || ''));
-  if (!src.trim()) return '';
-  const blocks = [];
-  const lines = src.replace(/\r\n/g, '\n').split('\n');
-  let i = 0;
-  while (i < lines.length) {
-    const line = lines[i];
-    if (line.trim().startsWith('```')) {
-      const lang = line.trim().slice(3).trim();
-      const codeLines = [];
-      i++;
-      while (i < lines.length && !lines[i].trim().startsWith('```')) { codeLines.push(lines[i]); i++; }
-      if (i < lines.length) i++;
-      blocks.push(`<div class="code-block-wrap"><div class="code-block-header"><span class="code-block-lang">${esc(lang || 'code')}</span><button class="code-block-btn" data-copy="${escAttr(codeLines.join('\n'))}">复制</button></div><div class="code-block-body">${esc(codeLines.join('\n'))}</div></div>`);
-      continue;
-    }
-    if (line.trim() === '') { i++; continue; }
-    const hm = line.match(/^(#{1,3})\s+(.+)/);
-    if (hm) { blocks.push(`<h${hm[1].length}>${renderInline(hm[2])}</h${hm[1].length}>`); i++; continue; }
-    if (/^\s*[-*]\s+/.test(line)) {
-      const items = [];
-      while (i < lines.length && /^\s*[-*]\s+/.test(lines[i])) { items.push(`<li>${renderInline(lines[i].replace(/^\s*[-*]\s+/, ''))}</li>`); i++; }
-      blocks.push(`<ul>${items.join('')}</ul>`); continue;
-    }
-    if (/^\s*\d+\.\s+/.test(line)) {
-      const items = [];
-      while (i < lines.length && /^\s*\d+\.\s+/.test(lines[i])) { items.push(`<li>${renderInline(lines[i].replace(/^\s*\d+\.\s+/, ''))}</li>`); i++; }
-      blocks.push(`<ol>${items.join('')}</ol>`); continue;
-    }
-    const para = [];
-    while (i < lines.length && lines[i].trim() !== '' && !lines[i].trim().startsWith('```') && !/^#{1,3}\s+/.test(lines[i]) && !/^\s*[-*]\s+/.test(lines[i]) && !/^\s*\d+\.\s+/.test(lines[i])) { para.push(lines[i]); i++; }
-    blocks.push(`<p>${renderInline(para.join('\n'))}</p>`);
-  }
-  return blocks.join('');
-}
-
-function renderInline(text) {
-  let h = esc(text);
-  h = h.replace(/`([^`]+)`/g, '<code>$1</code>');
-  h = h.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
-  h = h.replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noreferrer">$1</a>');
-  h = h.replace(/\n/g, '<br>');
-  return h;
-}
-
-function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
-function escAttr(s) { return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;'); }
-
 function formatTime(date) {
   if (!date) return '';
   const d = date instanceof Date ? date : new Date(date);
@@ -91,13 +36,32 @@ function toggleTool(id) {
   expandedTools.value = s;
 }
 
-function onCodeCopy(e) {
+function isSafeExternalUrl(value) {
+  try {
+    const url = new URL(value);
+    return url.protocol === 'http:' || url.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
+function onMessageClick(e) {
   const btn = e.target.closest('.code-block-btn');
-  if (!btn || !btn.dataset.copy) return;
-  navigator.clipboard.writeText(btn.dataset.copy.replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"').replace(/&#39;/g,"'"));
-  btn.textContent = '已复制';
-  btn.classList.add('copied');
-  setTimeout(() => { btn.textContent = '复制'; btn.classList.remove('copied'); }, 2000);
+  if (btn?.dataset.copy) {
+    navigator.clipboard?.writeText(btn.dataset.copy);
+    btn.textContent = '已复制';
+    btn.classList.add('copied');
+    setTimeout(() => { btn.textContent = '复制'; btn.classList.remove('copied'); }, 2000);
+    return;
+  }
+
+  const link = e.target.closest('a.markdown-link');
+  if (!link) return;
+
+  e.preventDefault();
+  const href = link.getAttribute('href') || '';
+  if (!isSafeExternalUrl(href)) return;
+  window.haxAgent?.openExternal?.(href) ?? window.open(href, '_blank', 'noopener,noreferrer');
 }
 
 function getToolsForMessage(msg) {
@@ -114,7 +78,7 @@ function isDiffMessage(msg) {
 </script>
 
 <template>
-  <div ref="chatRef" class="chat-area" @click="onCodeCopy">
+  <div ref="chatRef" class="chat-area" @click="onMessageClick">
     <div class="chat-inner">
       <!-- Empty -->
       <div v-if="messages.length === 0 && !isThinking" class="empty-state">

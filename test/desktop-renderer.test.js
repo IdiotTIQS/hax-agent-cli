@@ -1,0 +1,236 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const { pathToFileURL } = require('node:url');
+const test = require('node:test');
+const vm = require('node:vm');
+const { JSDOM } = require('jsdom');
+const { compileScript, compileTemplate, parse } = require('@vue/compiler-sfc');
+
+const projectRoot = path.resolve(__dirname, '..');
+const rendererSrc = path.join(projectRoot, 'desktop', 'renderer', 'src');
+const componentCache = new Map();
+let copiedText = '';
+let openedExternalUrl = '';
+
+installDom();
+const { mount } = require('@vue/test-utils');
+
+function installDom() {
+  const dom = new JSDOM('<!doctype html><html><body></body></html>', {
+    url: 'https://hax-agent.test/',
+  });
+
+  global.window = dom.window;
+  global.document = dom.window.document;
+  global.Node = dom.window.Node;
+  global.Element = dom.window.Element;
+  global.HTMLElement = dom.window.HTMLElement;
+  global.SVGElement = dom.window.SVGElement;
+  global.navigator = dom.window.navigator;
+  global.crypto = dom.window.crypto;
+  global.window.navigator.clipboard = {
+    async writeText(value) {
+      copiedText = value;
+    },
+  };
+  global.navigator.clipboard = global.window.navigator.clipboard;
+  global.window.haxAgent = {
+    async openExternal(value) {
+      openedExternalUrl = value;
+    },
+  };
+}
+
+async function loadComponent(relativePath) {
+  const filename = path.join(rendererSrc, relativePath);
+  return loadVueComponent(filename);
+}
+
+async function loadVueComponent(filename) {
+  const normalized = path.normalize(filename);
+  if (componentCache.has(normalized)) return componentCache.get(normalized);
+
+  const promise = compileVueComponent(normalized);
+  componentCache.set(normalized, promise);
+  return promise;
+}
+
+async function compileVueComponent(filename) {
+  const source = fs.readFileSync(filename, 'utf8');
+  const { descriptor } = parse(source, { filename });
+  const id = path.relative(rendererSrc, filename).replace(/[^\w]/g, '_');
+  const script = compileScript(descriptor, { id });
+  const template = compileTemplate({
+    source: descriptor.template.content,
+    filename,
+    id,
+    compilerOptions: {
+      bindingMetadata: script.bindings,
+    },
+  });
+
+  if (template.errors.length > 0) {
+    throw new Error(template.errors.map(String).join('\n'));
+  }
+
+  const imports = {};
+  let scriptCode = await rewriteImports(script.content, filename, imports);
+  let templateCode = await rewriteImports(template.code, filename, imports);
+
+  scriptCode = scriptCode.replace(/\bexport\s+default\b/, 'const __sfc__ =');
+  templateCode = templateCode.replace(/\bexport\s+function\s+render\b/, 'function render');
+
+  const module = { exports: {} };
+  const code = [
+    scriptCode,
+    templateCode,
+    '__sfc__.render = render;',
+    'module.exports.default = __sfc__;',
+  ].join('\n');
+
+  vm.runInNewContext(code, {
+    require,
+    module,
+    exports: module.exports,
+    __imports: imports,
+    window: global.window,
+    navigator: global.navigator,
+    URL,
+    setTimeout,
+    clearTimeout,
+  }, { filename });
+
+  return module.exports.default;
+}
+
+async function rewriteImports(code, importer, imports) {
+  let rewritten = code.replace(
+    /import\s+\{([^}]+)\}\s+from\s+['"]vue['"];?/g,
+    (_match, names) => `const {${toDestructureSpecifiers(names)}} = require('vue');`
+  );
+
+  rewritten = await replaceAsync(
+    rewritten,
+    /import\s+([A-Za-z_$][\w$]*)\s+from\s+['"]([^'"]+\.vue)['"];?/g,
+    async (_match, localName, specifier) => {
+      const resolved = resolveImport(importer, specifier);
+      imports[specifier] = { default: await loadVueComponent(resolved) };
+      return `const ${localName} = __imports[${JSON.stringify(specifier)}].default;`;
+    }
+  );
+
+  rewritten = await replaceAsync(
+    rewritten,
+    /import\s+\{([^}]+)\}\s+from\s+['"]([^'"]+\.mjs)['"];?/g,
+    async (_match, names, specifier) => {
+      const resolved = resolveImport(importer, specifier);
+      imports[specifier] = await import(pathToFileURL(resolved).href);
+      return `const {${toDestructureSpecifiers(names)}} = __imports[${JSON.stringify(specifier)}];`;
+    }
+  );
+
+  return rewritten;
+}
+
+function toDestructureSpecifiers(names) {
+  return names
+    .split(',')
+    .map((name) => name.trim().replace(/\s+as\s+/g, ': '))
+    .filter(Boolean)
+    .join(', ');
+}
+
+function resolveImport(importer, specifier) {
+  if (specifier.startsWith('.')) {
+    return path.resolve(path.dirname(importer), specifier);
+  }
+  throw new Error(`Unsupported component test import: ${specifier}`);
+}
+
+async function replaceAsync(value, pattern, replacer) {
+  const matches = [...value.matchAll(pattern)];
+  const replacements = await Promise.all(matches.map((match) => replacer(...match)));
+  let index = 0;
+  return value.replace(pattern, () => replacements[index++]);
+}
+
+test('ChatArea renders sanitized markdown and supports code copy', async () => {
+  const ChatArea = await loadComponent(path.join('components', 'ChatArea.vue'));
+  copiedText = '';
+  openedExternalUrl = '';
+  const wrapper = mount(ChatArea, {
+    props: {
+      messages: [{
+        id: 'm1',
+        role: 'assistant',
+        content: '**bold** [site](https://example.com)\n\n<script>alert(1)</script>\n\n```txt\ncopy me\n```',
+        createdAt: new Date('2026-05-04T00:00:00.000Z'),
+        turn: 1,
+      }],
+      toolCalls: [],
+    },
+    attachTo: document.body,
+  });
+
+  assert.match(wrapper.html(), /<strong>bold<\/strong>/);
+  assert.doesNotMatch(wrapper.html(), /<script>/i);
+  assert.equal(wrapper.find('.code-block-btn').exists(), true);
+
+  await wrapper.find('.code-block-btn').trigger('click');
+  assert.equal(copiedText, 'copy me');
+
+  await wrapper.find('a.markdown-link').trigger('click');
+  assert.equal(openedExternalUrl, 'https://example.com');
+
+  wrapper.unmount();
+});
+
+test('FileTreeNode collapses directories and files have no expand button', async () => {
+  const FileTreeNode = await loadComponent(path.join('components', 'FileTreeNode.vue'));
+  const wrapper = mount(FileTreeNode, {
+    props: {
+      depth: 0,
+      node: {
+        name: 'src',
+        path: 'src',
+        type: 'directory',
+        children: [{ name: 'index.js', path: 'src/index.js', type: 'file' }],
+      },
+    },
+  });
+
+  assert.equal(wrapper.find('button.tree-toggle').exists(), true);
+  assert.match(wrapper.text(), /index\.js/);
+
+  await wrapper.find('button.tree-toggle').trigger('click');
+  assert.doesNotMatch(wrapper.text(), /index\.js/);
+
+  const fileWrapper = mount(FileTreeNode, {
+    props: { node: { name: 'README.md', path: 'README.md', type: 'file' } },
+  });
+
+  assert.equal(fileWrapper.find('button.tree-toggle').exists(), false);
+  assert.equal(fileWrapper.find('.tree-toggle.placeholder').exists(), true);
+
+  await fileWrapper.find('.file-tree-item').trigger('click');
+  assert.deepEqual(fileWrapper.emitted('select')[0], ['README.md']);
+});
+
+test('RightPanel displays token and cost metrics', async () => {
+  const RightPanel = await loadComponent(path.join('components', 'RightPanel.vue'));
+  const wrapper = mount(RightPanel, {
+    props: {
+      activeTab: 'summary',
+      tokenUsed: 12345,
+      cost: '$0.1234',
+      stepsTotal: 3,
+      stepsDone: 2,
+      toolCalls: [{ id: 't1' }],
+    },
+  });
+
+  assert.match(wrapper.text(), /12,345/);
+  assert.match(wrapper.text(), /\$0\.1234/);
+  assert.match(wrapper.text(), /2\/3/);
+});

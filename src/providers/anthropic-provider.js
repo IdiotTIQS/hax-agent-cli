@@ -21,6 +21,8 @@ const {
   isDisplayableInput,
   formatInputPart,
   joinInputParts,
+  stripToolCallMarkup,
+  parseDsmlToolCalls,
 } = require("./shared");
 
 const DEFAULT_MODEL = "claude-opus-4-7";
@@ -129,7 +131,7 @@ class AnthropicProvider extends ChatProvider {
 
       if (isDsm) {
         hasDsmContent = true;
-        const cleanText = bufferedText.replace(/<\uFF5C\uFF5CDSML\uFF5C\uFF5C[\s\S]*?<\/\uFF5C\uFF5CDSML\uFF5C\uFF5Ctool_calls>/g, "").trim();
+        const cleanText = stripToolCallMarkup(bufferedText);
         if (cleanText) {
           yield createTextChunk(cleanText);
         }
@@ -151,7 +153,7 @@ class AnthropicProvider extends ChatProvider {
       }
 
       if (isDsm) {
-        const textWithoutDsm = bufferedText.replace(/<\uFF5C\uFF5CDSML\uFF5C\uFF5C[\s\S]*?<\/\uFF5C\uFF5CDSML\uFF5C\uFF5Ctool_calls>/g, "").trim();
+        const textWithoutDsm = stripToolCallMarkup(bufferedText);
         messages.push({
           role: "assistant",
           content: textWithoutDsm || "I'll use the available tools to help you.",
@@ -405,7 +407,7 @@ function extractToolUses(content) {
     ? content.filter((block) => block?.type === "text").map((block) => block.text || "").join("")
     : "";
 
-  const dsmlCalls = parseDsmToolCalls(text);
+  const dsmlCalls = parseDsmlToolCalls(text);
   if (dsmlCalls.length > 0) {
     return dsmlCalls.map((call, index) => ({
       type: "tool_use",
@@ -416,32 +418,6 @@ function extractToolUses(content) {
   }
 
   return [];
-}
-
-function parseDsmToolCalls(text) {
-  if (!text || typeof text !== "string") {
-    return [];
-  }
-
-  const calls = [];
-  const callPattern = /<\uFF5C\uFF5CDSML\uFF5C\uFF5Cinvoke\s+name="([^"]+)"[^>]*>([\s\S]*?)<\/\uFF5C\uFF5CDSML\uFF5C\uFF5Cinvoke>/g;
-  let callMatch;
-
-  while ((callMatch = callPattern.exec(text)) !== null) {
-    const name = callMatch[1];
-    const body = callMatch[2];
-    const parameters = {};
-    const paramPattern = /<\uFF5C\uFF5CDSML\uFF5C\uFF5Cparameter\s+name="([^"]+)"[^>]*>([\s\S]*?)<\/\uFF5C\uFF5CDSML\uFF5C\uFF5Cparameter>/g;
-    let paramMatch;
-
-    while ((paramMatch = paramPattern.exec(body)) !== null) {
-      parameters[paramMatch[1]] = paramMatch[2];
-    }
-
-    calls.push({ name, parameters });
-  }
-
-  return calls;
 }
 
 async function executeToolUse(toolRegistry, toolUse) {

@@ -1,5 +1,5 @@
 <script setup>
-import { onMounted, onUnmounted, reactive, ref, watch } from 'vue';
+import { computed, onMounted, onUnmounted, reactive, ref } from 'vue';
 
 import Sidebar from './components/Sidebar.vue';
 import TopBar from './components/TopBar.vue';
@@ -9,50 +9,49 @@ import RightPanel from './components/RightPanel.vue';
 import SettingsModal from './components/SettingsModal.vue';
 import Toast from './components/Toast.vue';
 
-/* ═══════════════════════════════════════════════════════════════════════
-   API
-   ═══════════════════════════════════════════════════════════════════════ */
-
 const api = window.haxAgent ?? {};
 
 function ensureApi(name) {
-  if (typeof api[name] !== 'function')
+  if (typeof api[name] !== 'function') {
     throw new Error(`window.haxAgent.${name} 不可用`);
+  }
   return api[name];
 }
-
-/* ═══════════════════════════════════════════════════════════════════════
-   Session state
-   ═══════════════════════════════════════════════════════════════════════ */
 
 const sessionId = ref('');
 const isBusy = ref(false);
 const isThinking = ref(false);
-const statusState = ref('idle'); // idle | running | thinking | error
+const statusState = ref('idle');
 const activeAssistantId = ref('');
 const errorText = ref('');
 const currentTurn = ref(0);
+const activeNav = ref('chat');
+const activeTab = ref('summary');
+const composer = ref('');
+const panelQuery = ref('');
+const permissionMode = ref('normal');
+const showSettings = ref(false);
+const sidebarWidth = ref(260);
+const inspectorWidth = ref(290);
+const resizing = ref(null);
 
-/* ── Messages ── */
-const messages = ref([
-  {
-    id: crypto.randomUUID(),
-    role: 'assistant',
-    content: getWelcomeMessage(),
-    createdAt: new Date(),
-    turn: 0,
-  },
-]);
-
-/* ── Tool calls ── */
+const messages = ref([{
+  id: crypto.randomUUID(),
+  role: 'assistant',
+  content: getWelcomeMessage(),
+  createdAt: new Date(),
+  turn: 0,
+}]);
 const toolCalls = ref([]);
+const runLog = ref([{ id: crypto.randomUUID(), label: '桌面端已初始化', time: new Date(), type: 'info' }]);
+const sessionList = ref([]);
+const fileTreeData = ref([]);
+const skillsSnapshot = ref({ projectRoot: '', total: 0, visible: 0, skills: [] });
+const toolsSnapshot = ref({ projectRoot: '', total: 0, tools: [] });
+const permissionsSnapshot = ref({ projectRoot: '', mode: 'normal', alwaysAllow: [], alwaysDeny: [], toolPermissions: [], counts: {} });
+const teamSnapshot = ref({ projectRoot: '', teams: [], activeTeam: null });
+const workspaceSummary = ref({ path: '', files: 0, directories: 0, depth: 0 });
 
-/* ── Run log ── */
-const runLog = ref([
-  { id: crypto.randomUUID(), label: '桌面端已初始化', time: new Date(), type: 'info' },
-]);
-
-/* ── Stats (populated from session) ── */
 const elapsed = ref('0s');
 const stepsTotal = ref(0);
 const stepsDone = ref(0);
@@ -62,11 +61,112 @@ const gitBranch = ref('master');
 const gitAhead = ref(0);
 const gitBehind = ref(0);
 const gitChanged = ref(0);
-const sessionList = ref([]);
+const toastRef = ref(null);
 
-/* ── Elapsed timer ── */
+const settings = reactive({
+  provider: 'auto',
+  model: '',
+  temperature: 0.3,
+  workspace: '',
+});
+
+const modelOptions = [
+  { value: '', label: '默认模型' },
+  { value: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6' },
+  { value: 'claude-opus-4-7', label: 'Claude Opus 4.7' },
+  { value: 'gpt-4.1', label: 'GPT-4.1' },
+  { value: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro' },
+];
+
+function flattenTree(nodes, bucket = []) {
+  for (const node of Array.isArray(nodes) ? nodes : []) {
+    if (!node) continue;
+    bucket.push(node);
+    if (Array.isArray(node.children) && node.children.length > 0) {
+      flattenTree(node.children, bucket);
+    }
+  }
+  return bucket;
+}
+
+const filteredSkills = computed(() => {
+  const query = activeNav.value === 'skills' ? panelQuery.value.trim().toLowerCase() : '';
+  return skillsSnapshot.value.skills.filter((skill) => {
+    if (!query) return true;
+    return [
+      skill.name,
+      skill.displayName,
+      skill.description,
+      skill.whenToUse,
+    ].some((value) => String(value || '').toLowerCase().includes(query));
+  });
+});
+
+const filteredTools = computed(() => {
+  const query = activeNav.value === 'plugins' ? panelQuery.value.trim().toLowerCase() : '';
+  return toolsSnapshot.value.tools.filter((tool) => {
+    if (!query) return true;
+    return [tool.name, tool.description].some((value) => String(value || '').toLowerCase().includes(query));
+  });
+});
+
+const filteredPermissions = computed(() => {
+  const query = activeNav.value === 'auto' ? panelQuery.value.trim().toLowerCase() : '';
+  return permissionsSnapshot.value.toolPermissions.filter((item) => {
+    if (!query) return true;
+    return [item.tool, item.level].some((value) => String(value || '').toLowerCase().includes(query));
+  });
+});
+
+const filteredTeams = computed(() => {
+  const query = activeNav.value === 'auto' ? panelQuery.value.trim().toLowerCase() : '';
+  return teamSnapshot.value.teams.filter((team) => {
+    if (!query) return true;
+    return [team.name, team.mission].some((value) => String(value || '').toLowerCase().includes(query));
+  });
+});
+
+const navCounts = computed(() => ({
+  skills: skillsSnapshot.value.total,
+  plugins: toolsSnapshot.value.total,
+  auto: permissionsSnapshot.value.toolPermissions.length + teamSnapshot.value.teams.length,
+  search: flattenTree(fileTreeData.value).length,
+}));
+
+const searchResults = computed(() => {
+  const query = panelQuery.value.trim().toLowerCase();
+  const items = flattenTree(fileTreeData.value);
+  if (!query) return items.slice(0, 100);
+  return items.filter((node) => [
+    node.name,
+    node.path,
+    node.type,
+  ].some((value) => String(value || '').toLowerCase().includes(query)));
+});
+
+const matchingSessions = computed(() => {
+  const query = panelQuery.value.trim().toLowerCase();
+  if (!query) return sessionList.value.slice(0, 8);
+  return sessionList.value.filter((session) => [
+    session.preview,
+    session.title,
+    session.id,
+  ].some((value) => String(value || '').toLowerCase().includes(query)));
+});
+
+const panelPlaceholder = computed(() => {
+  switch (activeNav.value) {
+    case 'search': return '搜索文件、路径、会话';
+    case 'skills': return '筛选技能';
+    case 'plugins': return '筛选工具';
+    case 'auto': return '筛选权限或团队';
+    default: return '搜索';
+  }
+});
+
 let elapsedTimer = null;
 let turnStartTime = null;
+let unsubAgent = null;
 
 function startElapsedTimer() {
   turnStartTime = Date.now();
@@ -77,37 +177,39 @@ function startElapsedTimer() {
 }
 
 function stopElapsedTimer() {
-  if (elapsedTimer) { clearInterval(elapsedTimer); elapsedTimer = null; }
+  if (elapsedTimer) {
+    clearInterval(elapsedTimer);
+    elapsedTimer = null;
+  }
   turnStartTime = null;
 }
 
-function updateStats(sessionResult) {
-  const s = sessionResult?.status ?? sessionResult;
-  if (!s) return;
-  if (typeof s.turns === 'number') stepsTotal.value = s.turns;
-  if (typeof s.toolCalls === 'number') stepsDone.value = s.toolCalls;
-  if (typeof s.tokens === 'number') tokenUsed.value = s.tokens;
-  else if (typeof s.inputTokens === 'number' || typeof s.outputTokens === 'number') {
-    tokenUsed.value = Number(s.inputTokens || 0) + Number(s.outputTokens || 0);
-  }
-  if (typeof s.cost === 'number') cost.value = `$${s.cost.toFixed(4)}`;
-  if (typeof s.elapsed === 'string') elapsed.value = s.elapsed;
-  if (sessionResult?.provider?.model) {
-    settings.model = sessionResult.provider.model;
-  }
+function getWelcomeMessage() {
+  return '欢迎使用 Hax Agent。我可以读取项目文件、执行命令、调用外部工具来完成你的任务。输入指令即可开始。';
 }
 
-/* ═══════════════════════════════════════════════════════════════════════
-   Settings
-   ═══════════════════════════════════════════════════════════════════════ */
+function appendLog(label, type = 'info') {
+  runLog.value.unshift({ id: crypto.randomUUID(), label, time: new Date(), type });
+  runLog.value = runLog.value.slice(0, 50);
+}
 
-const showSettings = ref(false);
-const settings = reactive({
-  provider: 'auto',
-  model: '',
-  temperature: 0.3,
-  workspace: '',
-});
+function appendMessage(role, content, extra = {}) {
+  const msg = {
+    id: crypto.randomUUID(),
+    role,
+    content: String(content ?? ''),
+    createdAt: new Date(),
+    turn: currentTurn.value,
+    ...extra,
+  };
+  messages.value.push(msg);
+  return msg;
+}
+
+function serializeSession(r) {
+  if (!r) return '';
+  return r.id ?? r.sessionId ?? '';
+}
 
 function normalizeSettings(payload) {
   const src = payload?.settings ?? payload;
@@ -119,42 +221,34 @@ function normalizeSettings(payload) {
   if (src.projectRoot || src.workspace) settings.workspace = src.projectRoot ?? src.workspace;
 }
 
-/* ═══════════════════════════════════════════════════════════════════════
-   UI state
-   ═══════════════════════════════════════════════════════════════════════ */
+function summarizeTree(nodes, depth = 0) {
+  let files = 0;
+  let directories = 0;
+  let maxDepth = depth;
+  for (const node of Array.isArray(nodes) ? nodes : []) {
+    if (!node) continue;
+    if (Array.isArray(node.children) && node.children.length > 0) {
+      directories += 1;
+      const nested = summarizeTree(node.children, depth + 1);
+      files += nested.files;
+      directories += nested.directories;
+      maxDepth = Math.max(maxDepth, nested.depth);
+    } else {
+      files += 1;
+      maxDepth = Math.max(maxDepth, depth);
+    }
+  }
+  return { files, directories, depth: maxDepth };
+}
 
-const activeNav = ref('chat');
-const activeTab = ref('summary');
-const composer = ref('');
-const permissionMode = ref('normal');
-
-/* ── Resize ── */
-const sidebarWidth = ref(260);
-const inspectorWidth = ref(290);
-const resizing = ref(null);
-
-/* ── Model options ── */
-const modelOptions = [
-  { value: '', label: '默认模型' },
-  { value: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6' },
-  { value: 'claude-opus-4-7', label: 'Claude Opus 4.7' },
-  { value: 'gpt-4.1', label: 'GPT-4.1' },
-  { value: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro' },
-];
-
-const fileTreeData = ref([]);
-
-/* ── Toast ref ── */
-const toastRef = ref(null);
-
-/* ═══════════════════════════════════════════════════════════════════════
-   Helpers
-   ═══════════════════════════════════════════════════════════════════════ */
-
-function serializeSession(r) { if (!r) return ''; return r.id ?? r.sessionId ?? ''; }
-
-function getWelcomeMessage() {
-  return '欢迎使用 Hax Agent。我可以读取项目文件、执行命令、调用外部工具来完成你的任务。输入指令即可开始。';
+function updateWorkspaceSummary(tree) {
+  const summary = summarizeTree(tree, 0);
+  workspaceSummary.value = {
+    path: settings.workspace || '',
+    files: summary.files,
+    directories: summary.directories,
+    depth: summary.depth,
+  };
 }
 
 function resetConversationView() {
@@ -174,22 +268,113 @@ function resetConversationView() {
   errorText.value = '';
 }
 
-function appendLog(label, type = 'info') {
-  runLog.value.unshift({ id: crypto.randomUUID(), label, time: new Date(), type });
-  runLog.value = runLog.value.slice(0, 50);
+function updateStats(sessionResult) {
+  const s = sessionResult?.status ?? sessionResult;
+  if (!s) return;
+  if (typeof s.turns === 'number') stepsTotal.value = s.turns;
+  if (typeof s.toolCalls === 'number') stepsDone.value = s.toolCalls;
+  if (typeof s.tokens === 'number') tokenUsed.value = s.tokens;
+  else if (typeof s.inputTokens === 'number' || typeof s.outputTokens === 'number') {
+    tokenUsed.value = Number(s.inputTokens || 0) + Number(s.outputTokens || 0);
+  }
+  if (typeof s.cost === 'number') cost.value = `$${s.cost.toFixed(4)}`;
+  if (typeof s.elapsed === 'string') elapsed.value = s.elapsed;
+  if (sessionResult?.provider?.model) settings.model = sessionResult.provider.model;
 }
 
-function appendMessage(role, content, extra = {}) {
-  const msg = {
-    id: crypto.randomUUID(),
-    role,
-    content: String(content ?? ''),
-    createdAt: new Date(),
-    turn: currentTurn.value,
-    ...extra,
+function appendAssistantDelta(delta) {
+  if (!activeAssistantId.value) {
+    activeAssistantId.value = appendMessage('assistant', '').id;
+  }
+  const msg = messages.value.find((m) => m.id === activeAssistantId.value);
+  if (msg) msg.content += String(delta ?? '');
+}
+
+function upsertToolCall(event) {
+  const name = event.name ?? event.tool ?? 'tool';
+  const attempt = event.attempt ?? 0;
+  const turn = event.turn ?? currentTurn.value;
+  const id = event.id ?? event.toolCallId ?? event.callId ?? event.tool_use_id ?? `${name}:${attempt}:${turn}`;
+  let existing = toolCalls.value.find((t) => t.id === id);
+  if (!existing && (event.status === 'done' || event.status === 'failed')) {
+    existing = toolCalls.value.find((t) => t.name === name && t.status === 'running');
+  }
+
+  const isResult = event.type === 'tool.result';
+  const patch = {
+    id,
+    name,
+    status: event.status ?? (isResult ? (event.isError ? 'failed' : 'done') : 'running'),
+    summary: isResult
+      ? (event.isError ? `错误 — ${event.durationMs ?? '?'}ms` : `完成 — ${event.durationMs ?? '?'}ms`)
+      : (event.displayInput ?? event.summary ?? ''),
+    input: event.input ? (typeof event.input === 'object' ? JSON.stringify(event.input, null, 2) : String(event.input)) : '',
+    output: isResult && event.data
+      ? (typeof event.data === 'object' ? JSON.stringify(event.data, null, 2) : String(event.data))
+      : (event.error ? String(event.error) : ''),
+    turn,
+    updatedAt: new Date(),
   };
-  messages.value.push(msg);
-  return msg;
+
+  if (existing) {
+    Object.assign(existing, patch);
+  } else {
+    toolCalls.value.unshift(patch);
+    toolCalls.value = toolCalls.value.slice(0, 20);
+  }
+}
+
+async function loadSettings() {
+  if (typeof api.getSettings !== 'function') return;
+  try {
+    const result = await api.getSettings();
+    normalizeSettings(result);
+    workspaceSummary.value.path = settings.workspace || '';
+  } catch (e) {
+    errorText.value = e.message;
+  }
+}
+
+async function loadWorkspaceSnapshot() {
+  if (typeof api.getWorkspaceSnapshot !== 'function') return;
+  try {
+    const snapshot = await api.getWorkspaceSnapshot({ projectRoot: settings.workspace || undefined });
+    fileTreeData.value = snapshot.fileTree || [];
+    sessionList.value = snapshot.sessions || [];
+    updateWorkspaceSummary(fileTreeData.value);
+    if (snapshot.projectRoot) settings.workspace = snapshot.projectRoot;
+    workspaceSummary.value.path = settings.workspace || snapshot.projectRoot || workspaceSummary.value.path;
+    if (snapshot.git) {
+      gitBranch.value = snapshot.git.branch || 'none';
+      gitAhead.value = Number(snapshot.git.ahead || 0);
+      gitBehind.value = Number(snapshot.git.behind || 0);
+      gitChanged.value = Number(snapshot.git.changed || 0);
+    }
+  } catch (e) {
+    appendLog('工作区快照加载失败', 'fail');
+    errorText.value = e.message;
+  }
+}
+
+async function loadInsightPanels() {
+  const projectRoot = settings.workspace || undefined;
+  const calls = [];
+  if (typeof api.getSkillsSnapshot === 'function') calls.push(api.getSkillsSnapshot({ projectRoot }));
+  if (typeof api.getToolsSnapshot === 'function') calls.push(api.getToolsSnapshot({ projectRoot }));
+  if (typeof api.getPermissionsSnapshot === 'function') calls.push(api.getPermissionsSnapshot({ projectRoot }));
+  if (typeof api.getTeamSnapshot === 'function') calls.push(api.getTeamSnapshot({ projectRoot }));
+
+  try {
+    const results = await Promise.all(calls);
+    let index = 0;
+    if (typeof api.getSkillsSnapshot === 'function') skillsSnapshot.value = results[index++] || skillsSnapshot.value;
+    if (typeof api.getToolsSnapshot === 'function') toolsSnapshot.value = results[index++] || toolsSnapshot.value;
+    if (typeof api.getPermissionsSnapshot === 'function') permissionsSnapshot.value = results[index++] || permissionsSnapshot.value;
+    if (typeof api.getTeamSnapshot === 'function') teamSnapshot.value = results[index++] || teamSnapshot.value;
+  } catch (e) {
+    appendLog('面板数据加载失败', 'fail');
+    errorText.value = e.message;
+  }
 }
 
 function setMessagesFromSession(sessionResult) {
@@ -212,54 +397,24 @@ function setMessagesFromSession(sessionResult) {
   currentTurn.value = Math.ceil(restored.length / 2);
 }
 
-function appendAssistantDelta(delta) {
-  if (!activeAssistantId.value) {
-    activeAssistantId.value = appendMessage('assistant', '').id;
-  }
-  const msg = messages.value.find((m) => m.id === activeAssistantId.value);
-  if (msg) msg.content += String(delta ?? '');
+function handleSelectNav(key) {
+  activeNav.value = key;
+  panelQuery.value = '';
 }
 
-function upsertToolCall(event) {
-  const name = event.name ?? event.tool ?? 'tool';
-  const attempt = event.attempt ?? 0;
-  const turn = event.turn ?? currentTurn.value;
-  // Composite key: name + attempt + turn (only fields present in both start & result events)
-  const id = event.id ?? event.toolCallId ?? event.callId ?? event.tool_use_id ?? `${name}:${attempt}:${turn}`;
-  let existing = toolCalls.value.find((t) => t.id === id);
-  if (!existing && (event.status === 'done' || event.status === 'failed')) {
-    existing = toolCalls.value.find((t) => t.name === name && t.status === 'running');
-  }
-
-  const isResult = event.type === 'tool.result';
-  const detail = event.displayInput ?? event.summary ?? '';
-
-  const patch = {
-    id,
-    name,
-    status: event.status ?? (isResult ? (event.isError ? 'failed' : 'done') : 'running'),
-    summary: isResult
-      ? (event.isError ? `错误 — ${event.durationMs ?? '?'}ms` : `完成 — ${event.durationMs ?? '?'}ms`)
-      : detail,
-    input: event.input ? (typeof event.input === 'object' ? JSON.stringify(event.input, null, 2) : String(event.input)) : '',
-    output: isResult && event.data
-      ? (typeof event.data === 'object' ? JSON.stringify(event.data, null, 2) : String(event.data))
-      : (event.error ? String(event.error) : ''),
-    turn,
-    updatedAt: new Date(),
-  };
-
-  if (existing) {
-    Object.assign(existing, patch);
-  } else {
-    toolCalls.value.unshift(patch);
-    toolCalls.value = toolCalls.value.slice(0, 20);
-  }
+function handleSelectFile(path) {
+  appendLog('选中文件: ' + path);
+  activeNav.value = 'search';
+  panelQuery.value = path;
 }
 
-/* ═══════════════════════════════════════════════════════════════════════
-   Agent IPC actions
-   ═══════════════════════════════════════════════════════════════════════ */
+function handleSelectTab(tab) {
+  activeTab.value = tab;
+}
+
+function handleTogglePermission() {
+  permissionMode.value = permissionMode.value === 'full' ? 'normal' : 'full';
+}
 
 async function createSession() {
   errorText.value = '';
@@ -269,14 +424,13 @@ async function createSession() {
     sessionId.value = serializeSession(result) || crypto.randomUUID();
     resetConversationView();
     updateStats(result);
-    // Append provider info to log
     const provider = result?.provider;
     if (provider) {
       appendLog(`提供商: ${provider.name} / ${provider.model || '默认模型'}`, 'done');
     }
     appendLog(`会话 ${sessionId.value.slice(0, 8)} 已就绪`, 'done');
     toastRef.value?.success('会话已创建');
-    await loadWorkspaceSnapshot();
+    await Promise.all([loadWorkspaceSnapshot(), loadInsightPanels()]);
     return sessionId.value;
   } catch (e) {
     errorText.value = e.message;
@@ -288,10 +442,8 @@ async function createSession() {
 
 async function resumeSession(targetSessionId) {
   if (!targetSessionId || isBusy.value) return;
-
   errorText.value = '';
   appendLog(`切换会话 ${targetSessionId.slice(0, 8)}…`, 'start');
-
   try {
     const result = await ensureApi('resumeSession')({
       sessionId: targetSessionId,
@@ -311,34 +463,13 @@ async function resumeSession(targetSessionId) {
   }
 }
 
-async function loadWorkspaceSnapshot() {
-  if (typeof api.getWorkspaceSnapshot !== 'function') return;
-
-  try {
-    const snapshot = await api.getWorkspaceSnapshot({
-      projectRoot: settings.workspace || undefined,
-    });
-    fileTreeData.value = snapshot.fileTree || [];
-    sessionList.value = snapshot.sessions || [];
-
-    if (snapshot.projectRoot) settings.workspace = snapshot.projectRoot;
-    if (snapshot.git) {
-      gitBranch.value = snapshot.git.branch || 'none';
-      gitAhead.value = Number(snapshot.git.ahead || 0);
-      gitBehind.value = Number(snapshot.git.behind || 0);
-      gitChanged.value = Number(snapshot.git.changed || 0);
-    }
-  } catch (e) {
-    appendLog('工作区快照加载失败', 'fail');
-    errorText.value = e.message;
-  }
-}
-
 async function sendMessage() {
   const content = composer.value.trim();
   if (!content || isBusy.value) return;
+  if (activeNav.value === 'search') {
+    activeNav.value = 'chat';
+  }
 
-  // Auto-create session
   if (!sessionId.value) {
     try { await createSession(); } catch { return; }
     if (!sessionId.value) return;
@@ -361,12 +492,9 @@ async function sendMessage() {
       content,
     });
 
-    // Update stats from session result
     updateStats(result);
-
-    // Handle sync response fallback
     if (!isBusy.value) {
-      // Already handled by events
+      // events handled
     } else if (typeof result === 'string' && result.length > 0) {
       appendMessage('assistant', result);
     } else if (result?.message || result?.content) {
@@ -409,14 +537,35 @@ async function interruptAgent() {
   }
 }
 
-/* ═══════════════════════════════════════════════════════════════════════
-   Agent streaming events
-   ═══════════════════════════════════════════════════════════════════════ */
+function startResize(panel) {
+  resizing.value = panel;
+  document.body.style.cursor = 'col-resize';
+  document.body.style.userSelect = 'none';
+}
+
+function onMouseMove(e) {
+  if (!resizing.value) return;
+  if (resizing.value === 'sidebar') sidebarWidth.value = Math.max(200, Math.min(380, e.clientX));
+  else if (resizing.value === 'inspector') inspectorWidth.value = Math.max(240, Math.min(460, window.innerWidth - e.clientX));
+}
+
+function stopResize() {
+  resizing.value = null;
+  document.body.style.cursor = '';
+  document.body.style.userSelect = '';
+}
+
+function onKeyDown(e) {
+  if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+    e.preventDefault();
+    showSettings.value = !showSettings.value;
+  }
+  if (e.key === 'Escape' && showSettings.value) showSettings.value = false;
+}
 
 function handleAgentEvent(event) {
   const type = event?.type ?? event?.event;
   if (!type) return;
-
   switch (type) {
     case 'turn.started':
       isBusy.value = true;
@@ -425,35 +574,28 @@ function handleAgentEvent(event) {
       statusState.value = 'thinking';
       appendLog('回合开始', 'start');
       break;
-
     case 'message.delta':
       appendAssistantDelta(event.delta);
       statusState.value = 'running';
       isThinking.value = false;
       break;
-
     case 'thinking':
       statusState.value = 'thinking';
       break;
-
     case 'tool.start':
       upsertToolCall({ ...event, status: 'running' });
       statusState.value = 'running';
       appendLog(`工具 ${event.name} 开始执行`, 'start');
       break;
-
     case 'tool.result':
       upsertToolCall({ ...event, status: event.isError ? 'failed' : 'done' });
       appendLog(`工具 ${event.name} ${event.isError ? '执行失败' : '完成'}`, event.isError ? 'fail' : 'done');
       break;
-
     case 'tool.limit':
       appendMessage('system', '已达到工具调用上限。');
       appendLog('工具调用上限');
       break;
-
     case 'usage':
-      // Real-time token tracking from provider
       if (event.status) {
         updateStats(event);
       } else {
@@ -461,15 +603,12 @@ function handleAgentEvent(event) {
         if (typeof event.outputTokens === 'number') tokenUsed.value += event.outputTokens;
       }
       break;
-
     case 'skill.start':
       appendLog(`技能开始: ${event.name || event.skill || '未知'}`);
       break;
-
     case 'skill.matched':
       appendLog(`技能匹配: ${event.name || event.skill || '未知'}`);
       break;
-
     case 'turn.completed':
       isBusy.value = false;
       isThinking.value = false;
@@ -479,7 +618,6 @@ function handleAgentEvent(event) {
       stopElapsedTimer();
       appendLog('回合完成', 'done');
       break;
-
     case 'turn.interrupted':
       isBusy.value = false;
       isThinking.value = false;
@@ -489,7 +627,6 @@ function handleAgentEvent(event) {
       appendMessage('system', '任务已被中断。');
       appendLog('回合被中断');
       break;
-
     case 'turn.failed':
       isBusy.value = false;
       isThinking.value = false;
@@ -500,23 +637,8 @@ function handleAgentEvent(event) {
       appendMessage('system', `错误: ${errorText.value}`, { tone: 'danger' });
       appendLog('回合失败', 'fail');
       break;
-
     default:
       break;
-  }
-}
-
-/* ═══════════════════════════════════════════════════════════════════════
-   Settings IPC
-   ═══════════════════════════════════════════════════════════════════════ */
-
-async function loadSettings() {
-  if (typeof api.getSettings !== 'function') return;
-  try {
-    const result = await api.getSettings();
-    normalizeSettings(result);
-  } catch (e) {
-    errorText.value = e.message;
   }
 }
 
@@ -528,52 +650,20 @@ async function saveSettings(updates) {
     showSettings.value = false;
     appendLog('设置已保存', 'done');
     toastRef.value?.success('设置已保存');
+    await Promise.all([loadWorkspaceSnapshot(), loadInsightPanels()]);
   } catch (e) {
     errorText.value = e.message;
     toastRef.value?.error('保存设置失败');
   }
 }
 
-/* ═══════════════════════════════════════════════════════════════════════
-   Panel resize
-   ═══════════════════════════════════════════════════════════════════════ */
-
-function startResize(panel) { resizing.value = panel; document.body.style.cursor = 'col-resize'; document.body.style.userSelect = 'none'; }
-function onMouseMove(e) {
-  if (!resizing.value) return;
-  if (resizing.value === 'sidebar') sidebarWidth.value = Math.max(200, Math.min(380, e.clientX));
-  else if (resizing.value === 'inspector') inspectorWidth.value = Math.max(240, Math.min(460, window.innerWidth - e.clientX));
+function renderSearchContent() {
+  return fileTreeData.value;
 }
-function stopResize() { resizing.value = null; document.body.style.cursor = ''; document.body.style.userSelect = ''; }
-
-/* ═══════════════════════════════════════════════════════════════════════
-   Keyboard shortcuts
-   ═══════════════════════════════════════════════════════════════════════ */
-
-function onKeyDown(e) {
-  if ((e.ctrlKey || e.metaKey) && e.key === 'k') { e.preventDefault(); showSettings.value = !showSettings.value; }
-  if (e.key === 'Escape' && showSettings.value) showSettings.value = false;
-}
-
-/* ═══════════════════════════════════════════════════════════════════════
-   Sidebar events
-   ═══════════════════════════════════════════════════════════════════════ */
-
-function handleSelectNav(key) { activeNav.value = key; }
-function handleSelectFile(path) { appendLog('选中文件: ' + path); }
-function handleTogglePermission() {
-  permissionMode.value = permissionMode.value === 'full' ? 'normal' : 'full';
-}
-
-/* ═══════════════════════════════════════════════════════════════════════
-   Lifecycle
-   ═══════════════════════════════════════════════════════════════════════ */
-
-let unsubAgent = null;
 
 onMounted(async () => {
   await loadSettings();
-  await loadWorkspaceSnapshot();
+  await Promise.all([loadWorkspaceSnapshot(), loadInsightPanels()]);
 
   if (typeof api.onAgentEvent === 'function') {
     unsubAgent = api.onAgentEvent(handleAgentEvent);
@@ -595,13 +685,13 @@ onUnmounted(() => {
 
 <template>
   <main class="desk" :style="{ gridTemplateColumns: sidebarWidth + 'px 3px 1fr 3px ' + inspectorWidth + 'px' }">
-    <!-- Left Sidebar -->
     <Sidebar
       :sessions="sessionList"
       :active-id="sessionId"
       :file-tree="fileTreeData"
       :active-nav="activeNav"
       :is-busy="isBusy"
+      :nav-counts="navCounts"
       @select-nav="handleSelectNav"
       @new-task="createSession"
       @select-session="resumeSession"
@@ -612,9 +702,8 @@ onUnmounted(() => {
 
     <div class="resize-handle" @mousedown="startResize('sidebar')"></div>
 
-    <!-- Main workspace -->
     <section class="workspace">
-      <div><!-- grid row 1: TopBar + ErrorBanner -->
+      <div>
         <TopBar
           :title="sessionId ? `会话 ${sessionId.slice(0, 8)}` : 'Agent 工作区'"
           :status="statusState"
@@ -624,31 +713,172 @@ onUnmounted(() => {
           @interrupt="interruptAgent"
           @select-model="(m) => settings.model = m"
         />
+        <div class="workspace-rail">
+          <div class="workspace-rail-item workspace-rail-wide">
+            <span class="rail-label">工作区</span>
+            <span class="rail-value">{{ workspaceSummary.path || settings.workspace || '当前项目根目录' }}</span>
+          </div>
+          <div class="workspace-rail-item"><span class="rail-label">文件</span><span class="rail-value">{{ workspaceSummary.files }}</span></div>
+          <div class="workspace-rail-item"><span class="rail-label">目录</span><span class="rail-value">{{ workspaceSummary.directories }}</span></div>
+          <div class="workspace-rail-item"><span class="rail-label">深度</span><span class="rail-value">{{ workspaceSummary.depth }}</span></div>
+          <div class="workspace-rail-item"><span class="rail-label">消息</span><span class="rail-value">{{ messages.length }}</span></div>
+          <div class="workspace-rail-item"><span class="rail-label">工具</span><span class="rail-value">{{ toolCalls.length }}</span></div>
+        </div>
         <div v-if="errorText" class="error-banner" role="alert">
           <strong>错误</strong>
           <span>{{ errorText }}</span>
         </div>
       </div>
 
-      <ChatArea
-        :messages="messages"
-        :tool-calls="toolCalls"
-        :is-thinking="isThinking"
-        :active-assistant-id="activeAssistantId"
-      />
+      <div v-if="activeNav === 'chat'" class="workspace-stack">
+        <ChatArea
+          :messages="messages"
+          :tool-calls="toolCalls"
+          :is-thinking="isThinking"
+          :active-assistant-id="activeAssistantId"
+        />
+        <InputBar
+          v-model="composer"
+          :is-busy="isBusy"
+          :permission-mode="permissionMode"
+          @send="sendMessage"
+          @toggle-permission="handleTogglePermission"
+        />
+      </div>
 
-      <InputBar
-        v-model="composer"
-        :is-busy="isBusy"
-        :permission-mode="permissionMode"
-        @send="sendMessage"
-        @toggle-permission="handleTogglePermission"
-      />
+      <div v-else class="nav-panel">
+        <div class="nav-panel-top">
+          <div class="panel-search">
+            <span class="panel-search-icon">⌕</span>
+            <input
+              v-model="panelQuery"
+              :placeholder="panelPlaceholder"
+              type="text"
+            />
+          </div>
+          <div class="panel-search-meta">
+            <span v-if="activeNav === 'search'">{{ searchResults.length }} results</span>
+            <span v-else-if="activeNav === 'skills'">{{ filteredSkills.length }} skills</span>
+            <span v-else-if="activeNav === 'plugins'">{{ filteredTools.length }} tools</span>
+            <span v-else>{{ filteredPermissions.length }} permissions</span>
+          </div>
+        </div>
+
+        <div v-if="activeNav === 'search'" class="nav-panel-body">
+          <div class="panel-head">
+            <div>
+              <div class="panel-kicker">Search</div>
+              <h2>Workspace Search</h2>
+            </div>
+            <div class="panel-meta">{{ fileTreeData.length }} top-level nodes</div>
+          </div>
+          <div class="nav-panel-list">
+            <div v-for="node in searchResults" :key="node.path" class="nav-row">
+              <div class="nav-row-title">{{ node.path }}</div>
+              <div class="nav-row-meta">{{ node.type }}</div>
+            </div>
+            <div v-if="searchResults.length === 0" class="empty-panel">
+              没有匹配结果
+            </div>
+          </div>
+          <div class="nav-panel-list">
+            <div class="subsection-title">Recent sessions</div>
+            <div v-for="session in matchingSessions" :key="session.id" class="nav-card">
+              <div class="nav-card-title">{{ session.title }}</div>
+              <div class="nav-card-meta">{{ session.preview }}</div>
+            </div>
+            <div v-if="matchingSessions.length === 0" class="empty-panel">
+              没有匹配会话
+            </div>
+          </div>
+        </div>
+
+        <div v-else-if="activeNav === 'skills'" class="nav-panel-body">
+          <div class="panel-head">
+            <div>
+              <div class="panel-kicker">Skills</div>
+              <h2>Loaded Skills</h2>
+            </div>
+            <div class="panel-meta">{{ skillsSnapshot.visible }} visible / {{ skillsSnapshot.total }} total</div>
+          </div>
+          <div class="nav-panel-list">
+            <div v-for="skill in filteredSkills" :key="skill.name" class="nav-card">
+              <div class="nav-card-title">{{ skill.displayName }}</div>
+              <div class="nav-card-meta">{{ skill.whenToUse || skill.description || 'No description' }}</div>
+              <div class="nav-card-foot">
+                <span>{{ skill.source }}</span>
+                <span>{{ skill.usageCount }} uses</span>
+              </div>
+            </div>
+            <div v-if="filteredSkills.length === 0" class="empty-panel">
+              没有匹配的技能
+            </div>
+          </div>
+        </div>
+
+        <div v-else-if="activeNav === 'plugins'" class="nav-panel-body">
+          <div class="panel-head">
+            <div>
+              <div class="panel-kicker">Plugins</div>
+              <h2>Local Tools</h2>
+            </div>
+            <div class="panel-meta">{{ toolsSnapshot.total }} tools</div>
+          </div>
+          <div class="nav-panel-list">
+            <div v-for="tool in filteredTools" :key="tool.name" class="nav-card">
+              <div class="nav-card-title">{{ tool.name }}</div>
+              <div class="nav-card-meta">{{ tool.description || 'No description' }}</div>
+            </div>
+            <div v-if="filteredTools.length === 0" class="empty-panel">
+              没有匹配的工具
+            </div>
+          </div>
+        </div>
+
+        <div v-else-if="activeNav === 'auto'" class="nav-panel-body">
+          <div class="panel-head">
+            <div>
+              <div class="panel-kicker">Automation</div>
+              <h2>Permissions and Teams</h2>
+            </div>
+            <div class="panel-meta">{{ permissionsSnapshot.mode }}</div>
+          </div>
+          <div class="dual-grid">
+            <div>
+              <div class="subsection-title">Tool Permissions</div>
+              <div class="nav-panel-list">
+                <div v-for="item in filteredPermissions" :key="item.tool" class="nav-row">
+                  <div class="nav-row-title">{{ item.tool }}</div>
+                  <div class="nav-row-meta">{{ item.level }}</div>
+                </div>
+                <div v-if="filteredPermissions.length === 0" class="empty-panel">
+                  没有匹配的权限规则
+                </div>
+              </div>
+            </div>
+            <div>
+              <div class="subsection-title">Teams</div>
+              <div class="nav-panel-list">
+                <div v-for="team in filteredTeams" :key="team.name" class="nav-card">
+                  <div class="nav-card-title">{{ team.name }}</div>
+                  <div class="nav-card-meta">{{ team.mission }}</div>
+                  <div class="nav-card-foot">
+                    <span>{{ team.members }} members</span>
+                    <span>{{ team.tasks }} tasks</span>
+                  </div>
+                </div>
+                <div v-if="filteredTeams.length === 0" class="empty-panel">
+                  没有匹配的团队
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
     </section>
 
     <div class="resize-handle" @mousedown="startResize('inspector')"></div>
 
-    <!-- Right inspector -->
     <RightPanel
       :active-tab="activeTab"
       :log-entries="runLog"
@@ -664,7 +894,7 @@ onUnmounted(() => {
       :git-ahead="gitAhead"
       :git-behind="gitBehind"
       :git-changed="gitChanged"
-      @select-tab="(t) => activeTab = t"
+      @select-tab="handleSelectTab"
     />
 
     <SettingsModal

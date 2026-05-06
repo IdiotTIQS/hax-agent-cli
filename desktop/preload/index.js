@@ -49,10 +49,45 @@ const workspace = {
   },
 };
 
+const skills = {
+  getSnapshot(options) {
+    return ipcRenderer.invoke("skills:getSnapshot", options);
+  },
+};
+
+const tools = {
+  getSnapshot(options) {
+    return ipcRenderer.invoke("tools:getSnapshot", options);
+  },
+};
+
+const permissions = {
+  getSnapshot(options) {
+    return ipcRenderer.invoke("permissions:getSnapshot", options);
+  },
+};
+
+const team = {
+  getSnapshot(options) {
+    return ipcRenderer.invoke("team:getSnapshot", options);
+  },
+};
+
+const shell = {
+  openExternal(url) {
+    return ipcRenderer.invoke("shell:openExternal", url);
+  },
+};
+
 contextBridge.exposeInMainWorld("haxAgent", {
   agent,
   settings,
   workspace,
+  skills,
+  tools,
+  permissions,
+  team,
+  shell,
   createSession: agent.createSession,
   resumeSession: agent.resumeSession,
   sendMessage: agent.sendMessage,
@@ -61,4 +96,9 @@ contextBridge.exposeInMainWorld("haxAgent", {
   getSettings: settings.get,
   updateSettings: settings.update,
   getWorkspaceSnapshot: workspace.getSnapshot,
+  getSkillsSnapshot: skills.getSnapshot,
+  getToolsSnapshot: tools.getSnapshot,
+  getPermissionsSnapshot: permissions.getSnapshot,
+  getTeamSnapshot: team.getSnapshot,
+  openExternal: shell.openExternal,
 });
