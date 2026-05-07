@@ -53,7 +53,7 @@ test('manual init stores settings in the requested user settings path', async ()
   const { runInitWizard } = require('../src/init-wizard');
   const settingsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hax-agent-init-unit-'));
   const settingsPath = path.join(settingsDir, 'settings.json');
-  const answers = ['3', 'key-google', 'https://google.example/v1', '', '1', '2', 'y'];
+  const answers = ['3', 'key-google', 'https://google.example/v1', '', 'y', '1000000', '32768', 'y', 'Prefer concise answers.', '1', '2', 'y'];
 
   await runInitWizard({
     ask: async () => answers.shift() || '',
@@ -70,13 +70,18 @@ test('manual init stores settings in the requested user settings path', async ()
   assert.equal(saved.ui.locale, 'en');
   assert.equal(saved.permissions.mode, 'yolo');
   assert.equal(saved.memory.enabled, true);
+  assert.equal(saved.context.enabled, true);
+  assert.equal(saved.context.windowTokens, 1000000);
+  assert.equal(saved.context.reserveOutputTokens, 32768);
+  assert.equal(saved.fileContext.enabled, true);
+  assert.equal(saved.instructions.custom, 'Prefer concise answers.');
 });
 
 test('manual init can use an injected selector for interactive choices', async () => {
   const { runInitWizard } = require('../src/init-wizard');
   const settingsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hax-agent-init-select-'));
   const settingsPath = path.join(settingsDir, 'settings.json');
-  const answers = ['key-openai', '', '', 'n'];
+  const answers = ['key-openai', '', '', '', '', '', 'n', '', 'n'];
   const selections = {
     Provider: 'openai',
     Language: 'zh-CN',
@@ -99,4 +104,9 @@ test('manual init can use an injected selector for interactive choices', async (
   assert.equal(saved.ui.locale, 'zh-CN');
   assert.equal(saved.permissions.mode, 'normal');
   assert.equal(saved.memory.enabled, false);
+  assert.equal(saved.context.enabled, true);
+  assert.equal(saved.context.reserveOutputTokens, 8192);
+  assert.equal(saved.context.windowTokens, undefined);
+  assert.equal(saved.fileContext.enabled, false);
+  assert.equal(saved.instructions, undefined);
 });

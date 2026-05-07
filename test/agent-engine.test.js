@@ -19,6 +19,7 @@ function createEngine(options = {}) {
     settings: {
       projectRoot,
       sessions: { directory: path.join(projectRoot, '.hax-agent', 'sessions') },
+      ...(options.settings || {}),
     },
     toolRegistry: options.toolRegistry || new ToolRegistry({ root: projectRoot }),
     permissionManager: new PermissionManager({ mode: 'yolo' }),
@@ -82,4 +83,94 @@ test('agent engine interruption does not persist partial assistant messages', as
   assert.ok(events.some((event) => event.type === AgentEventType.interrupted));
   assert.equal(events.some((event) => event.type === AgentEventType.completed), false);
   assert.deepEqual(session.messages, []);
+});
+
+test('agent engine marks empty tool preambles as failed instead of completed', async () => {
+  const provider = {
+    name: 'capture',
+    model: 'mock-large',
+    async *stream() {
+      yield { type: 'text', delta: '让我继续深入查看关键文件。' };
+      yield { type: 'tool_limit', reason: 'empty_tool_preamble', maxToolTurns: 2 };
+      yield { type: 'text', delta: '\n\nI stopped because the model repeatedly said it would inspect the project, but it did not call any available tool.' };
+    },
+  };
+  const { engine, session } = createEngine({ provider });
+
+  const events = await collect(engine.sendMessage('检查当前项目'));
+
+  assert.equal(events.some((event) => event.type === AgentEventType.completed), false);
+  const failed = events.find((event) => event.type === AgentEventType.failed);
+  assert.equal(failed.error.code, 'EMPTY_TOOL_PREAMBLE');
+  assert.match(failed.partialAssistantMessage.content, /继续深入查看关键文件/);
+  assert.deepEqual(session.messages, []);
+});
+
+test('agent engine sends only budgeted context to the provider', async () => {
+  const captured = [];
+  const provider = {
+    name: 'capture',
+    model: 'mock-large',
+    async *stream(request) {
+      captured.push(request);
+      yield { type: 'text', delta: 'ok' };
+      yield { type: 'usage', inputTokens: 10, outputTokens: 1 };
+    },
+  };
+  const { engine, session } = createEngine({ provider });
+  session.settings.context = {
+    windowTokens: 120,
+    reserveOutputTokens: 20,
+    charsPerToken: 4,
+  };
+  session.messages = Array.from({ length: 10 }, (_, index) => ({
+    role: index % 2 === 0 ? 'user' : 'assistant',
+    content: `${index}: ${'x'.repeat(120)}`,
+  }));
+
+  const events = await collect(engine.sendMessage('latest'));
+
+  assert.ok(captured[0].messages.length < session.messages.length);
+  assert.equal(captured[0].messages.at(-1).content, 'latest');
+  assert.ok(events[0].context.droppedMessages > 0);
+  assert.equal(session.messages.at(-2).content, 'latest');
+  assert.equal(session.messages.at(-1).content, 'ok');
+});
+
+test('agent engine injects custom instructions and relevant file context into provider system prompt', async () => {
+  const captured = [];
+  const provider = {
+    name: 'capture',
+    model: 'mock-large',
+    async *stream(request) {
+      captured.push(request);
+      yield { type: 'text', delta: 'ok' };
+      yield { type: 'usage', inputTokens: 10, outputTokens: 1 };
+    },
+  };
+  const { engine, projectRoot, session } = createEngine({
+    provider,
+    settings: {
+      instructions: { custom: 'Always mention tradeoffs.' },
+      fileContext: {
+        enabled: true,
+        maxFiles: 2,
+        maxIndexFiles: 20,
+        maxFileSize: 10000,
+        maxBytesPerFile: 1000,
+        maxTotalBytes: 2000,
+      },
+    },
+  });
+  fs.mkdirSync(path.join(projectRoot, 'src'), { recursive: true });
+  fs.writeFileSync(path.join(projectRoot, 'src', 'streaming.js'), 'export const desktopStreaming = true;\n');
+  fs.writeFileSync(path.join(projectRoot, 'src', 'theme.js'), 'export const theme = "blue";\n');
+
+  const events = await collect(engine.sendMessage('fix desktop streaming'));
+
+  assert.match(captured[0].system, /Always mention tradeoffs\./);
+  assert.match(captured[0].system, /src\/streaming\.js/);
+  assert.match(captured[0].system, /desktopStreaming/);
+  assert.equal(events[0].context.fileContext.includedFiles, 1);
+  assert.deepEqual(session.messages.map((message) => message.content), ['fix desktop streaming', 'ok']);
 });

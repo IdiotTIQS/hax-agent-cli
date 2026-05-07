@@ -19,6 +19,12 @@ const {
   getPermissionLevel,
   stripToolCallMarkup,
   parseDsmlToolCalls,
+  splitPotentialDsmlPrefix,
+  shouldContinueAfterToolPreamble,
+  isToolPreambleText,
+  createToolPreambleContinuationPrompt,
+  createToolPreambleLimitText,
+  createToolPreambleFinalAnswerPrompt,
 } = require("./shared");
 
 const DEFAULT_MODEL = "gpt-4.1";
@@ -81,12 +87,16 @@ class OpenAIProvider extends ChatProvider {
     const toolCallCounts = new Map();
     const lastToolName = { current: null };
     let forceTextResponse = false;
+    let emptyToolPreambleContinuations = 0;
+    let executedToolCount = 0;
+    let forcedFinalAnswerAfterPreamble = false;
 
-    for (let turn = 0; turn < maxToolTurns; turn += 1) {
+    for (let turn = 0; turn < maxToolTurns || forcedFinalAnswerAfterPreamble; turn += 1) {
       let stream;
       const requestOverrides = {
         ...request,
         messages,
+        stream: true,
       };
       if (forceTextResponse) {
         requestOverrides.tools = undefined;
@@ -103,6 +113,10 @@ class OpenAIProvider extends ChatProvider {
       let finishReason = null;
       const toolCalls = new Map();
       let reasoningContent = "";
+      let streamedContent = false;
+      let streamedTextLength = 0;
+      let suppressContentStreaming = false;
+      let pendingText = "";
 
       if (stream?.[Symbol.asyncIterator]) {
         for await (const event of stream) {
@@ -112,6 +126,19 @@ class OpenAIProvider extends ChatProvider {
           }
           if (delta?.content) {
             fullContent += delta.content;
+            if (suppressContentStreaming || containsDsmlToolMarkup(fullContent)) {
+              suppressContentStreaming = true;
+              pendingText = "";
+            } else {
+              const safeText = pendingText + delta.content;
+              const split = splitPotentialDsmlPrefix(safeText);
+              pendingText = split.pending;
+              if (split.emit) {
+                streamedContent = true;
+                streamedTextLength += split.emit.length;
+                yield createTextChunk(split.emit);
+              }
+            }
           }
           if (delta?.reasoning_content) {
             reasoningContent += delta.reasoning_content;
@@ -162,8 +189,13 @@ class OpenAIProvider extends ChatProvider {
       }
       const displayContent = hasDsmlToolCalls ? stripToolCallMarkup(fullContent) : fullContent;
 
-      if (displayContent) {
-        yield createTextChunk(displayContent);
+      if (displayContent && (!streamedContent || suppressContentStreaming)) {
+        const remainingContent = suppressContentStreaming ? displayContent.slice(streamedTextLength) : displayContent;
+        if (remainingContent) {
+          yield createTextChunk(remainingContent);
+        }
+      } else if (pendingText && !containsDsmlToolMarkup(fullContent)) {
+        yield createTextChunk(pendingText);
       }
 
       if (finishReason === "length" && sortedToolCalls.length === 0) {
@@ -171,8 +203,32 @@ class OpenAIProvider extends ChatProvider {
       }
 
       if (!toolRegistry || sortedToolCalls.length === 0) {
+        if (toolRegistry && (forceTextResponse || executedToolCount > 0 || emptyToolPreambleContinuations > 0) && isToolPreambleText(displayContent)) {
+          if (!forcedFinalAnswerAfterPreamble && (forceTextResponse || executedToolCount > 0)) {
+            forcedFinalAnswerAfterPreamble = true;
+            messages.push({ role: "assistant", content: displayContent || fullContent || null });
+            messages.push({ role: "user", content: createToolPreambleFinalAnswerPrompt() });
+            forceTextResponse = true;
+            continue;
+          }
+          yield createToolLimitChunk(turn + 1, "empty_tool_preamble");
+          yield createTextChunk(createToolPreambleLimitText());
+          return;
+        }
+        if (shouldContinueAfterToolPreamble(displayContent, toolRegistry, emptyToolPreambleContinuations)) {
+          emptyToolPreambleContinuations += 1;
+          messages.push({ role: "assistant", content: displayContent || fullContent || null });
+          messages.push({ role: "user", content: createToolPreambleContinuationPrompt() });
+          continue;
+        }
+        if (toolRegistry && emptyToolPreambleContinuations > 0 && isToolPreambleText(displayContent)) {
+          yield createToolLimitChunk(turn + 1, "empty_tool_preamble");
+          yield createTextChunk(createToolPreambleLimitText());
+        }
         return;
       }
+
+      emptyToolPreambleContinuations = 0;
 
       if (forceTextResponse) {
         continue;
@@ -273,6 +329,7 @@ class OpenAIProvider extends ChatProvider {
 
         yield createToolStartChunk(toolName, toolInput, { attempt, turn: turn + 1 });
         const registryResult = await toolRegistry.execute(toolName, toolInput, { root: process.cwd() });
+        executedToolCount += 1;
         const isError = registryResult.ok !== true;
         const toolError = isError ? (registryResult.error?.message || registryResult.error?.code || null) : null;
         const parsedResult = parseResultData(registryResult.data);
@@ -304,11 +361,19 @@ class OpenAIProvider extends ChatProvider {
       messages.push(...toolResults);
 
       if (sortedToolCalls.some((tc) => toolRegistry.hasSingleCallResult?.(toRegistryToolName(tc.function.name)))) {
+        emptyToolPreambleContinuations += 1;
         forceTextResponse = true;
         messages.push({
           role: "user",
           content: "Use the previous tool result to answer the user's request now in natural language. Do not call tools and do not output tool-call markup or DSML/XML tags.",
         });
+        continue;
+      }
+
+      if (maxToolTurns > 1 && turn + 1 >= maxToolTurns && !forcedFinalAnswerAfterPreamble) {
+        forcedFinalAnswerAfterPreamble = true;
+        forceTextResponse = true;
+        messages.push({ role: "user", content: createToolPreambleFinalAnswerPrompt() });
         continue;
       }
     }
@@ -550,6 +615,10 @@ function createDsmlToolCalls(text, turn) {
       arguments: JSON.stringify(call.parameters || {}),
     },
   }));
+}
+
+function containsDsmlToolMarkup(text) {
+  return /<\uFF5C\uFF5CDSML\uFF5C\uFF5C/.test(String(text || ""));
 }
 
 function createToolResultBlock(toolCallId, isError, content) {

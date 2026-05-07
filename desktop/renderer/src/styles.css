@@ -209,10 +209,25 @@ html, body {
 .session-list {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  max-height: 158px;
+  gap: 6px;
+  max-height: 220px;
   overflow: auto;
   padding: 0 0 var(--sp-2);
+}
+
+.session-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.session-group-label {
+  padding: 4px var(--sp-2) 2px;
+  color: var(--text-disabled);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
 }
 
 .session-item {
@@ -899,6 +914,10 @@ html, body {
   align-self: flex-start;
   animation: msg-in var(--slow) var(--ease-out);
 }
+.thinking-indicator.streaming {
+  padding-top: var(--sp-2);
+  margin-top: calc(var(--sp-2) * -1);
+}
 .thinking-avatar {
   width: 28px; height: 28px; border-radius: var(--r-sm);
   background: var(--accent-light); color: var(--accent);
@@ -1163,6 +1182,7 @@ html, body {
 .settings-field select { cursor: pointer; }
 .settings-field input[type="range"] { padding: 0; min-height: auto; cursor: pointer; height: 4px; background: var(--bg-card); border-radius: var(--r-full); }
 .settings-field input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 16px; height: 16px; border-radius: 50%; background: var(--accent); cursor: pointer; }
+.settings-path-row { display: grid; grid-template-columns: 1fr auto; gap: var(--sp-2); }
 .settings-panel-footer { display: flex; justify-content: flex-end; gap: var(--sp-2); padding: var(--sp-4) var(--sp-5); border-top: 1px solid var(--border-subtle); }
 
 /* ═══════════════════════════════════════════════════════════════════════

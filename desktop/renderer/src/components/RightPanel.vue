@@ -10,8 +10,6 @@ const props = defineProps({
   workspace: { type: String, default: '' },
   // Stats
   elapsed: { type: String, default: '0s' },
-  stepsTotal: { type: Number, default: 0 },
-  stepsDone: { type: Number, default: 0 },
   tokenUsed: { type: Number, default: 0 },
   cost: { type: String, default: '$0.00' },
   gitBranch: { type: String, default: 'master' },
@@ -35,10 +33,8 @@ function formatTime(date) {
   return d.toLocaleTimeString([], { hour:'2-digit', minute:'2-digit', second:'2-digit' });
 }
 
-const progressPct = computed(() => {
-  if (props.stepsTotal === 0) return 0;
-  return Math.round((props.stepsDone / props.stepsTotal) * 100);
-});
+const hasToolActivity = computed(() => props.toolCalls.some((tc) => tc && tc.status));
+const sessionMode = computed(() => (hasToolActivity.value ? '工具执行中' : '普通对话'));
 </script>
 
 <template>
@@ -55,22 +51,19 @@ const progressPct = computed(() => {
     <div class="inspector-content">
       <!-- Summary -->
       <div v-if="activeTab === 'summary'">
-        <!-- Task card -->
+        <!-- Session card -->
         <div class="info-card">
           <div class="info-card-header">
-            <span>任务进度</span>
-            <span class="badge">{{ stepsDone }}/{{ stepsTotal }}</span>
+            <span>会话状态</span>
+            <span class="badge">{{ sessionMode }}</span>
           </div>
           <div class="info-card-row">
             <span class="label">已处理</span>
             <span class="value">{{ elapsed }}</span>
           </div>
           <div class="info-card-row">
-            <span class="label">步骤</span>
-            <span class="value">{{ stepsDone }}/{{ stepsTotal }} 完成</span>
-          </div>
-          <div class="progress-bar">
-            <div class="progress-bar-fill" :style="{ width: progressPct + '%' }"></div>
+            <span class="label">工具调用</span>
+            <span class="value">{{ toolCalls.length }} 次</span>
           </div>
         </div>
 

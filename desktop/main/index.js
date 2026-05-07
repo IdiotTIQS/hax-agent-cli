@@ -31,6 +31,7 @@ const { createLocalToolRegistry } = require("../../src/tools");
 
 const app = electron.app;
 const BrowserWindow = electron.BrowserWindow;
+const dialog = electron.dialog;
 const ipcMain = electron.ipcMain;
 const shell = electron.shell;
 
@@ -98,10 +99,14 @@ function createMainWindow() {
 }
 
 function createDesktopSession(options = {}) {
-  const projectRoot = path.resolve(options.projectRoot || process.cwd());
+  const hasWorkspace = Boolean(String(options.projectRoot || "").trim());
+  const projectRoot = path.resolve(hasWorkspace ? options.projectRoot : process.cwd());
   const settings = loadSettings({
     projectRoot,
-    overrides: options.settings || {},
+    overrides: mergePlainObjects(
+      { transcriptProjectRoot: hasWorkspace ? projectRoot : "" },
+      options.settings || {},
+    ),
   });
   const provider = createProvider(settings.agent, process.env);
   const permissionManager = new PermissionManager({
@@ -137,6 +142,10 @@ function createDesktopSession(options = {}) {
   sessions.set(session.id, record);
 
   return record;
+}
+
+function mergePlainObjects(...objects) {
+  return Object.assign({}, ...objects.filter((item) => item && typeof item === "object"));
 }
 
 function getSessionRecord(sessionId) {
@@ -199,7 +208,8 @@ function registerIpcHandlers(ipc = ipcMain) {
   });
 
   ipc.handle("agent:resumeSession", async (_event, payload = {}) => {
-    const projectRoot = path.resolve(payload.projectRoot || process.cwd());
+    const hasWorkspace = Boolean(String(payload.projectRoot || "").trim());
+    const projectRoot = path.resolve(hasWorkspace ? payload.projectRoot : process.cwd());
     const settings = loadSettings({ projectRoot });
     const transcriptSession = findTranscriptSession(settings, payload.sessionId);
 
@@ -211,7 +221,7 @@ function registerIpcHandlers(ipc = ipcMain) {
       .filter((entry) => entry.role === "user" || entry.role === "assistant")
       .map((entry) => ({ role: entry.role, content: entry.content || "" }));
     const { session } = createDesktopSession({
-      projectRoot,
+      projectRoot: hasWorkspace ? projectRoot : "",
       sessionId: transcriptSession.id,
       messages,
     });
@@ -254,8 +264,9 @@ function registerIpcHandlers(ipc = ipcMain) {
   });
 
   ipc.handle("settings:get", async (_event, options = {}) => {
+    const bootstrap = resolveSettings({ projectRoot: options.projectRoot || process.cwd() });
     const resolved = resolveSettings({
-      projectRoot: options.projectRoot || process.cwd(),
+      projectRoot: options.projectRoot || bootstrap.settings.desktop?.workspace || process.cwd(),
     });
 
     return {
@@ -266,7 +277,10 @@ function registerIpcHandlers(ipc = ipcMain) {
 
   ipc.handle("settings:update", async (_event, updates = {}) => {
     const saved = updateUserSettings(normalizeSettingsUpdates(updates));
-    const resolved = resolveSettings();
+    const bootstrap = resolveSettings();
+    const resolved = resolveSettings({
+      projectRoot: bootstrap.settings.desktop?.workspace || process.cwd(),
+    });
 
     return {
       path: saved.path,
@@ -276,15 +290,34 @@ function registerIpcHandlers(ipc = ipcMain) {
   });
 
   ipc.handle("workspace:getSnapshot", async (_event, options = {}) => {
-    const projectRoot = path.resolve(options.projectRoot || process.cwd());
+    const hasWorkspace = Boolean(String(options.projectRoot || "").trim());
+    const projectRoot = path.resolve(hasWorkspace ? options.projectRoot : process.cwd());
     const settings = loadSettings({ projectRoot });
 
     return {
-      projectRoot,
-      fileTree: readWorkspaceTree(projectRoot),
+      projectRoot: hasWorkspace ? projectRoot : "",
+      fileTree: hasWorkspace ? readWorkspaceTree(projectRoot) : [],
       git: await readGitStatus(projectRoot),
-      sessions: readSessionList(settings),
+      sessions: readSessionList(settings, { currentProjectRoot: hasWorkspace ? projectRoot : "" }),
     };
+  });
+
+  ipc.handle("workspace:chooseDirectory", async (_event, options = {}) => {
+    if (!dialog || typeof dialog.showOpenDialog !== "function") {
+      throw new Error("Choosing a workspace directory requires the Electron runtime.");
+    }
+
+    const result = await dialog.showOpenDialog(mainWindow || undefined, {
+      title: "选择项目目录",
+      defaultPath: options.defaultPath || process.cwd(),
+      properties: ["openDirectory", "createDirectory"],
+    });
+
+    if (result.canceled || !result.filePaths?.[0]) {
+      return { canceled: true, path: "" };
+    }
+
+    return { canceled: false, path: path.resolve(result.filePaths[0]) };
   });
 
   ipc.handle("skills:getSnapshot", async (_event, options = {}) => {
@@ -315,7 +348,7 @@ function registerIpcHandlers(ipc = ipcMain) {
 
 function findTranscriptSession(settings, sessionId) {
   if (!sessionId) return null;
-  const transcriptSessions = listSessions(settings);
+  const transcriptSessions = getSessionRecords(settings);
   const exactMatch = transcriptSessions.find((session) => session.id === sessionId);
 
   if (exactMatch) return exactMatch;
@@ -375,10 +408,15 @@ function sortDirectoryEntries(left, right) {
   return left.name.localeCompare(right.name);
 }
 
-function readSessionList(settings) {
-  return listSessions(settings).map((session) => {
+function readSessionList(settings, options = {}) {
+  const sessionRecords = getSessionRecords(settings);
+  const currentProjectRoot = options.currentProjectRoot === undefined ? settings.projectRoot : options.currentProjectRoot;
+
+  return sessionRecords.map((session) => {
     const entries = session.entries();
     const summary = summarizeTranscriptEntries(entries);
+    const metadata = typeof session.metadata === "function" ? session.metadata() : null;
+    const projectRoot = metadata?.projectRoot || "";
 
     if (!summary) return null;
 
@@ -388,8 +426,39 @@ function readSessionList(settings) {
       preview: summary.preview,
       title: summary.title,
       messageCount: entries.length,
+      projectRoot,
+      projectName: metadata?.projectName || (projectRoot ? path.basename(projectRoot) : "未归属"),
+      projectScope: getSessionProjectScope(projectRoot, currentProjectRoot),
     };
   }).filter(Boolean).slice(0, MAX_RECENT_SESSIONS);
+}
+
+function getSessionRecords(settings) {
+  const legacySessionDirectory = path.join(settings.projectRoot || process.cwd(), ".hax-agent", "sessions");
+  const sessionRecords = [
+    ...listSessions(settings),
+    ...(pathsEqual(settings.sessions?.directory, legacySessionDirectory)
+      ? []
+      : listSessions({ ...settings, sessions: { ...(settings.sessions || {}), directory: legacySessionDirectory } })),
+  ];
+  const seen = new Set();
+
+  return sessionRecords.map((session) => {
+    if (seen.has(session.path)) return null;
+    seen.add(session.path);
+    return session;
+  }).filter(Boolean);
+}
+
+function getSessionProjectScope(sessionProjectRoot, currentProjectRoot) {
+  if (!sessionProjectRoot) return "unassigned";
+  if (pathsEqual(sessionProjectRoot, currentProjectRoot)) return "current";
+  return "other";
+}
+
+function pathsEqual(left, right) {
+  const normalize = (value) => path.resolve(String(value || "")).toLowerCase();
+  return Boolean(left && right) && normalize(left) === normalize(right);
 }
 
 function summarizeTranscriptEntries(entries) {
@@ -646,6 +715,13 @@ function normalizeSettingsUpdates(updates = {}) {
   delete next.provider;
   delete next.model;
   delete next.temperature;
+  if (next.workspace !== undefined) {
+    const workspace = String(next.workspace || "").trim();
+    next.desktop = {
+      ...(next.desktop || {}),
+      ...(workspace ? { workspace: path.resolve(workspace) } : { workspace: undefined }),
+    };
+  }
   delete next.workspace;
 
   return next;

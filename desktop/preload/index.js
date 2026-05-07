@@ -47,6 +47,10 @@ const workspace = {
   getSnapshot(options) {
     return ipcRenderer.invoke("workspace:getSnapshot", options);
   },
+
+  chooseDirectory(options) {
+    return ipcRenderer.invoke("workspace:chooseDirectory", options);
+  },
 };
 
 const skills = {
@@ -96,6 +100,7 @@ contextBridge.exposeInMainWorld("haxAgent", {
   getSettings: settings.get,
   updateSettings: settings.update,
   getWorkspaceSnapshot: workspace.getSnapshot,
+  chooseWorkspaceDirectory: workspace.chooseDirectory,
   getSkillsSnapshot: skills.getSnapshot,
   getToolsSnapshot: tools.getSnapshot,
   getPermissionsSnapshot: permissions.getSnapshot,

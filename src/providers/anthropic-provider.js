@@ -23,6 +23,12 @@ const {
   joinInputParts,
   stripToolCallMarkup,
   parseDsmlToolCalls,
+  splitPotentialDsmlPrefix,
+  shouldContinueAfterToolPreamble,
+  isToolPreambleText,
+  createToolPreambleContinuationPrompt,
+  createToolPreambleLimitText,
+  createToolPreambleFinalAnswerPrompt,
 } = require("./shared");
 
 const DEFAULT_MODEL = "claude-opus-4-7";
@@ -86,8 +92,11 @@ class AnthropicProvider extends ChatProvider {
     const toolCallCounts = new Map();
     const lastToolName = { current: null };
     let forceTextResponse = false;
+    let emptyToolPreambleContinuations = 0;
+    let executedToolCount = 0;
+    let forcedFinalAnswerAfterPreamble = false;
 
-    for (let turn = 0; turn < maxToolTurns; turn += 1) {
+    for (let turn = 0; turn < maxToolTurns || forcedFinalAnswerAfterPreamble; turn += 1) {
       const requestPayload = this.createRequest({
         ...request,
         messages,
@@ -106,10 +115,27 @@ class AnthropicProvider extends ChatProvider {
 
       let bufferedText = "";
       let hasDsmContent = false;
+      let streamedText = false;
+      let streamedTextLength = 0;
+      let suppressTextStreaming = false;
+      let pendingText = "";
 
       for await (const event of stream) {
         if (event.type === "content_block_delta" && event.delta?.type === "text_delta") {
           bufferedText += event.delta.text;
+          if (suppressTextStreaming || containsDsmlToolMarkup(bufferedText)) {
+            suppressTextStreaming = true;
+            pendingText = "";
+          } else {
+            const safeText = pendingText + event.delta.text;
+            const split = splitPotentialDsmlPrefix(safeText);
+            pendingText = split.pending;
+            if (split.emit) {
+              streamedText = true;
+              streamedTextLength += split.emit.length;
+              yield createTextChunk(split.emit);
+            }
+          }
         } else if (event.type === "content_block_delta" && (event.delta?.type === "thinking_delta" || event.delta?.type === "signature_delta")) {
           yield createThinkingChunk();
         }
@@ -117,7 +143,9 @@ class AnthropicProvider extends ChatProvider {
 
       const response = typeof stream.finalMessage === "function" ? await stream.finalMessage() : null;
       if (!response) {
-        if (bufferedText) {
+        if (pendingText) {
+          yield createTextChunk(pendingText);
+        } else if (bufferedText && !streamedText) {
           yield createTextChunk(bufferedText);
         }
         return;
@@ -129,21 +157,52 @@ class AnthropicProvider extends ChatProvider {
       const toolUses = extractToolUses(response.content);
       const isDsm = toolUses.some((u) => String(u.id).startsWith("dsml_"));
 
-      if (isDsm) {
+      if (isDsm || suppressTextStreaming) {
         hasDsmContent = true;
         const cleanText = stripToolCallMarkup(bufferedText);
-        if (cleanText) {
-          yield createTextChunk(cleanText);
+        const remainingText = cleanText.slice(streamedTextLength);
+        if (remainingText) {
+          yield createTextChunk(remainingText);
         }
-      } else if (bufferedText) {
+      } else if (bufferedText && !streamedText) {
         yield createTextChunk(bufferedText);
+      } else if (pendingText && !containsDsmlToolMarkup(bufferedText)) {
+        yield createTextChunk(pendingText);
       }
 
       if (forceTextResponse || !toolRegistry || toolUses.length === 0) {
+        if (toolRegistry && (forceTextResponse || executedToolCount > 0 || emptyToolPreambleContinuations > 0) && isToolPreambleText(bufferedText)) {
+          if (!forcedFinalAnswerAfterPreamble && (forceTextResponse || executedToolCount > 0)) {
+            forcedFinalAnswerAfterPreamble = true;
+            messages.push({ role: "assistant", content: bufferedText || "" });
+            messages.push({ role: "user", content: createToolPreambleFinalAnswerPrompt() });
+            forceTextResponse = true;
+            continue;
+          }
+          yield createToolLimitChunk(turn + 1, "empty_tool_preamble");
+          yield createTextChunk(createToolPreambleLimitText());
+          return;
+        }
+        if (
+          !forceTextResponse &&
+          shouldContinueAfterToolPreamble(bufferedText, toolRegistry, emptyToolPreambleContinuations)
+        ) {
+          emptyToolPreambleContinuations += 1;
+          messages.push({ role: "assistant", content: bufferedText });
+          messages.push({ role: "user", content: createToolPreambleContinuationPrompt() });
+          continue;
+        }
+        if (!forceTextResponse && toolRegistry && emptyToolPreambleContinuations > 0 && isToolPreambleText(bufferedText)) {
+          yield createToolLimitChunk(turn + 1, "empty_tool_preamble");
+          yield createTextChunk(createToolPreambleLimitText());
+        }
         return;
       }
 
+      emptyToolPreambleContinuations = 0;
+
       if (toolUses.some((toolUse) => toolRegistry.hasSingleCallResult?.(toRegistryToolName(toolUse.name)))) {
+        emptyToolPreambleContinuations += 1;
         forceTextResponse = true;
         messages.push({
           role: "user",
@@ -209,6 +268,7 @@ class AnthropicProvider extends ChatProvider {
 
         yield createToolStartChunk(toolName, toolInput, { attempt, turn: turn + 1 });
         const registryResult = await toolRegistry.execute(toolName, toolInput, { root: process.cwd() });
+        executedToolCount += 1;
         const toolResult = createToolResultBlock(toolUse.id, registryResult);
         const toolError = extractToolError(toolResult);
         const parsedToolResult = parseToolResultContent(toolResult);
@@ -250,6 +310,13 @@ class AnthropicProvider extends ChatProvider {
           role: "user",
           content: toolResults,
         });
+      }
+
+      if (maxToolTurns > 1 && turn + 1 >= maxToolTurns && !forcedFinalAnswerAfterPreamble) {
+        forcedFinalAnswerAfterPreamble = true;
+        forceTextResponse = true;
+        messages.push({ role: "user", content: createToolPreambleFinalAnswerPrompt() });
+        continue;
       }
     }
 
@@ -418,6 +485,10 @@ function extractToolUses(content) {
   }
 
   return [];
+}
+
+function containsDsmlToolMarkup(text) {
+  return /<\uFF5C\uFF5CDSML\uFF5C\uFF5C/.test(String(text || ""));
 }
 
 async function executeToolUse(toolRegistry, toolUse) {

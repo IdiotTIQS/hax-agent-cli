@@ -21,6 +21,7 @@ function ensureApi(name) {
 const sessionId = ref('');
 const isBusy = ref(false);
 const isThinking = ref(false);
+const isStreaming = ref(false);
 const statusState = ref('idle');
 const activeAssistantId = ref('');
 const errorText = ref('');
@@ -53,8 +54,6 @@ const teamSnapshot = ref({ projectRoot: '', teams: [], activeTeam: null });
 const workspaceSummary = ref({ path: '', files: 0, directories: 0, depth: 0 });
 
 const elapsed = ref('0s');
-const stepsTotal = ref(0);
-const stepsDone = ref(0);
 const tokenUsed = ref(0);
 const cost = ref('$0.00');
 const gitBranch = ref('master');
@@ -218,7 +217,9 @@ function normalizeSettings(payload) {
   if (agent.provider !== undefined) settings.provider = agent.provider;
   if (agent.model !== undefined) settings.model = agent.model;
   if (typeof agent.temperature === 'number') settings.temperature = agent.temperature;
-  if (src.projectRoot || src.workspace) settings.workspace = src.projectRoot ?? src.workspace;
+  if (src.desktop?.workspace !== undefined || src.workspace !== undefined) {
+    settings.workspace = src.desktop?.workspace ?? src.workspace ?? '';
+  }
 }
 
 function summarizeTree(nodes, depth = 0) {
@@ -262,6 +263,7 @@ function resetConversationView() {
   toolCalls.value = [];
   composer.value = '';
   activeAssistantId.value = '';
+  isStreaming.value = false;
   currentTurn.value = 0;
   tokenUsed.value = 0;
   elapsed.value = '0s';
@@ -271,8 +273,6 @@ function resetConversationView() {
 function updateStats(sessionResult) {
   const s = sessionResult?.status ?? sessionResult;
   if (!s) return;
-  if (typeof s.turns === 'number') stepsTotal.value = s.turns;
-  if (typeof s.toolCalls === 'number') stepsDone.value = s.toolCalls;
   if (typeof s.tokens === 'number') tokenUsed.value = s.tokens;
   else if (typeof s.inputTokens === 'number' || typeof s.outputTokens === 'number') {
     tokenUsed.value = Number(s.inputTokens || 0) + Number(s.outputTokens || 0);
@@ -342,8 +342,7 @@ async function loadWorkspaceSnapshot() {
     fileTreeData.value = snapshot.fileTree || [];
     sessionList.value = snapshot.sessions || [];
     updateWorkspaceSummary(fileTreeData.value);
-    if (snapshot.projectRoot) settings.workspace = snapshot.projectRoot;
-    workspaceSummary.value.path = settings.workspace || snapshot.projectRoot || workspaceSummary.value.path;
+    workspaceSummary.value.path = settings.workspace || workspaceSummary.value.path;
     if (snapshot.git) {
       gitBranch.value = snapshot.git.branch || 'none';
       gitAhead.value = Number(snapshot.git.ahead || 0);
@@ -420,7 +419,7 @@ async function createSession() {
   errorText.value = '';
   appendLog('正在创建会话…', 'start');
   try {
-    const result = await ensureApi('createSession')();
+    const result = await ensureApi('createSession')({ projectRoot: settings.workspace || undefined });
     sessionId.value = serializeSession(result) || crypto.randomUUID();
     resetConversationView();
     updateStats(result);
@@ -445,17 +444,20 @@ async function resumeSession(targetSessionId) {
   errorText.value = '';
   appendLog(`切换会话 ${targetSessionId.slice(0, 8)}…`, 'start');
   try {
+    const targetSession = sessionList.value.find((item) => item.id === targetSessionId);
     const result = await ensureApi('resumeSession')({
       sessionId: targetSessionId,
-      projectRoot: settings.workspace || undefined,
+      projectRoot: targetSession?.projectRoot || settings.workspace || undefined,
     });
     sessionId.value = serializeSession(result) || targetSessionId;
     setMessagesFromSession(result);
     toolCalls.value = [];
     activeAssistantId.value = '';
+    isStreaming.value = false;
     updateStats(result);
     appendLog(`已切换到 ${sessionId.value.slice(0, 8)}`, 'done');
     toastRef.value?.success('会话已切换');
+    await loadWorkspaceSnapshot();
   } catch (e) {
     errorText.value = e.message;
     appendLog('会话切换失败', 'fail');
@@ -479,6 +481,7 @@ async function sendMessage() {
   appendMessage('user', content);
   isBusy.value = true;
   isThinking.value = true;
+  isStreaming.value = false;
   statusState.value = 'thinking';
   currentTurn.value += 1;
   activeAssistantId.value = '';
@@ -512,6 +515,7 @@ async function sendMessage() {
   } finally {
     isBusy.value = false;
     isThinking.value = false;
+    isStreaming.value = false;
     activeAssistantId.value = '';
     stopElapsedTimer();
     if (statusState.value !== 'error') statusState.value = 'idle';
@@ -525,6 +529,7 @@ async function interruptAgent() {
     await ensureApi('interrupt')({ sessionId: sessionId.value });
     isBusy.value = false;
     isThinking.value = false;
+    isStreaming.value = false;
     activeAssistantId.value = '';
     statusState.value = 'idle';
     stopElapsedTimer();
@@ -570,6 +575,7 @@ function handleAgentEvent(event) {
     case 'turn.started':
       isBusy.value = true;
       isThinking.value = true;
+      isStreaming.value = false;
       activeAssistantId.value = '';
       statusState.value = 'thinking';
       appendLog('回合开始', 'start');
@@ -578,6 +584,7 @@ function handleAgentEvent(event) {
       appendAssistantDelta(event.delta);
       statusState.value = 'running';
       isThinking.value = false;
+      isStreaming.value = true;
       break;
     case 'thinking':
       statusState.value = 'thinking';
@@ -612,15 +619,18 @@ function handleAgentEvent(event) {
     case 'turn.completed':
       isBusy.value = false;
       isThinking.value = false;
+      isStreaming.value = false;
       activeAssistantId.value = '';
       statusState.value = 'idle';
       updateStats(event);
       stopElapsedTimer();
       appendLog('回合完成', 'done');
+      void loadWorkspaceSnapshot();
       break;
     case 'turn.interrupted':
       isBusy.value = false;
       isThinking.value = false;
+      isStreaming.value = false;
       activeAssistantId.value = '';
       statusState.value = 'idle';
       stopElapsedTimer();
@@ -630,6 +640,7 @@ function handleAgentEvent(event) {
     case 'turn.failed':
       isBusy.value = false;
       isThinking.value = false;
+      isStreaming.value = false;
       activeAssistantId.value = '';
       errorText.value = event.error?.message ?? 'Agent 错误';
       statusState.value = 'error';
@@ -655,6 +666,12 @@ async function saveSettings(updates) {
     errorText.value = e.message;
     toastRef.value?.error('保存设置失败');
   }
+}
+
+async function chooseWorkspaceDirectory() {
+  if (typeof api.chooseWorkspaceDirectory !== 'function') return '';
+  const result = await api.chooseWorkspaceDirectory({ defaultPath: settings.workspace || undefined });
+  return result?.canceled ? '' : (result?.path || '');
 }
 
 function renderSearchContent() {
@@ -735,6 +752,7 @@ onUnmounted(() => {
           :messages="messages"
           :tool-calls="toolCalls"
           :is-thinking="isThinking"
+          :is-streaming="isStreaming"
           :active-assistant-id="activeAssistantId"
         />
         <InputBar
@@ -886,8 +904,6 @@ onUnmounted(() => {
       :file-tree="fileTreeData"
       :workspace="settings.workspace"
       :elapsed="elapsed"
-      :steps-total="stepsTotal"
-      :steps-done="stepsDone"
       :token-used="tokenUsed"
       :cost="cost"
       :git-branch="gitBranch"
@@ -905,6 +921,7 @@ onUnmounted(() => {
       :workspace="settings.workspace"
       @close="showSettings = false"
       @save="saveSettings"
+      @choose-workspace="(resolve) => chooseWorkspaceDirectory().then(resolve)"
     />
 
     <Toast ref="toastRef" />

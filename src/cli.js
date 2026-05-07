@@ -148,10 +148,9 @@ function runResumeCommand(args) {
   }
 
   const entries = targetSession.entries();
-  const limit = settings.prompts?.maxTranscriptMessages || 20;
   const messages = entries
     .filter((e) => e.role === 'user' || e.role === 'assistant')
-    .slice(-limit)
+    .slice(-resolveTranscriptMessageLimit(settings))
     .map((e) => ({ role: e.role, content: e.content || '' }));
 
   const provider = createProvider(settings.agent, process.env);
@@ -172,6 +171,11 @@ function runResumeCommand(args) {
   session.id = targetSession.id;
 
   runShell([], session);
+}
+
+function resolveTranscriptMessageLimit(settings = {}) {
+  const limit = Number(settings.prompts?.maxTranscriptMessages);
+  return Number.isFinite(limit) && limit > 0 ? limit : Infinity;
 }
 
 function runSessionsCommand() {

@@ -148,10 +148,9 @@ function loadRecentTranscript(session) {
 
   const latestSession = sessions[0];
   const entries = latestSession.entries();
-  const limit = session.settings.prompts?.maxTranscriptMessages || 20;
   const restored = entries
     .filter(e => e.role === 'user' || e.role === 'assistant')
-    .slice(-limit)
+    .slice(-resolveTranscriptMessageLimit(session.settings))
     .map(e => ({ role: e.role, content: e.content || '' }));
 
   if (restored.length > 0) {
@@ -203,7 +202,9 @@ function renderAgentEvent(event, { screen, session, renderer }) {
       renderer.finishTool(toProviderChunk('tool_result', event));
       break;
     case AgentEventType.toolLimit:
-      renderer.notice(`Tool turn limit reached after ${event.maxToolTurns} turns. Type /continue if you need more.`);
+      if (event.reason !== 'empty_tool_preamble') {
+        renderer.notice(`Tool turn limit reached after ${event.maxToolTurns} turns. Type /continue if you need more.`);
+      }
       break;
     case AgentEventType.completed:
       renderer.complete(event.usage);
@@ -854,10 +855,9 @@ async function resumeSession(args, { screen, session }) {
   }
 
   const entries = targetSession.entries();
-  const limit = session.settings.prompts?.maxTranscriptMessages || 20;
   const restored = entries
     .filter(e => e.role === 'user' || e.role === 'assistant')
-    .slice(-limit)
+    .slice(-resolveTranscriptMessageLimit(session.settings))
     .map(e => ({ role: e.role, content: e.content || '' }));
 
   session.messages = restored;
@@ -872,6 +872,11 @@ function formatSessionOption(session) {
   const preview = firstMsg.length > 48 ? firstMsg.slice(0, 45) + '...' : firstMsg;
   const date = new Date(session.updatedAt).toLocaleString();
   return `${session.id.slice(0, 12)}  ${date}  ${preview}`;
+}
+
+function resolveTranscriptMessageLimit(settings = {}) {
+  const limit = Number(settings.prompts?.maxTranscriptMessages);
+  return Number.isFinite(limit) && limit > 0 ? limit : Infinity;
 }
 
 function showConfig({ screen, session }) {

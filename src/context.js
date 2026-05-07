@@ -15,7 +15,7 @@ function loadPromptContext(options = {}) {
 function buildPromptContext(options = {}) {
   const settings = options.settings || {};
   const memories = limitItems(options.memories || [], settings.memory?.maxItems || 20);
-  const transcript = limitLast(options.transcript || [], settings.prompts?.maxTranscriptMessages || 20);
+  const transcript = limitLast(options.transcript || [], settings.prompts?.maxTranscriptMessages);
   const systemPrompt = assembleSystemPrompt({
     instructions: options.instructions,
     memories,

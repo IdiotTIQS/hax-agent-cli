@@ -72,12 +72,16 @@ test('desktop external links only open http and https URLs', async () => {
 test('desktop workspace snapshot reads real files and hides mock transcripts', async () => {
   const projectRoot = createTempProject();
   const settings = config.loadSettings({ projectRoot, env: {} });
+  settings.sessions.directory = path.join(projectRoot, 'sessions');
   const ipc = createFakeIpc();
 
   fs.mkdirSync(path.join(projectRoot, 'src'), { recursive: true });
   fs.writeFileSync(path.join(projectRoot, 'src', 'index.js'), 'console.log("hello");\n');
   fs.mkdirSync(path.join(projectRoot, '.hax-agent'), { recursive: true });
   fs.writeFileSync(path.join(projectRoot, '.hax-agent', 'hidden.txt'), 'hidden\n');
+  fs.writeFileSync(path.join(projectRoot, '.hax-agent', 'settings.json'), JSON.stringify({
+    sessions: { directory: settings.sessions.directory },
+  }));
 
   memory.writeTranscript('real-session', [
     { timestamp: new Date().toISOString(), role: 'user', content: 'Build a UI' },
@@ -104,6 +108,7 @@ test('desktop workspace snapshot reads real files and hides mock transcripts', a
 test('desktop session list summarizes latest useful user message', () => {
   const projectRoot = createTempProject();
   const settings = config.loadSettings({ projectRoot, env: {} });
+  settings.sessions.directory = path.join(projectRoot, 'sessions');
 
   memory.writeTranscript('summary-session', [
     { timestamp: new Date().toISOString(), role: 'user', content: 'Initial request' },
@@ -117,17 +122,118 @@ test('desktop session list summarizes latest useful user message', () => {
   assert.equal(session.preview, 'Latest follow up');
 });
 
+test('desktop session list includes legacy project transcripts', () => {
+  const projectRoot = createTempProject();
+  const settings = config.loadSettings({
+    projectRoot,
+    env: {},
+    overrides: {
+      sessions: { directory: path.join(projectRoot, 'global-sessions') },
+    },
+  });
+
+  memory.writeTranscript('global-session', [
+    { timestamp: new Date().toISOString(), role: 'user', content: 'Global chat' },
+  ], settings);
+  memory.writeTranscript('legacy-session', [
+    { timestamp: new Date().toISOString(), role: 'user', content: 'Legacy chat' },
+  ], {
+    ...settings,
+    sessions: { directory: path.join(projectRoot, '.hax-agent', 'sessions') },
+  });
+
+  const previews = readSessionList(settings).map((session) => session.preview);
+
+  assert.ok(previews.includes('Global chat'));
+  assert.ok(previews.includes('Legacy chat'));
+});
+
+test('desktop can resume legacy project transcripts from the merged session list', async () => {
+  const projectRoot = createTempProject();
+  const ipc = createFakeIpc();
+  const settings = config.loadSettings({
+    projectRoot,
+    env: {},
+    overrides: {
+      sessions: { directory: path.join(projectRoot, 'global-sessions') },
+    },
+  });
+
+  memory.writeTranscript('legacy-session', [
+    { timestamp: new Date().toISOString(), role: 'user', content: 'Open old chat' },
+    { timestamp: new Date().toISOString(), role: 'assistant', content: 'Old answer' },
+  ], {
+    ...settings,
+    sessions: { directory: path.join(projectRoot, '.hax-agent', 'sessions') },
+  });
+
+  registerIpcHandlers(ipc);
+  const resumed = await ipc.handlers.get('agent:resumeSession')(null, {
+    projectRoot,
+    sessionId: 'legacy-session',
+  });
+
+  assert.match(resumed.id, /^legacy-session/);
+  assert.deepEqual(resumed.messages.map((message) => message.content), ['Open old chat', 'Old answer']);
+});
+
+test('desktop unassigned sessions stay out of project groups', () => {
+  const projectRoot = createTempProject();
+  const settings = config.loadSettings({
+    projectRoot,
+    env: {},
+    overrides: {
+      sessions: { directory: path.join(projectRoot, 'sessions') },
+      transcriptProjectRoot: '',
+    },
+  });
+
+  memory.writeTranscript('unassigned-session', [
+    { timestamp: new Date().toISOString(), role: 'user', content: 'Casual chat' },
+  ], settings);
+
+  const [session] = readSessionList(settings);
+
+  assert.equal(session.preview, 'Casual chat');
+  assert.equal(session.projectRoot, '');
+  assert.equal(session.projectName, '未归属');
+  assert.equal(session.projectScope, 'unassigned');
+});
+
+test('desktop session classification can disable current project scope', () => {
+  const sessionDirectory = createTempProject();
+  const settings = config.loadSettings({
+    projectRoot: process.cwd(),
+    env: {},
+    overrides: {
+      sessions: { directory: sessionDirectory },
+    },
+  });
+
+  memory.writeTranscript('cwd-session', [
+    { timestamp: new Date().toISOString(), role: 'user', content: 'Process cwd chat' },
+  ], settings);
+
+  const [session] = readSessionList(settings, { currentProjectRoot: '' });
+
+  assert.equal(session.projectScope, 'other');
+});
+
 test('desktop settings updates normalize renderer form fields', () => {
+  const workspace = createTempProject();
   assert.deepEqual(normalizeSettingsUpdates({
     provider: 'openai',
     model: 'gpt-4.1',
     temperature: 0.4,
-    workspace: 'ignored',
+    workspace,
   }), {
     agent: {
       provider: 'openai',
       model: 'gpt-4.1',
       temperature: 0.4,
+    },
+    desktop: {
+      workspace,
     },
   });
 });

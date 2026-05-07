@@ -17,6 +17,11 @@ const {
   extractToolError,
   parseToolResultContent,
   getPermissionLevel,
+  shouldContinueAfterToolPreamble,
+  isToolPreambleText,
+  createToolPreambleContinuationPrompt,
+  createToolPreambleLimitText,
+  createToolPreambleFinalAnswerPrompt,
 } = require("./shared");
 
 const DEFAULT_MODEL = "gemini-2.5-flash-preview-05-20";
@@ -79,9 +84,15 @@ class GoogleProvider extends ChatProvider {
     const lastToolName = { current: null };
     let conversationHistory = [];
     let forceTextResponse = false;
+    let emptyToolPreambleContinuations = 0;
+    let executedToolCount = 0;
+    let forcedFinalAnswerAfterPreamble = false;
 
-    for (let turn = 0; turn < maxToolTurns; turn += 1) {
+    for (let turn = 0; turn < maxToolTurns || forcedFinalAnswerAfterPreamble; turn += 1) {
       let response;
+      let text = "";
+      let usage = null;
+      const functionCalls = [];
       try {
         const requestPayload = this.createRequest({
           ...request,
@@ -89,23 +100,39 @@ class GoogleProvider extends ChatProvider {
           ...(forceTextResponse ? { toolRegistry: undefined } : {}),
         });
         const { model, contents, systemInstruction, tools, generationConfig } = requestPayload;
-        response = await withRetry(() => this.client.models.generateContent({
+        const apiRequest = {
           model,
           contents,
           ...(systemInstruction ? { config: { systemInstruction } } : {}),
           ...(tools && !forceTextResponse ? { tools } : {}),
           ...(generationConfig ? { generationConfig } : {}),
-        }))();
+        };
+        if (typeof this.client.models.generateContentStream === "function") {
+          const stream = await withRetry(() => this.client.models.generateContentStream(apiRequest))();
+          for await (const chunk of stream) {
+            const deltaText = extractText(chunk);
+            if (deltaText) {
+              text += deltaText;
+              yield createTextChunk(deltaText);
+            }
+            functionCalls.push(...extractFunctionCalls(chunk));
+            usage = extractUsage(chunk) || usage;
+          }
+          response = createAggregatedResponse(text, functionCalls, usage);
+        } else {
+          response = await withRetry(() => this.client.models.generateContent(apiRequest))();
+          text = extractText(response);
+          functionCalls.push(...extractFunctionCalls(response));
+          usage = extractUsage(response);
+        }
       } catch (err) {
         yield createTextChunk(`\nError: ${err.message || 'API request failed after retries'}`);
         return;
       }
 
-      const text = extractText(response);
-      if (text) {
+      if (text && !response?.__alreadyStreamedText) {
         yield createTextChunk(text);
       }
-      const usage = extractUsage(response);
       if (usage) {
         yield {
           type: "usage",
@@ -113,12 +140,51 @@ class GoogleProvider extends ChatProvider {
         };
       }
 
-      const functionCalls = extractFunctionCalls(response);
       if (forceTextResponse || !toolRegistry || functionCalls.length === 0) {
+        if (toolRegistry && (forceTextResponse || executedToolCount > 0 || emptyToolPreambleContinuations > 0) && isToolPreambleText(text)) {
+          if (!forcedFinalAnswerAfterPreamble && (forceTextResponse || executedToolCount > 0)) {
+            forcedFinalAnswerAfterPreamble = true;
+            conversationHistory.push({
+              role: "model",
+              parts: [{ text: text || "" }],
+            });
+            conversationHistory.push({
+              role: "user",
+              parts: [{ text: createToolPreambleFinalAnswerPrompt() }],
+            });
+            forceTextResponse = true;
+            continue;
+          }
+          yield createToolLimitChunk(turn + 1, "empty_tool_preamble");
+          yield createTextChunk(createToolPreambleLimitText());
+          return;
+        }
+        if (
+          !forceTextResponse &&
+          shouldContinueAfterToolPreamble(text, toolRegistry, emptyToolPreambleContinuations)
+        ) {
+          emptyToolPreambleContinuations += 1;
+          conversationHistory.push({
+            role: "model",
+            parts: [{ text }],
+          });
+          conversationHistory.push({
+            role: "user",
+            parts: [{ text: createToolPreambleContinuationPrompt() }],
+          });
+          continue;
+        }
+        if (!forceTextResponse && toolRegistry && emptyToolPreambleContinuations > 0 && isToolPreambleText(text)) {
+          yield createToolLimitChunk(turn + 1, "empty_tool_preamble");
+          yield createTextChunk(createToolPreambleLimitText());
+        }
         return;
       }
 
+      emptyToolPreambleContinuations = 0;
+
       if (functionCalls.some((fc) => toolRegistry.hasSingleCallResult?.(toRegistryToolName(fc.name)))) {
+        emptyToolPreambleContinuations += 1;
         forceTextResponse = true;
         conversationHistory.push({
           role: "model",
@@ -222,6 +288,7 @@ class GoogleProvider extends ChatProvider {
 
         yield createToolStartChunk(toolName, toolInput, { attempt, turn: turn + 1 });
         const registryResult = await toolRegistry.execute(toolName, toolInput, { root: process.cwd() });
+        executedToolCount += 1;
         const toolResult = createToolResultBlock(fc.name, registryResult);
         const toolError = extractToolError(toolResult);
         const parsedToolResult = parseToolResultContent(toolResult);
@@ -252,6 +319,16 @@ class GoogleProvider extends ChatProvider {
         role: "user",
         parts: toolResultParts,
       });
+
+      if (maxToolTurns > 1 && turn + 1 >= maxToolTurns && !forcedFinalAnswerAfterPreamble) {
+        forcedFinalAnswerAfterPreamble = true;
+        forceTextResponse = true;
+        conversationHistory.push({
+          role: "user",
+          parts: [{ text: createToolPreambleFinalAnswerPrompt() }],
+        });
+        continue;
+      }
     }
 
     yield createToolLimitChunk(maxToolTurns);
@@ -519,6 +596,21 @@ function extractFunctionCalls(response) {
       name: part.functionCall.name,
       args: part.functionCall.args || {},
     }));
+}
+
+function createAggregatedResponse(text, functionCalls, usage) {
+  return {
+    __alreadyStreamedText: true,
+    candidates: [{
+      content: {
+        parts: [
+          ...(text ? [{ text }] : []),
+          ...functionCalls.map((fc) => ({ functionCall: { name: fc.name, args: fc.args || {} } })),
+        ],
+      },
+    }],
+    ...(usage ? { usageMetadata: usage } : {}),
+  };
 }
 
 function extractText(response) {

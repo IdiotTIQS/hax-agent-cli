@@ -13,24 +13,44 @@ const DEFAULT_SETTINGS = Object.freeze({
   },
   memory: {
     enabled: true,
-    directory: '.hax-agent/memory',
+    directory: undefined,
     maxItems: 20,
   },
   sessions: {
-    directory: '.hax-agent/sessions',
+    directory: undefined,
     transcriptLimit: 100,
   },
   prompts: {
     includeSettings: true,
     includeMemory: true,
     includeTranscript: true,
-    maxTranscriptMessages: 20,
+    maxTranscriptMessages: undefined,
+  },
+  context: {
+    enabled: true,
+    windowTokens: undefined,
+    reserveOutputTokens: 8192,
+    charsPerToken: 4,
+  },
+  instructions: {
+    custom: undefined,
+  },
+  fileContext: {
+    enabled: true,
+    maxFiles: 8,
+    maxIndexFiles: 2000,
+    maxFileSize: 512_000,
+    maxBytesPerFile: 32_000,
+    maxTotalBytes: 120_000,
   },
   permissions: {
     mode: 'normal',
   },
   updates: {
     autoInstall: false,
+  },
+  desktop: {
+    workspace: undefined,
   },
   ui: {
     locale: 'en',
@@ -134,11 +154,23 @@ function loadJsonFile(filePath, options = {}) {
 }
 
 function defaultUserSettingsPath(homeDirectory = os.homedir()) {
-  return path.join(homeDirectory, '.hax-agent', 'settings.json');
+  return path.join(defaultAppDataDirectory(homeDirectory), 'settings.json');
 }
 
 function defaultProjectSettingsPath(projectRoot = process.cwd()) {
   return path.join(path.resolve(projectRoot), '.hax-agent', 'settings.json');
+}
+
+function defaultAppDataDirectory(homeDirectory = os.homedir(), env = process.env, platform = process.platform) {
+  if (platform === 'win32') {
+    return path.join(env.APPDATA || path.join(homeDirectory, 'AppData', 'Roaming'), 'HaxAgent');
+  }
+
+  if (platform === 'darwin') {
+    return path.join(homeDirectory, 'Library', 'Application Support', 'HaxAgent');
+  }
+
+  return path.join(env.XDG_DATA_HOME || path.join(homeDirectory, '.local', 'share'), 'hax-agent');
 }
 
 function readEnvOverrides(env = process.env) {
@@ -160,8 +192,20 @@ function readEnvOverrides(env = process.env) {
   setIfDefined(overrides, ['prompts', 'includeMemory'], parseBooleanEnv(env, 'HAX_AGENT_INCLUDE_MEMORY'));
   setIfDefined(overrides, ['prompts', 'includeTranscript'], parseBooleanEnv(env, 'HAX_AGENT_INCLUDE_TRANSCRIPT'));
   setIfDefined(overrides, ['prompts', 'maxTranscriptMessages'], parseNumberEnv(env, 'HAX_AGENT_MAX_TRANSCRIPT_MESSAGES'));
+  setIfDefined(overrides, ['context', 'enabled'], parseBooleanEnv(env, 'HAX_AGENT_CONTEXT_ENABLED'));
+  setIfDefined(overrides, ['context', 'windowTokens'], parseNumberEnv(env, 'HAX_AGENT_CONTEXT_WINDOW_TOKENS'));
+  setIfDefined(overrides, ['context', 'reserveOutputTokens'], parseNumberEnv(env, 'HAX_AGENT_CONTEXT_RESERVE_OUTPUT_TOKENS'));
+  setIfDefined(overrides, ['context', 'charsPerToken'], parseNumberEnv(env, 'HAX_AGENT_CONTEXT_CHARS_PER_TOKEN'));
+  setIfDefined(overrides, ['instructions', 'custom'], env.HAX_AGENT_INSTRUCTIONS);
+  setIfDefined(overrides, ['fileContext', 'enabled'], parseBooleanEnv(env, 'HAX_AGENT_FILE_CONTEXT_ENABLED'));
+  setIfDefined(overrides, ['fileContext', 'maxFiles'], parseNumberEnv(env, 'HAX_AGENT_FILE_CONTEXT_MAX_FILES'));
+  setIfDefined(overrides, ['fileContext', 'maxIndexFiles'], parseNumberEnv(env, 'HAX_AGENT_FILE_CONTEXT_MAX_INDEX_FILES'));
+  setIfDefined(overrides, ['fileContext', 'maxFileSize'], parseNumberEnv(env, 'HAX_AGENT_FILE_CONTEXT_MAX_FILE_SIZE'));
+  setIfDefined(overrides, ['fileContext', 'maxBytesPerFile'], parseNumberEnv(env, 'HAX_AGENT_FILE_CONTEXT_MAX_BYTES_PER_FILE'));
+  setIfDefined(overrides, ['fileContext', 'maxTotalBytes'], parseNumberEnv(env, 'HAX_AGENT_FILE_CONTEXT_MAX_TOTAL_BYTES'));
   setIfDefined(overrides, ['permissions', 'mode'], env.HAX_AGENT_PERMISSIONS_MODE);
   setIfDefined(overrides, ['updates', 'autoInstall'], parseBooleanEnv(env, 'HAX_AGENT_UPDATES_AUTO_INSTALL'));
+  setIfDefined(overrides, ['desktop', 'workspace'], env.HAX_AGENT_DESKTOP_WORKSPACE);
   setIfDefined(overrides, ['ui', 'locale'], env.HAX_AGENT_LOCALE || env.HAX_AGENT_LANGUAGE);
   setIfDefined(overrides, ['tools', 'shell', 'enabled'], parseBooleanEnv(env, 'HAX_AGENT_SHELL_ENABLED'));
   setIfDefined(overrides, ['tools', 'shell', 'allowedCommands'], parseListEnv(env, 'HAX_AGENT_SHELL_COMMANDS'));
@@ -175,15 +219,26 @@ function normalizeSettings(settings, projectRoot) {
   const normalized = mergeSettings(settings);
 
   normalized.projectRoot = projectRoot;
-  normalized.memory.directory = resolveConfigPath(projectRoot, normalized.memory.directory);
-  normalized.sessions.directory = resolveConfigPath(projectRoot, normalized.sessions.directory);
+  normalized.desktop.workspace = normalized.desktop.workspace
+    ? path.resolve(normalized.desktop.workspace)
+    : undefined;
+  normalized.memory.directory = resolveConfigPath(projectRoot, normalized.memory.directory, defaultMemoryDirectory());
+  normalized.sessions.directory = resolveConfigPath(projectRoot, normalized.sessions.directory, defaultSessionDirectory());
 
   return normalized;
 }
 
-function resolveConfigPath(projectRoot, configuredPath) {
+function defaultMemoryDirectory() {
+  return path.join(defaultAppDataDirectory(), 'memory');
+}
+
+function defaultSessionDirectory() {
+  return path.join(defaultAppDataDirectory(), 'sessions');
+}
+
+function resolveConfigPath(projectRoot, configuredPath, fallbackPath = projectRoot) {
   if (!configuredPath) {
-    return projectRoot;
+    return path.normalize(fallbackPath);
   }
 
   if (path.isAbsolute(configuredPath)) {
@@ -299,7 +354,10 @@ function parseListEnv(env, name) {
 
 module.exports = {
   DEFAULT_SETTINGS,
+  defaultAppDataDirectory,
+  defaultMemoryDirectory,
   defaultProjectSettingsPath,
+  defaultSessionDirectory,
   defaultUserSettingsPath,
   loadJsonFile,
   loadSettings,

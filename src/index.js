@@ -1,5 +1,6 @@
 const config = require('./config');
 const context = require('./context');
+const fileContext = require('./file-context');
 const memory = require('./memory');
 const orchestration = require('./orchestration');
 const runtime = require('./runtime');
@@ -13,6 +14,7 @@ const agentTeamFormatters = require('./formatters/agent-teams');
 module.exports = {
   config,
   context,
+  fileContext,
   memory,
   ...orchestration,
   ...runtime,

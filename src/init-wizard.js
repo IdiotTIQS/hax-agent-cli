@@ -98,6 +98,11 @@ async function runInitWizard(options = {}) {
 
     const modelInput = (await question(t('init.defaultModel', { model: providerInfo.defaultModel }))).trim();
     const model = modelInput || providerInfo.defaultModel;
+    const contextEnabled = readYesNo(await question(t('init.contextEnabled')), true);
+    const contextWindowTokens = readOptionalPositiveInteger(await question(t('init.contextWindowTokens')));
+    const contextReserveOutputTokens = readOptionalPositiveInteger(await question(t('init.contextReserveOutputTokens')), 8192);
+    const fileContextEnabled = readYesNo(await question(t('init.fileContext')), true);
+    const customInstructions = (await question(t('init.customInstructions'))).trim();
 
     const locale = await chooseOption(question, output, {
       name: t('init.language'),
@@ -125,7 +130,20 @@ async function runInitWizard(options = {}) {
       ui: { locale },
       permissions: { mode: permissionMode },
       memory: { enabled: memoryEnabled },
+      context: {
+        enabled: contextEnabled,
+        reserveOutputTokens: contextReserveOutputTokens,
+      },
+      fileContext: { enabled: fileContextEnabled },
     };
+
+  if (contextWindowTokens) {
+    updates.context.windowTokens = contextWindowTokens;
+  }
+
+  if (customInstructions) {
+    updates.instructions = { custom: customInstructions };
+  }
 
   if (apiKey) {
     updates.agent.apiKey = apiKey;
@@ -366,6 +384,14 @@ function readYesNo(value, defaultValue) {
   const normalized = String(value || '').trim().toLowerCase();
   if (!normalized) return defaultValue;
   return ['y', 'yes', '1', 'true', 'on'].includes(normalized);
+}
+
+function readOptionalPositiveInteger(value, defaultValue) {
+  const normalized = String(value || '').trim();
+  if (!normalized) return defaultValue;
+
+  const parsed = Number(normalized);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : defaultValue;
 }
 
 function readBooleanEnv(value) {

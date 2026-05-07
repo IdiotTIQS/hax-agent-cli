@@ -1,6 +1,9 @@
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
+const { defaultMemoryDirectory, defaultSessionDirectory } = require('./config');
+
+const SESSION_META_TYPE = 'session.meta';
 
 function createStorage(options = {}) {
   const settings = options.settings || options;
@@ -8,8 +11,8 @@ function createStorage(options = {}) {
 
   return {
     projectRoot,
-    memoryDirectory: resolveStoragePath(projectRoot, settings.memoryDirectory || settings.memory?.directory || '.hax-agent/memory'),
-    sessionDirectory: resolveStoragePath(projectRoot, settings.sessionDirectory || settings.sessions?.directory || '.hax-agent/sessions'),
+    memoryDirectory: resolveStoragePath(projectRoot, settings.memoryDirectory || settings.memory?.directory || defaultMemoryDirectory()),
+    sessionDirectory: resolveStoragePath(projectRoot, settings.sessionDirectory || settings.sessions?.directory || defaultSessionDirectory()),
   };
 }
 
@@ -28,6 +31,7 @@ function appendTranscriptEntry(sessionId, entry, options = {}) {
   };
 
   ensureDirectory(path.dirname(filePath));
+  ensureTranscriptMetadata(filePath, options);
   fs.appendFileSync(filePath, `${JSON.stringify(record)}\n`, 'utf8');
 
   return record;
@@ -35,7 +39,10 @@ function appendTranscriptEntry(sessionId, entry, options = {}) {
 
 function writeTranscript(sessionId, entries, options = {}) {
   const filePath = getSessionTranscriptPath(sessionId, options);
-  const lines = entries.map((entry) => JSON.stringify(entry)).join('\n');
+  const metadata = createTranscriptMetadata(options);
+  const hasMetadata = entries.some((entry) => entry?.type === SESSION_META_TYPE);
+  const records = hasMetadata ? entries : [metadata, ...entries];
+  const lines = records.map((entry) => JSON.stringify(entry)).join('\n');
 
   ensureDirectory(path.dirname(filePath));
   fs.writeFileSync(filePath, lines ? `${lines}\n` : '', 'utf8');
@@ -44,7 +51,7 @@ function writeTranscript(sessionId, entries, options = {}) {
 }
 
 function readTranscript(sessionId, options = {}) {
-  return readTranscriptFile(getSessionTranscriptPath(sessionId, options));
+  return readChatTranscriptFile(getSessionTranscriptPath(sessionId, options));
 }
 
 function readTranscriptFile(filePath) {
@@ -77,7 +84,8 @@ function listSessions(options = {}) {
       return {
         id: path.basename(fileName, '.jsonl'),
         path: filePath,
-        entries: () => readTranscriptFile(filePath),
+        entries: () => readChatTranscriptFile(filePath),
+        metadata: () => readTranscriptMetadata(filePath),
         updatedAt: stats.mtime.toISOString(),
       };
     })
@@ -164,6 +172,46 @@ function resolveStoragePath(projectRoot, configuredPath) {
   return path.resolve(projectRoot, configuredPath);
 }
 
+function ensureTranscriptMetadata(filePath, options = {}) {
+  if (fs.existsSync(filePath) && fs.statSync(filePath).size > 0) {
+    return;
+  }
+
+  const metadata = createTranscriptMetadata(options);
+  if (metadata) {
+    fs.appendFileSync(filePath, `${JSON.stringify(metadata)}\n`, 'utf8');
+  }
+}
+
+function createTranscriptMetadata(options = {}) {
+  const storage = createStorage(options);
+  const projectRoot = Object.prototype.hasOwnProperty.call(options, 'transcriptProjectRoot')
+    ? normalizeOptionalPath(options.transcriptProjectRoot)
+    : normalizeOptionalPath(options.projectRoot || storage.projectRoot);
+  const projectName = projectRoot ? path.basename(projectRoot) : '';
+
+  return {
+    type: SESSION_META_TYPE,
+    timestamp: new Date().toISOString(),
+    projectRoot,
+    projectName,
+  };
+}
+
+function readTranscriptMetadata(filePath) {
+  const entries = readTranscriptFile(filePath);
+  return entries.find((entry) => entry?.type === SESSION_META_TYPE) || null;
+}
+
+function readChatTranscriptFile(filePath) {
+  return readTranscriptFile(filePath).filter((entry) => entry?.type !== SESSION_META_TYPE);
+}
+
+function normalizeOptionalPath(value) {
+  const text = String(value || '').trim();
+  return text ? path.resolve(text) : '';
+}
+
 function ensureDirectory(directoryPath) {
   fs.mkdirSync(directoryPath, { recursive: true });
 }
@@ -214,6 +262,7 @@ function isGeneratedTranscriptId(value) {
 
 module.exports = {
   appendTranscriptEntry,
+  createTranscriptMetadata,
   createSessionId,
   createStorage,
   deleteMemory,
@@ -224,6 +273,7 @@ module.exports = {
   listSessions,
   readMemory,
   readTranscript,
+  readTranscriptMetadata,
   resolveStoragePath,
   toFileSafeName,
   writeMemory,

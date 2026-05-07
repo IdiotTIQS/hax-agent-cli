@@ -1,5 +1,5 @@
 <script setup>
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
 import FileTreeNode from './FileTreeNode.vue';
 
 const props = defineProps({
@@ -26,6 +26,27 @@ const navItems = [
   { key: 'plugins', icon: '⬡', label: '插件' },
   { key: 'auto',    icon: '↻', label: '自动化' },
 ];
+
+const maxSessionsPerGroup = 6;
+
+const sessionGroups = computed(() => {
+  const groups = [
+    { key: 'current', label: '当前项目', sessions: [] },
+    { key: 'other', label: '其他项目', sessions: [] },
+    { key: 'unassigned', label: '未归属对话', sessions: [] },
+  ];
+  const byKey = new Map(groups.map((group) => [group.key, group]));
+
+  for (const session of props.sessions) {
+    const key = session.projectScope || 'unassigned';
+    const group = byKey.get(key) || byKey.get('unassigned');
+    if (group.sessions.length < maxSessionsPerGroup) {
+      group.sessions.push(session);
+    }
+  }
+
+  return groups.filter((group) => group.sessions.length > 0);
+});
 
 function toggleSection(key) {
   collapsedSections.value[key] = !collapsedSections.value[key];
@@ -72,17 +93,20 @@ function sectionArrow(key) {
         <span>最近会话</span>
         <span class="count">{{ sessions.length }}</span>
       </div>
-      <div v-if="sessions.length" class="session-list">
-        <button
-          v-for="session in sessions.slice(0, 6)"
-          :key="session.id"
-          class="session-item"
-          :class="{ active: activeId === session.id }"
-          @click="emit('select-session', session.id)"
-        >
-          <span class="session-title">{{ session.preview }}</span>
-          <span class="session-meta">{{ session.messageCount }} messages</span>
-        </button>
+      <div v-if="sessionGroups.length" class="session-list">
+        <div v-for="group in sessionGroups" :key="group.key" class="session-group">
+          <div class="session-group-label">{{ group.label }}</div>
+          <button
+            v-for="session in group.sessions"
+            :key="session.id"
+            class="session-item"
+            :class="{ active: activeId === session.id }"
+            @click="emit('select-session', session.id)"
+          >
+            <span class="session-title">{{ session.preview }}</span>
+            <span class="session-meta">{{ session.projectName }} · {{ session.messageCount }} messages</span>
+          </button>
+        </div>
       </div>
       <div v-else class="session-empty">暂无历史会话</div>
     </div>

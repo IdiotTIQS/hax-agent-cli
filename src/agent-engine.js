@@ -1,6 +1,8 @@
 "use strict";
 
 const { appendTranscriptEntry } = require("./memory");
+const { prepareContextWindow } = require("./context-window");
+const { buildFileContext } = require("./file-context");
 const {
   buildSkillSystemPrompt,
   getSkillsForSession,
@@ -126,6 +128,7 @@ class AgentEngine {
     const userMessage = options.userMessage;
     const abortController = new AbortController();
     let assistantText = "";
+    let terminalProviderIssue = null;
     const turnInputTokens = session.costTracker.inputTokens;
     const turnOutputTokens = session.costTracker.outputTokens;
 
@@ -136,17 +139,36 @@ class AgentEngine {
     session.responseAbortController = abortController;
     session.responseRenderer = null;
 
+    const promptContext = await buildTurnSystemPrompt({
+      baseSystem: options.system,
+      settings: session.settings,
+      projectRoot: this.projectRoot,
+      query: options.content,
+    });
+    const contextWindow = prepareContextWindow({
+      messages: session.messages,
+      system: promptContext.system,
+      settings: session.settings,
+      model: session.provider?.model,
+      outputTokens: options.maxTokens || session.provider?.maxTokens,
+    });
+
     yield createEvent(AgentEventType.started, {
       userMessage,
       skill: serializeSkill(options.skill),
+      context: {
+        ...contextWindow.stats,
+        fileContext: promptContext.fileContext.stats,
+      },
     }, session);
 
     try {
       for await (const chunk of session.provider.stream({
-        messages: session.messages,
+        messages: contextWindow.messages,
         toolRegistry: session.toolRegistry,
         signal: abortController.signal,
-        system: options.system,
+        system: contextWindow.system,
+        context: contextWindow.stats,
       })) {
         if (session.responseInterrupted) break;
 
@@ -158,6 +180,13 @@ class AgentEngine {
 
         if (chunk.type === "text") {
           assistantText += chunk.delta;
+        }
+
+        if (chunk.type === "tool_limit" && isTerminalToolLimitReason(chunk.reason)) {
+          terminalProviderIssue = {
+            reason: chunk.reason,
+            maxToolTurns: chunk.maxToolTurns,
+          };
         }
 
         if (event) {
@@ -202,6 +231,17 @@ class AgentEngine {
       inputTokens: session.costTracker.inputTokens - turnInputTokens,
       outputTokens: session.costTracker.outputTokens - turnOutputTokens,
     };
+
+    if (terminalProviderIssue) {
+      session.messages.pop();
+      yield createEvent(AgentEventType.failed, {
+        error: serializeProviderIssue(terminalProviderIssue),
+        partialAssistantMessage: { role: "assistant", content: assistantText },
+        usage: turnUsage,
+      }, session);
+      return;
+    }
+
     const assistantMessage = { role: "assistant", content: assistantText };
 
     session.messages.push(assistantMessage);
@@ -264,6 +304,63 @@ class AgentEngine {
 
     return null;
   }
+}
+
+async function buildTurnSystemPrompt(options = {}) {
+  const settings = options.settings || {};
+  const blocks = [];
+  const customInstructions = String(settings.instructions?.custom || "").trim();
+  let fileContext = createEmptyFileContext();
+
+  if (options.baseSystem) {
+    blocks.push(String(options.baseSystem).trim());
+  }
+
+  if (customInstructions) {
+    blocks.push([
+      "<custom-instructions>",
+      customInstructions,
+      "</custom-instructions>",
+    ].join("\n"));
+  }
+
+  try {
+    fileContext = await buildFileContext({
+      settings,
+      projectRoot: options.projectRoot,
+      query: options.query,
+    });
+  } catch (error) {
+    fileContext = {
+      ...createEmptyFileContext(),
+      stats: {
+        ...createEmptyFileContext().stats,
+        error: error?.message || String(error),
+      },
+    };
+  }
+
+  if (fileContext.systemPrompt) {
+    blocks.push(fileContext.systemPrompt);
+  }
+
+  return {
+    system: blocks.filter(Boolean).join("\n\n"),
+    fileContext,
+  };
+}
+
+function createEmptyFileContext() {
+  return {
+    files: [],
+    stats: {
+      indexedFiles: 0,
+      matchedFiles: 0,
+      includedFiles: 0,
+      bytes: 0,
+    },
+    systemPrompt: "",
+  };
 }
 
 function withoutProviderType(chunk) {
@@ -334,7 +431,30 @@ function serializeError(error) {
   };
 }
 
+function isTerminalToolLimitReason(reason) {
+  return reason === "empty_tool_preamble";
+}
+
+function serializeProviderIssue(issue) {
+  if (issue?.reason === "empty_tool_preamble") {
+    return {
+      name: "ProviderToolUseError",
+      code: "EMPTY_TOOL_PREAMBLE",
+      message: "The model repeatedly said it would inspect or gather more context, but it did not call an available tool.",
+      stack: null,
+    };
+  }
+
+  return {
+    name: "ProviderToolUseError",
+    code: issue?.reason || "PROVIDER_TOOL_LIMIT",
+    message: "The provider stopped before completing the requested tool workflow.",
+    stack: null,
+  };
+}
+
 module.exports = {
   AgentEngine,
   AgentEventType,
+  buildTurnSystemPrompt,
 };

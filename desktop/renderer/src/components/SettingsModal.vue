@@ -9,7 +9,7 @@ const props = defineProps({
   workspace: { type: String, default: '' },
 });
 
-const emit = defineEmits(['close', 'save']);
+const emit = defineEmits(['close', 'save', 'choose-workspace']);
 
 const form = reactive({
   provider: props.provider,
@@ -29,6 +29,11 @@ const providers = [
   { value: 'openai', label: 'OpenAI (GPT)' },
   { value: 'google', label: 'Google (Gemini)' },
 ];
+
+async function chooseWorkspace() {
+  const selected = await new Promise((resolve) => emit('choose-workspace', resolve));
+  if (selected) form.workspace = selected;
+}
 </script>
 
 <template>
@@ -59,7 +64,10 @@ const providers = [
           </div>
           <div class="settings-field">
             <label>工作区路径</label>
-            <input v-model="form.workspace" type="text" placeholder="当前项目根目录" />
+            <div class="settings-path-row">
+              <input v-model="form.workspace" type="text" placeholder="当前项目根目录" />
+              <button class="btn btn-ghost" type="button" @click="chooseWorkspace">选择</button>
+            </div>
           </div>
         </div>
         <div class="settings-panel-footer">

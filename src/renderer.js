@@ -850,6 +850,9 @@ function isDisplayableInput(key, value) {
 
 function formatProviderError(error, provider) {
   const message = error?.message || String(error);
+  if (error?.code === 'EMPTY_TOOL_PREAMBLE') {
+    return `${message}\nThe selected model/provider endpoint produced planning text instead of a tool call. Try again, or switch to a model endpoint with reliable tool calling.`;
+  }
   if (provider?.name === 'anthropic' && /\b(401|403|forbidden|unauthorized)\b/i.test(message)) {
     return `${message}\nCheck /api-key and /api-url, then try again.`;
   }

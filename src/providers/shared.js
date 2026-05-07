@@ -55,6 +55,8 @@ const DEFAULT_SYSTEM_PROMPT = [
 const DSML_TOOL_CALLS_PATTERN = /<\uFF5C\uFF5CDSML\uFF5C\uFF5Ctool_calls\b[^>]*>[\s\S]*?<\/\uFF5C\uFF5CDSML\uFF5C\uFF5Ctool_calls>/g;
 const DSML_INVOKE_PATTERN = /<\uFF5C\uFF5CDSML\uFF5C\uFF5Cinvoke\s+name="([^"]+)"[^>]*>([\s\S]*?)<\/\uFF5C\uFF5CDSML\uFF5C\uFF5Cinvoke>/g;
 const DSML_PARAMETER_PATTERN = /<\uFF5C\uFF5CDSML\uFF5C\uFF5Cparameter\s+name="([^"]+)"([^>]*)>([\s\S]*?)<\/\uFF5C\uFF5CDSML\uFF5C\uFF5Cparameter>/g;
+const DSML_PREFIX = "<\uFF5C\uFF5CDSML\uFF5C\uFF5C";
+const MAX_EMPTY_TOOL_PREAMBLE_CONTINUATIONS = 1;
 
 function withRetry(fn, maxRetries = 3, baseDelayMs = 1000) {
   return async (...args) => {
@@ -263,6 +265,73 @@ function parseDsmlToolCalls(text) {
   return calls;
 }
 
+function splitPotentialDsmlPrefix(text) {
+  const value = String(text || "");
+  const maxLength = Math.min(value.length, DSML_PREFIX.length - 1);
+
+  for (let length = maxLength; length > 0; length -= 1) {
+    const suffix = value.slice(-length);
+    if (DSML_PREFIX.startsWith(suffix)) {
+      return {
+        emit: value.slice(0, -length),
+        pending: suffix,
+      };
+    }
+  }
+
+  return {
+    emit: value,
+    pending: "",
+  };
+}
+
+function shouldContinueAfterToolPreamble(text, toolRegistry, count = 0) {
+  if (!toolRegistry || count >= MAX_EMPTY_TOOL_PREAMBLE_CONTINUATIONS) {
+    return false;
+  }
+
+  return isToolPreambleText(text);
+}
+
+function isToolPreambleText(text) {
+  const value = String(text || "").trim();
+  if (!value || value.length > 220) {
+    return false;
+  }
+
+  return [
+    /\b(let me|i'?ll|i will|i am going to)\s+(examine|inspect|check|look|read|explore|gather|review)\b/i,
+    /\b(to|in order to)\s+(examine|inspect|check|understand|look into|gather)\b/i,
+    /(?:让我|我来|我将|我会|先|继续|进一步).{0,16}(?:检查|查看|读取|了解|分析|探索|浏览|确认|获取)/,
+    /(?:检查|查看|读取|了解|分析|探索|浏览).{0,16}(?:项目|文件|代码|结构|信息|详细)/,
+  ].some((pattern) => pattern.test(value));
+}
+
+function createToolPreambleContinuationPrompt() {
+  return [
+    "You said you would inspect or gather more context, but you did not call a tool.",
+    "Continue the task now. If you need project context, call an available tool such as file.readDirectory, file.glob, file.search, or file.read with valid arguments.",
+    "If the API only supports text-form tool calls, emit a valid DSML tool call instead of prose.",
+    "Do not stop after another preamble.",
+  ].join(" ");
+}
+
+function createToolPreambleLimitText() {
+  return [
+    "\n\nI stopped because the model repeatedly said it would inspect the project, but it did not call any available tool.",
+    "Please retry, or switch to a model/provider endpoint that supports tool calls for project inspection.",
+  ].join(" ");
+}
+
+function createToolPreambleFinalAnswerPrompt() {
+  return [
+    "Stop promising to inspect more files.",
+    "Do not call tools.",
+    "Using only the context and tool results already available in this conversation, give a concise final answer now.",
+    "If the context is incomplete, say exactly what is missing and suggest the next concrete command or file to inspect.",
+  ].join(" ");
+}
+
 function parseDsmlParameterValue(value, attributes = "") {
   const text = String(value || "");
   if (/string="false"/.test(attributes)) {
@@ -303,4 +372,10 @@ module.exports = {
   getPermissionLevel,
   stripToolCallMarkup,
   parseDsmlToolCalls,
+  splitPotentialDsmlPrefix,
+  shouldContinueAfterToolPreamble,
+  isToolPreambleText,
+  createToolPreambleContinuationPrompt,
+  createToolPreambleLimitText,
+  createToolPreambleFinalAnswerPrompt,
 };

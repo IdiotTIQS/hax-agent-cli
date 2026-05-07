@@ -186,6 +186,30 @@ test('ChatArea renders sanitized markdown and supports code copy', async () => {
   wrapper.unmount();
 });
 
+test('ChatArea shows output dots while assistant stream is still active', async () => {
+  const ChatArea = await loadComponent(path.join('components', 'ChatArea.vue'));
+  const wrapper = mount(ChatArea, {
+    props: {
+      messages: [{
+        id: 'm1',
+        role: 'assistant',
+        content: 'Partial answer',
+        createdAt: new Date('2026-05-04T00:00:00.000Z'),
+        turn: 1,
+      }],
+      toolCalls: [],
+      isThinking: false,
+      isStreaming: true,
+    },
+  });
+
+  assert.equal(wrapper.find('.thinking-indicator.streaming').exists(), true);
+  assert.match(wrapper.text(), /输出中/);
+  assert.equal(wrapper.findAll('.thinking-dots span').length, 3);
+
+  wrapper.unmount();
+});
+
 test('FileTreeNode collapses directories and files have no expand button', async () => {
   const FileTreeNode = await loadComponent(path.join('components', 'FileTreeNode.vue'));
   const wrapper = mount(FileTreeNode, {
@@ -224,13 +248,58 @@ test('RightPanel displays token and cost metrics', async () => {
       activeTab: 'summary',
       tokenUsed: 12345,
       cost: '$0.1234',
-      stepsTotal: 3,
-      stepsDone: 2,
       toolCalls: [{ id: 't1' }],
     },
   });
 
   assert.match(wrapper.text(), /12,345/);
   assert.match(wrapper.text(), /\$0\.1234/);
-  assert.match(wrapper.text(), /2\/3/);
+  assert.match(wrapper.text(), /普通对话/);
+  assert.doesNotMatch(wrapper.text(), /2\/3/);
+});
+
+test('Sidebar groups sessions by project scope', async () => {
+  const Sidebar = await loadComponent(path.join('components', 'Sidebar.vue'));
+  const wrapper = mount(Sidebar, {
+    props: {
+      sessions: [
+        { id: 'a', preview: 'Current task', messageCount: 2, projectScope: 'current', projectName: 'HaxAgent' },
+        { id: 'b', preview: 'Other task', messageCount: 4, projectScope: 'other', projectName: 'OtherProject' },
+        { id: 'c', preview: 'Loose chat', messageCount: 1, projectScope: 'unassigned', projectName: '未归属' },
+      ],
+      activeId: 'a',
+      fileTree: [],
+      activeNav: 'chat',
+    },
+  });
+
+  assert.match(wrapper.text(), /当前项目/);
+  assert.match(wrapper.text(), /其他项目/);
+  assert.match(wrapper.text(), /未归属对话/);
+});
+
+test('Sidebar groups all sessions before applying per-group limits', async () => {
+  const Sidebar = await loadComponent(path.join('components', 'Sidebar.vue'));
+  const sessions = [
+    ...Array.from({ length: 12 }, (_, index) => ({
+      id: `other-${index}`,
+      preview: `Other ${index}`,
+      messageCount: 1,
+      projectScope: 'other',
+      projectName: 'OtherProject',
+    })),
+    { id: 'current-late', preview: 'Late current task', messageCount: 2, projectScope: 'current', projectName: 'HaxAgent' },
+    { id: 'loose-late', preview: 'Late loose chat', messageCount: 1, projectScope: 'unassigned', projectName: '未归属' },
+  ];
+  const wrapper = mount(Sidebar, {
+    props: {
+      sessions,
+      fileTree: [],
+      activeNav: 'chat',
+    },
+  });
+
+  assert.match(wrapper.text(), /Late current task/);
+  assert.match(wrapper.text(), /Late loose chat/);
+  assert.doesNotMatch(wrapper.text(), /Other 11/);
 });

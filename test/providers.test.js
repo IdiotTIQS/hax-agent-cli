@@ -268,6 +268,414 @@ test('anthropic provider streams text while executing local tools', async () => 
   assert.equal(toolResult.tool_use_id, 'toolu_1');
 });
 
+test('anthropic provider surfaces repeated empty tool preambles instead of completing silently', async () => {
+  const requests = [];
+  const registry = new ToolRegistry();
+  registry.register({
+    name: 'file.readDirectory',
+    description: 'Read a directory.',
+    inputSchema: {
+      type: 'object',
+      required: ['path'],
+      properties: { path: { type: 'string' } },
+    },
+    async execute(args) {
+      return { entries: [`listed ${args.path}`] };
+    },
+  });
+
+  const provider = new AnthropicProvider({
+    client: {
+      messages: {
+        stream(request) {
+          requests.push(request);
+
+          if (requests.length === 1) {
+            return createMessageStream([
+              { type: 'content_block_delta', delta: { type: 'text_delta', text: '好的，让我先全面了解一下这个项目的结构和内容。' } },
+            ], {
+              id: 'msg-preamble-1',
+              model: 'claude-opus-4-7',
+              content: [{ type: 'text', text: '好的，让我先全面了解一下这个项目的结构和内容。' }],
+              usage: null,
+            });
+          }
+
+          return createMessageStream([
+            { type: 'content_block_delta', delta: { type: 'text_delta', text: '让我进一步了解项目的核心内容。' } },
+          ], {
+            id: 'msg-preamble-2',
+            model: 'claude-opus-4-7',
+            content: [{ type: 'text', text: '让我进一步了解项目的核心内容。' }],
+            usage: null,
+          });
+        },
+      },
+    },
+  });
+
+  const chunks = [];
+  for await (const chunk of provider.stream({ prompt: '检查当前项目', toolRegistry: registry, maxToolTurns: 4 })) {
+    chunks.push(chunk);
+  }
+
+  assert.equal(requests.length, 2);
+  assert.equal(requests[1].messages.some((message) => /file\.readDirectory/.test(message.content || '')), true);
+  assert.equal(chunks.some((chunk) => chunk.type === 'tool_start'), false);
+  assert.deepEqual(chunks.find((chunk) => chunk.type === 'tool_limit'), {
+    type: 'tool_limit',
+    reason: 'empty_tool_preamble',
+    maxToolTurns: 2,
+  });
+  assert.equal(chunks.at(-1).type, 'text');
+  assert.match(chunks.at(-1).delta, /did not call any available tool/);
+});
+
+test('anthropic provider surfaces empty preambles after a directory tool result', async () => {
+  const requests = [];
+  const registry = new ToolRegistry();
+  registry.register({
+    name: 'file.readDirectory',
+    description: 'Read a directory.',
+    inputSchema: {
+      type: 'object',
+      required: ['path'],
+      properties: { path: { type: 'string' } },
+    },
+    async execute(args) {
+      return { entries: [`listed ${args.path}`] };
+    },
+  });
+
+  const provider = new AnthropicProvider({
+    client: {
+      messages: {
+        stream(request) {
+          requests.push(request);
+
+          if (requests.length === 1) {
+            return createMessageStream([
+              { type: 'content_block_delta', delta: { type: 'text_delta', text: '我先查看目录。' } },
+            ], {
+              id: 'msg-tool',
+              model: 'claude-opus-4-7',
+              content: [
+                { type: 'text', text: '我先查看目录。' },
+                { type: 'tool_use', id: 'toolu_list', name: 'file_readDirectory', input: { path: '.' } },
+              ],
+              usage: null,
+            });
+          }
+
+          if (requests.length === 2) {
+            return createMessageStream([
+              { type: 'content_block_delta', delta: { type: 'text_delta', text: '让我继续深入查看关键文件。' } },
+            ], {
+              id: 'msg-empty-after-tool',
+              model: 'claude-opus-4-7',
+              content: [{ type: 'text', text: '让我继续深入查看关键文件。' }],
+              usage: null,
+            });
+          }
+
+          return createMessageStream([
+            { type: 'content_block_delta', delta: { type: 'text_delta', text: '这是一个 Node.js 项目，当前只读取了根目录，建议下一步查看 package.json。' } },
+          ], {
+            id: 'msg-final-after-tool',
+            model: 'claude-opus-4-7',
+            content: [{ type: 'text', text: '这是一个 Node.js 项目，当前只读取了根目录，建议下一步查看 package.json。' }],
+            usage: null,
+          });
+        },
+      },
+    },
+  });
+
+  const chunks = [];
+  for await (const chunk of provider.stream({ prompt: '检查当前项目', toolRegistry: registry, maxToolTurns: 4 })) {
+    chunks.push(chunk);
+  }
+
+  assert.equal(requests.length, 3);
+  assert.equal(chunks.some((chunk) => chunk.type === 'tool_start' && chunk.name === 'file.readDirectory'), true);
+  assert.equal(chunks.some((chunk) => chunk.type === 'tool_limit'), false);
+  assert.match(chunks.at(-1).delta, /这是一个 Node\.js 项目/);
+});
+
+test('anthropic provider still gives final-answer fallback when empty preamble reaches max tool turns', async () => {
+  const requests = [];
+  const registry = new ToolRegistry();
+  registry.register({
+    name: 'file.readDirectory',
+    description: 'Read a directory.',
+    inputSchema: {
+      type: 'object',
+      required: ['path'],
+      properties: { path: { type: 'string' } },
+    },
+    async execute(args) {
+      return { entries: [`listed ${args.path}`] };
+    },
+  });
+
+  const provider = new AnthropicProvider({
+    client: {
+      messages: {
+        stream(request) {
+          requests.push(request);
+
+          if (requests.length === 1) {
+            return createMessageStream([], {
+              id: 'msg-tool',
+              model: 'claude-opus-4-7',
+              content: [
+                { type: 'tool_use', id: 'toolu_list', name: 'file_readDirectory', input: { path: '.' } },
+              ],
+              usage: null,
+            });
+          }
+
+          if (requests.length === 2) {
+            return createMessageStream([
+              { type: 'content_block_delta', delta: { type: 'text_delta', text: '让我继续深入查看关键文件。' } },
+            ], {
+              id: 'msg-empty-at-limit',
+              model: 'claude-opus-4-7',
+              content: [{ type: 'text', text: '让我继续深入查看关键文件。' }],
+              usage: null,
+            });
+          }
+
+          return createMessageStream([
+            { type: 'content_block_delta', delta: { type: 'text_delta', text: '当前只读取了根目录，下一步应读取 package.json。' } },
+          ], {
+            id: 'msg-final-after-limit',
+            model: 'claude-opus-4-7',
+            content: [{ type: 'text', text: '当前只读取了根目录，下一步应读取 package.json。' }],
+            usage: null,
+          });
+        },
+      },
+    },
+  });
+
+  const chunks = [];
+  for await (const chunk of provider.stream({ prompt: '检查当前项目', toolRegistry: registry, maxToolTurns: 2 })) {
+    chunks.push(chunk);
+  }
+
+  assert.equal(requests.length, 3);
+  assert.equal(chunks.some((chunk) => chunk.type === 'tool_limit'), false);
+  assert.match(chunks.at(-1).delta, /下一步应读取 package\.json/);
+});
+
+test('anthropic provider summarizes final tool result instead of limiting immediately at max tool turns', async () => {
+  const requests = [];
+  const registry = new ToolRegistry();
+  registry.register({
+    name: 'file.read',
+    description: 'Read a file.',
+    inputSchema: {
+      type: 'object',
+      required: ['path'],
+      properties: { path: { type: 'string' } },
+    },
+    async execute(args) {
+      return { content: `${args.path}: hax-agent-cli package` };
+    },
+  });
+
+  const provider = new AnthropicProvider({
+    client: {
+      messages: {
+        stream(request) {
+          requests.push(request);
+
+          if (requests.length === 1) {
+            return createMessageStream([
+              { type: 'content_block_delta', delta: { type: 'text_delta', text: '先读取 package.json。' } },
+            ], {
+              id: 'msg-tool-1',
+              model: 'claude-opus-4-7',
+              content: [
+                { type: 'text', text: '先读取 package.json。' },
+                { type: 'tool_use', id: 'toolu_pkg', name: 'file_read', input: { path: 'package.json' } },
+              ],
+              usage: null,
+            });
+          }
+
+          if (requests.length === 2) {
+            return createMessageStream([
+              { type: 'content_block_delta', delta: { type: 'text_delta', text: '继续读取 README。' } },
+            ], {
+              id: 'msg-tool-2',
+              model: 'claude-opus-4-7',
+              content: [
+                { type: 'text', text: '继续读取 README。' },
+                { type: 'tool_use', id: 'toolu_readme', name: 'file_read', input: { path: 'README.md' } },
+              ],
+              usage: null,
+            });
+          }
+
+          return createMessageStream([
+            { type: 'content_block_delta', delta: { type: 'text_delta', text: '已读取 package.json 和 README.md，可确认这是 hax-agent-cli 项目。' } },
+          ], {
+            id: 'msg-final-after-max-tool-result',
+            model: 'claude-opus-4-7',
+            content: [{ type: 'text', text: '已读取 package.json 和 README.md，可确认这是 hax-agent-cli 项目。' }],
+            usage: null,
+          });
+        },
+      },
+    },
+  });
+
+  const chunks = [];
+  for await (const chunk of provider.stream({ prompt: '检查当前项目', toolRegistry: registry, maxToolTurns: 2 })) {
+    chunks.push(chunk);
+  }
+
+  assert.equal(requests.length, 3);
+  assert.equal(chunks.filter((chunk) => chunk.type === 'tool_start' && chunk.name === 'file.read').length, 2);
+  assert.equal(chunks.some((chunk) => chunk.type === 'tool_limit'), false);
+  assert.match(chunks.at(-1).delta, /hax-agent-cli 项目/);
+});
+
+test('anthropic provider fails if final-answer fallback is also an empty preamble', async () => {
+  const requests = [];
+  const registry = new ToolRegistry();
+  registry.register({
+    name: 'file.readDirectory',
+    description: 'Read a directory.',
+    inputSchema: {
+      type: 'object',
+      required: ['path'],
+      properties: { path: { type: 'string' } },
+    },
+    async execute(args) {
+      return { entries: [`listed ${args.path}`] };
+    },
+  });
+
+  const provider = new AnthropicProvider({
+    client: {
+      messages: {
+        stream(request) {
+          requests.push(request);
+
+          if (requests.length === 1) {
+            return createMessageStream([
+              { type: 'content_block_delta', delta: { type: 'text_delta', text: '我先查看目录。' } },
+            ], {
+              id: 'msg-tool',
+              model: 'claude-opus-4-7',
+              content: [
+                { type: 'text', text: '我先查看目录。' },
+                { type: 'tool_use', id: 'toolu_list', name: 'file_readDirectory', input: { path: '.' } },
+              ],
+              usage: null,
+            });
+          }
+
+          return createMessageStream([
+            { type: 'content_block_delta', delta: { type: 'text_delta', text: '让我继续深入查看关键文件。' } },
+          ], {
+            id: 'msg-empty-after-tool',
+            model: 'claude-opus-4-7',
+            content: [{ type: 'text', text: '让我继续深入查看关键文件。' }],
+            usage: null,
+          });
+        },
+      },
+    },
+  });
+
+  const chunks = [];
+  for await (const chunk of provider.stream({ prompt: '检查当前项目', toolRegistry: registry, maxToolTurns: 3 })) {
+    chunks.push(chunk);
+  }
+
+  assert.equal(requests.length, 3);
+  assert.equal(chunks.some((chunk) => chunk.type === 'tool_start' && chunk.name === 'file.readDirectory'), true);
+  assert.deepEqual(chunks.find((chunk) => chunk.type === 'tool_limit'), {
+    type: 'tool_limit',
+    reason: 'empty_tool_preamble',
+    maxToolTurns: 3,
+  });
+  assert.match(chunks.at(-1).delta, /did not call any available tool/);
+});
+
+test('anthropic provider surfaces empty preambles after repeated single-call tools force text', async () => {
+  const requests = [];
+  const registry = new ToolRegistry();
+  registry.register({
+    name: 'file.readDirectory',
+    description: 'Read a directory.',
+    inputSchema: {
+      type: 'object',
+      required: ['path'],
+      properties: { path: { type: 'string' } },
+    },
+    async execute(args) {
+      return { entries: [`listed ${args.path}`] };
+    },
+  });
+
+  const provider = new AnthropicProvider({
+    client: {
+      messages: {
+        stream(request) {
+          requests.push(request);
+
+          if (requests.length <= 2) {
+            return createMessageStream([], {
+              id: `msg-tool-${requests.length}`,
+              model: 'claude-opus-4-7',
+              content: [
+                { type: 'tool_use', id: `toolu_list_${requests.length}`, name: 'file_readDirectory', input: { path: '.' } },
+              ],
+              usage: null,
+            });
+          }
+
+          if (requests.length === 3) {
+            return createMessageStream([
+              { type: 'content_block_delta', delta: { type: 'text_delta', text: '让我继续深入查看关键文件。' } },
+            ], {
+              id: 'msg-forced-empty',
+              model: 'claude-opus-4-7',
+              content: [{ type: 'text', text: '让我继续深入查看关键文件。' }],
+              usage: null,
+            });
+          }
+
+          return createMessageStream([
+            { type: 'content_block_delta', delta: { type: 'text_delta', text: '当前仅确认了根目录结构，建议下一步读取 package.json。' } },
+          ], {
+            id: 'msg-forced-final',
+            model: 'claude-opus-4-7',
+            content: [{ type: 'text', text: '当前仅确认了根目录结构，建议下一步读取 package.json。' }],
+            usage: null,
+          });
+        },
+      },
+    },
+  });
+
+  const chunks = [];
+  for await (const chunk of provider.stream({ prompt: '检查当前项目', toolRegistry: registry, maxToolTurns: 4 })) {
+    chunks.push(chunk);
+  }
+
+  assert.equal(requests.length, 4);
+  assert.equal(chunks.filter((chunk) => chunk.type === 'tool_start' && chunk.name === 'file.readDirectory').length, 1);
+  assert.equal(chunks.filter((chunk) => chunk.type === 'tool_result' && chunk.name === 'file.readDirectory').length, 1);
+  assert.equal(chunks.some((chunk) => chunk.type === 'tool_limit'), false);
+  assert.match(chunks.at(-1).delta, /建议下一步读取 package\.json/);
+});
+
 test('anthropic provider reports streaming tool errors with reasons', async () => {
   const registry = new ToolRegistry();
   registry.register({
@@ -842,6 +1250,34 @@ test('openai provider preserves tool results and forces text after repeated sing
   assert.match(secondRequestToolMessage.content, /Baidu home page/);
 });
 
+test('openai provider streams text deltas when tools are enabled', async () => {
+  const requests = [];
+  const registry = new ToolRegistry();
+  const provider = new OpenAIProvider({
+    client: {
+      chat: {
+        completions: {
+          create(request) {
+            requests.push(request);
+            return createOpenAIStream([
+              { choices: [{ delta: { content: 'Hello' } }] },
+              { choices: [{ delta: { content: ' world' } }] },
+            ]);
+          },
+        },
+      },
+    },
+  });
+
+  const chunks = [];
+  for await (const chunk of provider.stream({ prompt: 'say hello', toolRegistry: registry, maxToolTurns: 1 })) {
+    chunks.push(chunk);
+  }
+
+  assert.equal(requests[0].stream, true);
+  assert.deepEqual(chunks.filter((chunk) => chunk.type === 'text').map((chunk) => chunk.delta), ['Hello', ' world']);
+});
+
 test('openai provider executes DSML tool markup without streaming it as text', async () => {
   const requests = [];
   let executions = 0;
@@ -916,6 +1352,160 @@ test('openai provider executes DSML tool markup without streaming it as text', a
   const toolMessage = requests[1].messages.find((message) => message.role === 'tool');
   assert.ok(toolMessage);
   assert.match(toolMessage.content, /read package\.json/);
+});
+
+test('openai provider does not leak split DSML prefix while streaming tool markup', async () => {
+  const registry = new ToolRegistry();
+  let executions = 0;
+
+  registry.register({
+    name: 'file.read',
+    description: 'Read a file.',
+    inputSchema: {
+      type: 'object',
+      required: ['path'],
+      properties: { path: { type: 'string' } },
+    },
+    async execute(args) {
+      executions += 1;
+      return { content: `read ${args.path}` };
+    },
+  });
+
+  const provider = new OpenAIProvider({
+    client: {
+      chat: {
+        completions: {
+          create() {
+            if (executions === 0) {
+              return createOpenAIStream([
+                { choices: [{ delta: { content: '我先读取文件。' } }] },
+                { choices: [{ delta: { content: '<' } }] },
+                { choices: [{ delta: { content: '｜｜DSML｜｜tool_calls>' } }] },
+                { choices: [{ delta: { content: '<｜｜DSML｜｜invoke name="file.read">' } }] },
+                { choices: [{ delta: { content: '<｜｜DSML｜｜parameter name="path" string="true">package.json</｜｜DSML｜｜parameter>' } }] },
+                { choices: [{ delta: { content: '</｜｜DSML｜｜invoke></｜｜DSML｜｜tool_calls>' } }] },
+              ]);
+            }
+
+            return createOpenAIStream([
+              { choices: [{ delta: { content: '读取完成。' } }] },
+            ]);
+          },
+        },
+      },
+    },
+  });
+
+  const chunks = [];
+  for await (const chunk of provider.stream({ prompt: '检查项目', toolRegistry: registry, maxToolTurns: 3 })) {
+    chunks.push(chunk);
+  }
+
+  const text = chunks.filter((chunk) => chunk.type === 'text').map((chunk) => chunk.delta).join('');
+  assert.equal(executions, 1);
+  assert.equal(text, '我先读取文件。读取完成。');
+  assert.equal(chunks.some((chunk) => chunk.type === 'text' && chunk.delta === '<'), false);
+  assert.equal(chunks.some((chunk) => chunk.type === 'text' && /DSML|file\.read|package\.json/.test(chunk.delta)), false);
+});
+
+test('openai provider preserves ordinary split less-than text', async () => {
+  const registry = new ToolRegistry();
+  const provider = new OpenAIProvider({
+    client: {
+      chat: {
+        completions: {
+          create() {
+            return createOpenAIStream([
+              { choices: [{ delta: { content: 'Use ' } }] },
+              { choices: [{ delta: { content: '<' } }] },
+              { choices: [{ delta: { content: 'tag> literally.' } }] },
+            ]);
+          },
+        },
+      },
+    },
+  });
+
+  const chunks = [];
+  for await (const chunk of provider.stream({ prompt: 'literal less than', toolRegistry: registry, maxToolTurns: 1 })) {
+    chunks.push(chunk);
+  }
+
+  assert.equal(chunks.filter((chunk) => chunk.type === 'text').map((chunk) => chunk.delta).join(''), 'Use <tag> literally.');
+});
+
+test('openai provider continues after empty tool preamble instead of completing the turn', async () => {
+  const requests = [];
+  let executions = 0;
+  const registry = new ToolRegistry();
+
+  registry.register({
+    name: 'file.readDirectory',
+    description: 'Read a directory.',
+    inputSchema: {
+      type: 'object',
+      required: ['path'],
+      properties: { path: { type: 'string' } },
+    },
+    async execute(args) {
+      executions += 1;
+      return { entries: [`listed ${args.path}`] };
+    },
+  });
+
+  const provider = new OpenAIProvider({
+    client: {
+      chat: {
+        completions: {
+          create(request) {
+            requests.push(request);
+
+            if (requests.length === 1) {
+              return createOpenAIStream([
+                { choices: [{ delta: { content: '让我进一步了解项目的详细信息。' } }] },
+              ]);
+            }
+
+            if (requests.length === 2) {
+              return createOpenAIStream([
+                {
+                  choices: [{
+                    delta: {
+                      tool_calls: [{
+                        index: 0,
+                        id: 'call_list',
+                        type: 'function',
+                        function: { name: 'file_readDirectory', arguments: '{"path":"."}' },
+                      }],
+                    },
+                  }],
+                },
+              ]);
+            }
+
+            return createOpenAIStream([
+              { choices: [{ delta: { content: '项目目录已检查。' } }] },
+            ]);
+          },
+        },
+      },
+    },
+  });
+
+  const chunks = [];
+  for await (const chunk of provider.stream({ prompt: '检查当前项目', toolRegistry: registry, maxToolTurns: 4 })) {
+    chunks.push(chunk);
+  }
+
+  assert.equal(executions, 1);
+  assert.equal(requests.length, 3);
+  assert.equal(requests.some((request) =>
+    request.messages.some((message) => /did not call a tool/i.test(message.content || ''))
+  ), true);
+  assert.equal(chunks.some((chunk) => chunk.type === 'tool_start' && chunk.name === 'file.readDirectory'), true);
+  assert.equal(chunks.at(-1).type, 'text');
+  assert.equal(chunks.at(-1).delta, '项目目录已检查。');
 });
 
 function createOpenAIStream(events) {

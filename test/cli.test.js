@@ -14,10 +14,13 @@ function stripAnsi(text) {
 
 function createIsolatedEnv(overrides = {}) {
   const settingsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hax-agent-cli-'));
+  const storageDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hax-agent-storage-'));
 
   return {
     ...process.env,
     HAX_AGENT_USER_SETTINGS: path.join(settingsDir, 'settings.json'),
+    HAX_AGENT_MEMORY_DIR: path.join(storageDir, 'memory'),
+    HAX_AGENT_SESSION_DIR: path.join(storageDir, 'sessions'),
     HAX_AGENT_PROVIDER: '',
     ANTHROPIC_API_KEY: '',
     HAX_AGENT_API_URL: '',
@@ -82,7 +85,7 @@ test('runs the init wizard and saves settings', () => {
   const result = spawnSync(process.execPath, [cliPath, 'init'], {
     encoding: 'utf8',
     env: createIsolatedEnv({ HAX_AGENT_USER_SETTINGS: settingsPath }),
-    input: '2\nsk-test\nhttps://api.example.test/v1\ncustom-model\n1\n1\nn\n',
+    input: '2\nsk-test\nhttps://api.example.test/v1\ncustom-model\ny\n\n8192\nn\n\n1\n1\nn\n',
   });
   const saved = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
 
@@ -97,6 +100,9 @@ test('runs the init wizard and saves settings', () => {
   assert.equal(saved.ui.locale, 'en');
   assert.equal(saved.permissions.mode, 'normal');
   assert.equal(saved.memory.enabled, false);
+  assert.equal(saved.context.enabled, true);
+  assert.equal(saved.context.reserveOutputTokens, 8192);
+  assert.equal(saved.fileContext.enabled, false);
   assert.equal(result.stderr, '');
 });
 

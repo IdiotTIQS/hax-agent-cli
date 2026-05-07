@@ -6,6 +6,7 @@ const props = defineProps({
   messages: { type: Array, default: () => [] },
   toolCalls: { type: Array, default: () => [] },
   isThinking: { type: Boolean, default: false },
+  isStreaming: { type: Boolean, default: false },
   activeAssistantId: { type: String, default: '' },
 });
 
@@ -179,10 +180,10 @@ function isDiffMessage(msg) {
       </template>
 
       <!-- Thinking -->
-      <div v-if="isThinking" class="thinking-indicator">
+      <div v-if="isThinking || isStreaming" class="thinking-indicator" :class="{ streaming: isStreaming && !isThinking }">
         <div class="thinking-avatar">HX</div>
         <div class="thinking-dots"><span></span><span></span><span></span></div>
-        <span class="thinking-text">思考中…</span>
+        <span class="thinking-text">{{ isStreaming && !isThinking ? '输出中…' : '思考中…' }}</span>
       </div>
     </div>
   </div>
