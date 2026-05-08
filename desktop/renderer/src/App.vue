@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, onUnmounted, reactive, ref } from 'vue';
+import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
 
 import Sidebar from './components/Sidebar.vue';
 import TopBar from './components/TopBar.vue';
@@ -8,6 +8,7 @@ import InputBar from './components/InputBar.vue';
 import RightPanel from './components/RightPanel.vue';
 import SettingsModal from './components/SettingsModal.vue';
 import Toast from './components/Toast.vue';
+import ApprovalModal from './components/ApprovalModal.vue';
 
 const api = window.haxAgent ?? {};
 
@@ -52,6 +53,11 @@ const toolsSnapshot = ref({ projectRoot: '', total: 0, tools: [] });
 const permissionsSnapshot = ref({ projectRoot: '', mode: 'normal', alwaysAllow: [], alwaysDeny: [], toolPermissions: [], counts: {} });
 const teamSnapshot = ref({ projectRoot: '', teams: [], activeTeam: null });
 const workspaceSummary = ref({ path: '', files: 0, directories: 0, depth: 0 });
+const sessionProjectRoot = ref('');
+const contentSearch = ref({ query: '', matches: [], scannedFiles: 0, truncated: false });
+const selectedPreview = ref(null);
+const selectedMatch = ref(null);
+const isSearching = ref(false);
 
 const elapsed = ref('0s');
 const tokenUsed = ref(0);
@@ -60,7 +66,12 @@ const gitBranch = ref('master');
 const gitAhead = ref(0);
 const gitBehind = ref(0);
 const gitChanged = ref(0);
+const gitFiles = ref([]);
+const selectedGitFile = ref('');
+const selectedGitDiff = ref(null);
+const isLoadingGitDiff = ref(false);
 const toastRef = ref(null);
+const approvalQueue = ref([]);
 
 const settings = reactive({
   provider: 'auto',
@@ -163,9 +174,29 @@ const panelPlaceholder = computed(() => {
   }
 });
 
+const workspaceDisplayPath = computed(() => (
+  workspaceSummary.value.path || settings.workspace || sessionProjectRoot.value || '当前项目根目录'
+));
+
+const sessionScopeLabel = computed(() => {
+  if (!sessionId.value) return '未创建会话';
+  if (!sessionProjectRoot.value) return '未绑定项目';
+
+  const selectedWorkspace = settings.workspace || workspaceSummary.value.path;
+  if (selectedWorkspace && pathsMatch(sessionProjectRoot.value, selectedWorkspace)) {
+    return `当前工作区: ${pathBasename(sessionProjectRoot.value)}`;
+  }
+
+  return `会话工作区: ${pathBasename(sessionProjectRoot.value)}`;
+});
+
+const sessionScopeTitle = computed(() => sessionProjectRoot.value || '当前还没有活动会话');
+
 let elapsedTimer = null;
 let turnStartTime = null;
 let unsubAgent = null;
+let unsubApproval = null;
+let searchTimer = null;
 
 function startElapsedTimer() {
   turnStartTime = Date.now();
@@ -252,6 +283,35 @@ function updateWorkspaceSummary(tree) {
   };
 }
 
+function normalizePathForCompare(value) {
+  return String(value || '').replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+}
+
+function pathsMatch(left, right) {
+  const normalizedLeft = normalizePathForCompare(left);
+  const normalizedRight = normalizePathForCompare(right);
+  return Boolean(normalizedLeft && normalizedRight && normalizedLeft === normalizedRight);
+}
+
+function pathBasename(value) {
+  const parts = String(value || '').split(/[\\/]+/).filter(Boolean);
+  return parts.at(-1) || value || '未命名项目';
+}
+
+function updateSessionWorkspace(sessionResult, options = {}) {
+  const projectRoot = sessionResult?.settings?.projectRoot || '';
+  if (!projectRoot) return false;
+
+  sessionProjectRoot.value = projectRoot;
+  if (options.switchWorkspace && !pathsMatch(settings.workspace, projectRoot)) {
+    settings.workspace = projectRoot;
+    workspaceSummary.value.path = projectRoot;
+    return true;
+  }
+
+  return false;
+}
+
 function resetConversationView() {
   messages.value = [{
     id: crypto.randomUUID(),
@@ -263,6 +323,7 @@ function resetConversationView() {
   toolCalls.value = [];
   composer.value = '';
   activeAssistantId.value = '';
+  sessionProjectRoot.value = '';
   isStreaming.value = false;
   currentTurn.value = 0;
   tokenUsed.value = 0;
@@ -339,15 +400,21 @@ async function loadWorkspaceSnapshot() {
   if (typeof api.getWorkspaceSnapshot !== 'function') return;
   try {
     const snapshot = await api.getWorkspaceSnapshot({ projectRoot: settings.workspace || undefined });
+    const snapshotRoot = snapshot.projectRoot || settings.workspace || '';
     fileTreeData.value = snapshot.fileTree || [];
     sessionList.value = snapshot.sessions || [];
     updateWorkspaceSummary(fileTreeData.value);
-    workspaceSummary.value.path = settings.workspace || workspaceSummary.value.path;
+    workspaceSummary.value.path = snapshotRoot || workspaceSummary.value.path;
     if (snapshot.git) {
       gitBranch.value = snapshot.git.branch || 'none';
       gitAhead.value = Number(snapshot.git.ahead || 0);
       gitBehind.value = Number(snapshot.git.behind || 0);
       gitChanged.value = Number(snapshot.git.changed || 0);
+      gitFiles.value = snapshot.git.files || [];
+      if (selectedGitFile.value && !gitFiles.value.some((file) => file.path === selectedGitFile.value)) {
+        selectedGitFile.value = '';
+        selectedGitDiff.value = null;
+      }
     }
   } catch (e) {
     appendLog('工作区快照加载失败', 'fail');
@@ -405,6 +472,7 @@ function handleSelectFile(path) {
   appendLog('选中文件: ' + path);
   activeNav.value = 'search';
   panelQuery.value = path;
+  void previewWorkspaceFile(path);
 }
 
 function handleSelectTab(tab) {
@@ -422,6 +490,7 @@ async function createSession() {
     const result = await ensureApi('createSession')({ projectRoot: settings.workspace || undefined });
     sessionId.value = serializeSession(result) || crypto.randomUUID();
     resetConversationView();
+    updateSessionWorkspace(result);
     updateStats(result);
     const provider = result?.provider;
     if (provider) {
@@ -451,13 +520,17 @@ async function resumeSession(targetSessionId) {
     });
     sessionId.value = serializeSession(result) || targetSessionId;
     setMessagesFromSession(result);
+    const switchedWorkspace = updateSessionWorkspace(result, { switchWorkspace: Boolean(targetSession?.projectRoot) });
     toolCalls.value = [];
     activeAssistantId.value = '';
     isStreaming.value = false;
     updateStats(result);
+    if (switchedWorkspace) {
+      appendLog(`工作区已切换到 ${pathBasename(settings.workspace)}`, 'done');
+    }
     appendLog(`已切换到 ${sessionId.value.slice(0, 8)}`, 'done');
     toastRef.value?.success('会话已切换');
-    await loadWorkspaceSnapshot();
+    await Promise.all([loadWorkspaceSnapshot(), loadInsightPanels()]);
   } catch (e) {
     errorText.value = e.message;
     appendLog('会话切换失败', 'fail');
@@ -465,20 +538,19 @@ async function resumeSession(targetSessionId) {
   }
 }
 
-async function sendMessage() {
-  const content = composer.value.trim();
-  if (!content || isBusy.value) return;
-  if (activeNav.value === 'search') {
+async function submitAgentMessage(content, options = {}) {
+  const normalizedContent = String(content || '').trim();
+  if (!normalizedContent || isBusy.value) return false;
+  if (activeNav.value !== 'chat') {
     activeNav.value = 'chat';
   }
 
   if (!sessionId.value) {
-    try { await createSession(); } catch { return; }
-    if (!sessionId.value) return;
+    try { await createSession(); } catch { return false; }
+    if (!sessionId.value) return false;
   }
 
-  composer.value = '';
-  appendMessage('user', content);
+  appendMessage('user', normalizedContent);
   isBusy.value = true;
   isThinking.value = true;
   isStreaming.value = false;
@@ -487,15 +559,17 @@ async function sendMessage() {
   activeAssistantId.value = '';
   errorText.value = '';
   startElapsedTimer();
-  appendLog('发送指令', 'start');
+  appendLog(options.logLabel || '发送指令', 'start');
 
   try {
     const result = await ensureApi('sendMessage')({
       sessionId: sessionId.value,
-      content,
+      content: normalizedContent,
+      projectRoot: settings.workspace || undefined,
     });
 
     updateStats(result);
+    updateSessionWorkspace(result);
     if (!isBusy.value) {
       // events handled
     } else if (typeof result === 'string' && result.length > 0) {
@@ -505,13 +579,15 @@ async function sendMessage() {
     }
 
     statusState.value = 'idle';
-    appendLog('任务完成', 'done');
+    appendLog(options.doneLabel || '任务完成', 'done');
+    return true;
   } catch (e) {
     errorText.value = e.message;
     appendMessage('system', `错误: ${e.message}`, { tone: 'danger' });
     statusState.value = 'error';
-    appendLog('任务失败', 'fail');
+    appendLog(options.failLabel || '任务失败', 'fail');
     toastRef.value?.error('发送失败: ' + e.message);
+    return false;
   } finally {
     isBusy.value = false;
     isThinking.value = false;
@@ -520,6 +596,13 @@ async function sendMessage() {
     stopElapsedTimer();
     if (statusState.value !== 'error') statusState.value = 'idle';
   }
+}
+
+async function sendMessage() {
+  const content = composer.value.trim();
+  if (!content || isBusy.value) return;
+  composer.value = '';
+  await submitAgentMessage(content);
 }
 
 async function interruptAgent() {
@@ -540,6 +623,124 @@ async function interruptAgent() {
     errorText.value = e.message;
     appendLog('中断失败', 'fail');
   }
+}
+
+async function searchWorkspaceContent() {
+  if (typeof api.searchWorkspace !== 'function') return;
+  const query = panelQuery.value.trim();
+  if (activeNav.value !== 'search' || !query) {
+    contentSearch.value = { query: '', matches: [], scannedFiles: 0, truncated: false };
+    return;
+  }
+
+  isSearching.value = true;
+  try {
+    const result = await api.searchWorkspace({
+      projectRoot: settings.workspace || undefined,
+      query,
+      maxResults: 120,
+    });
+    contentSearch.value = {
+      query: result.query || query,
+      matches: result.matches || [],
+      scannedFiles: Number(result.scannedFiles || 0),
+      truncated: Boolean(result.truncated),
+    };
+  } catch (e) {
+    errorText.value = e.message;
+    appendLog('内容搜索失败', 'fail');
+  } finally {
+    isSearching.value = false;
+  }
+}
+
+async function previewWorkspaceFile(filePath, match = null) {
+  if (!filePath || typeof api.readWorkspaceFile !== 'function') return;
+  selectedMatch.value = match;
+  try {
+    const result = await api.readWorkspaceFile({
+      projectRoot: settings.workspace || undefined,
+      path: filePath,
+    });
+    selectedPreview.value = result;
+    appendLog(`预览文件: ${result.path}`, 'done');
+  } catch (e) {
+    errorText.value = e.message;
+    appendLog('文件预览失败', 'fail');
+  }
+}
+
+async function loadGitDiff(filePath) {
+  if (!filePath || typeof api.getGitDiff !== 'function') return;
+  selectedGitFile.value = filePath;
+  isLoadingGitDiff.value = true;
+  try {
+    const result = await api.getGitDiff({
+      projectRoot: settings.workspace || undefined,
+      path: filePath,
+    });
+    selectedGitDiff.value = result;
+    appendLog(`读取 diff: ${result.path}`, 'done');
+  } catch (e) {
+    selectedGitDiff.value = null;
+    errorText.value = e.message;
+    appendLog('Diff 读取失败', 'fail');
+  } finally {
+    isLoadingGitDiff.value = false;
+  }
+}
+
+function buildGitPrompt(intent) {
+  const diff = String(selectedGitDiff.value?.diff || '').trim();
+  if (!selectedGitFile.value || !diff) return '';
+
+  if (intent === 'commit') {
+    return [
+      `请基于下面这个 Git diff 草拟一条清晰的 commit message。`,
+      `要求：`,
+      `- 使用 Conventional Commits 风格`,
+      `- 只输出建议的标题和 2-4 条要点`,
+      `- 不要执行 git 命令`,
+      ``,
+      `文件：${selectedGitFile.value}`,
+      ``,
+      '```diff',
+      diff,
+      '```',
+    ].join('\n');
+  }
+
+  return [
+    `请解释下面这个 Git diff。`,
+    `请重点说明：`,
+    `- 这次变更改变了什么行为`,
+    `- 有哪些风险或需要补测的地方`,
+    `- 如果你发现明显问题，请直接指出`,
+    ``,
+    `文件：${selectedGitFile.value}`,
+    ``,
+    '```diff',
+    diff,
+    '```',
+  ].join('\n');
+}
+
+async function handleGitAssist(intent) {
+  const prompt = buildGitPrompt(intent);
+  if (!prompt) {
+    toastRef.value?.warning('请先选择一个有 diff 的文件');
+    return;
+  }
+
+  await submitAgentMessage(prompt, {
+    logLabel: intent === 'commit' ? '生成提交说明' : '解释 diff',
+    doneLabel: intent === 'commit' ? '提交说明已生成' : 'Diff 解释完成',
+    failLabel: intent === 'commit' ? '提交说明生成失败' : 'Diff 解释失败',
+  });
+}
+
+function isHighlightedLine(lineNumber) {
+  return selectedMatch.value && selectedMatch.value.path === selectedPreview.value?.path && selectedMatch.value.line === lineNumber;
 }
 
 function startResize(panel) {
@@ -653,6 +854,34 @@ function handleAgentEvent(event) {
   }
 }
 
+function handleApprovalRequest(request) {
+  approvalQueue.value.push(request);
+  appendLog(`等待审批: ${request.toolName}`, 'start');
+}
+
+async function decideApproval(decision) {
+  const request = approvalQueue.value[0];
+  if (!request) return;
+
+  approvalQueue.value = approvalQueue.value.slice(1);
+  try {
+    const result = await ensureApi('respondApproval')({ id: request.id, decision });
+    if (!result?.resolved) {
+      appendLog(`审批请求已过期: ${request.toolName}`, 'fail');
+      toastRef.value?.warning('审批请求已过期');
+      return;
+    }
+
+    const approved = decision === 'approve' || decision === 'always_allow';
+    appendLog(`${approved ? '已允许' : '已拒绝'}: ${request.toolName}`, approved ? 'done' : 'fail');
+    void loadInsightPanels();
+  } catch (e) {
+    errorText.value = e.message;
+    appendLog('审批响应失败', 'fail');
+    toastRef.value?.error('审批失败: ' + e.message);
+  }
+}
+
 async function saveSettings(updates) {
   errorText.value = '';
   try {
@@ -685,6 +914,9 @@ onMounted(async () => {
   if (typeof api.onAgentEvent === 'function') {
     unsubAgent = api.onAgentEvent(handleAgentEvent);
   }
+  if (typeof api.onApprovalRequest === 'function') {
+    unsubApproval = api.onApprovalRequest(handleApprovalRequest);
+  }
 
   document.addEventListener('mousemove', onMouseMove);
   document.addEventListener('mouseup', stopResize);
@@ -693,10 +925,19 @@ onMounted(async () => {
 
 onUnmounted(() => {
   stopElapsedTimer();
+  if (searchTimer) clearTimeout(searchTimer);
   if (typeof unsubAgent === 'function') unsubAgent();
+  if (typeof unsubApproval === 'function') unsubApproval();
   document.removeEventListener('mousemove', onMouseMove);
   document.removeEventListener('mouseup', stopResize);
   document.removeEventListener('keydown', onKeyDown);
+});
+
+watch([activeNav, panelQuery], () => {
+  if (searchTimer) clearTimeout(searchTimer);
+  searchTimer = setTimeout(() => {
+    void searchWorkspaceContent();
+  }, 180);
 });
 </script>
 
@@ -723,6 +964,8 @@ onUnmounted(() => {
       <div>
         <TopBar
           :title="sessionId ? `会话 ${sessionId.slice(0, 8)}` : 'Agent 工作区'"
+          :scope-label="sessionScopeLabel"
+          :scope-title="sessionScopeTitle"
           :status="statusState"
           :is-busy="isBusy"
           :model="settings.model"
@@ -733,7 +976,7 @@ onUnmounted(() => {
         <div class="workspace-rail">
           <div class="workspace-rail-item workspace-rail-wide">
             <span class="rail-label">工作区</span>
-            <span class="rail-value">{{ workspaceSummary.path || settings.workspace || '当前项目根目录' }}</span>
+            <span class="rail-value">{{ workspaceDisplayPath }}</span>
           </div>
           <div class="workspace-rail-item"><span class="rail-label">文件</span><span class="rail-value">{{ workspaceSummary.files }}</span></div>
           <div class="workspace-rail-item"><span class="rail-label">目录</span><span class="rail-value">{{ workspaceSummary.directories }}</span></div>
@@ -788,25 +1031,88 @@ onUnmounted(() => {
               <div class="panel-kicker">Search</div>
               <h2>Workspace Search</h2>
             </div>
-            <div class="panel-meta">{{ fileTreeData.length }} top-level nodes</div>
-          </div>
-          <div class="nav-panel-list">
-            <div v-for="node in searchResults" :key="node.path" class="nav-row">
-              <div class="nav-row-title">{{ node.path }}</div>
-              <div class="nav-row-meta">{{ node.type }}</div>
-            </div>
-            <div v-if="searchResults.length === 0" class="empty-panel">
-              没有匹配结果
+            <div class="panel-meta">
+              <span v-if="isSearching">searching…</span>
+              <span v-else-if="contentSearch.query">{{ contentSearch.matches.length }} matches · {{ contentSearch.scannedFiles }} files</span>
+              <span v-else>{{ fileTreeData.length }} top-level nodes</span>
             </div>
           </div>
-          <div class="nav-panel-list">
-            <div class="subsection-title">Recent sessions</div>
-            <div v-for="session in matchingSessions" :key="session.id" class="nav-card">
-              <div class="nav-card-title">{{ session.title }}</div>
-              <div class="nav-card-meta">{{ session.preview }}</div>
+          <div class="search-workbench">
+            <div class="search-results-pane">
+              <div v-if="contentSearch.query" class="nav-panel-list">
+                <button
+                  v-for="match in contentSearch.matches"
+                  :key="match.path + ':' + match.line + ':' + match.column"
+                  class="search-hit"
+                  :class="{ active: selectedMatch && selectedMatch.path === match.path && selectedMatch.line === match.line }"
+                  type="button"
+                  @click="previewWorkspaceFile(match.path, match)"
+                >
+                  <div class="search-hit-top">
+                    <span class="search-hit-path">{{ match.path }}</span>
+                    <span class="search-hit-line">L{{ match.line }}:{{ match.column }}</span>
+                  </div>
+                  <div class="search-hit-text">{{ match.text }}</div>
+                </button>
+                <div v-if="contentSearch.truncated" class="empty-panel">
+                  结果已截断
+                </div>
+                <div v-if="contentSearch.matches.length === 0 && !isSearching" class="empty-panel">
+                  没有内容匹配
+                </div>
+              </div>
+
+              <div v-else class="nav-panel-list">
+                <button
+                  v-for="node in searchResults"
+                  :key="node.path"
+                  class="nav-row nav-row-button"
+                  type="button"
+                  @click="node.type === 'file' ? previewWorkspaceFile(node.path) : null"
+                >
+                  <div class="nav-row-title">{{ node.path }}</div>
+                  <div class="nav-row-meta">{{ node.type }}</div>
+                </button>
+                <div v-if="searchResults.length === 0" class="empty-panel">
+                  没有匹配结果
+                </div>
+              </div>
+
+              <div class="nav-panel-list">
+                <div class="subsection-title">Recent sessions</div>
+                <div v-for="session in matchingSessions" :key="session.id" class="nav-card">
+                  <div class="nav-card-title">{{ session.title }}</div>
+                  <div class="nav-card-meta">{{ session.preview }}</div>
+                </div>
+                <div v-if="matchingSessions.length === 0" class="empty-panel">
+                  没有匹配会话
+                </div>
+              </div>
             </div>
-            <div v-if="matchingSessions.length === 0" class="empty-panel">
-              没有匹配会话
+
+            <div class="file-preview-pane">
+              <div v-if="selectedPreview" class="file-preview">
+                <div class="file-preview-head">
+                  <div>
+                    <div class="panel-kicker">Preview</div>
+                    <h3>{{ selectedPreview.path }}</h3>
+                  </div>
+                  <span class="file-preview-meta">{{ selectedPreview.bytes }} bytes</span>
+                </div>
+                <div v-if="selectedPreview.truncated" class="empty-panel">
+                  文件过大，未加载预览
+                </div>
+                <div v-else class="file-preview-code"><div
+                  v-for="line in selectedPreview.lines"
+                  :key="line.number"
+                  class="file-preview-line"
+                  :class="{ highlighted: isHighlightedLine(line.number) }"
+                ><span class="file-preview-num">{{ line.number }}</span><span class="file-preview-text">{{ line.text || ' ' }}</span></div></div>
+              </div>
+              <div v-else class="file-preview-empty">
+                <div class="panel-kicker">Preview</div>
+                <h3>选择一个文件</h3>
+              </div>
             </div>
           </div>
         </div>
@@ -910,7 +1216,14 @@ onUnmounted(() => {
       :git-ahead="gitAhead"
       :git-behind="gitBehind"
       :git-changed="gitChanged"
+      :git-files="gitFiles"
+      :selected-git-file="selectedGitFile"
+      :selected-git-diff="selectedGitDiff"
+      :is-loading-git-diff="isLoadingGitDiff"
+      :is-busy="isBusy"
       @select-tab="handleSelectTab"
+      @select-git-file="loadGitDiff"
+      @git-assist="handleGitAssist"
     />
 
     <SettingsModal
@@ -925,5 +1238,9 @@ onUnmounted(() => {
     />
 
     <Toast ref="toastRef" />
+    <ApprovalModal
+      :request="approvalQueue[0] || null"
+      @decide="decideApproval"
+    />
   </main>
 </template>

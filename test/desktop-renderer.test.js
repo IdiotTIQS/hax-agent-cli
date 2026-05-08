@@ -258,6 +258,87 @@ test('RightPanel displays token and cost metrics', async () => {
   assert.doesNotMatch(wrapper.text(), /2\/3/);
 });
 
+test('RightPanel shows git changes and emits selected file', async () => {
+  const RightPanel = await loadComponent(path.join('components', 'RightPanel.vue'));
+  const wrapper = mount(RightPanel, {
+    props: {
+      activeTab: 'git',
+      gitBranch: 'main',
+      gitFiles: [
+        { path: 'src/index.js', status: 'modified' },
+        { path: 'README.md', status: 'untracked' },
+      ],
+      selectedGitFile: 'src/index.js',
+      selectedGitDiff: {
+        path: 'src/index.js',
+        diff: 'diff --git a/src/index.js b/src/index.js\n@@ -1 +1 @@\n-old\n+new',
+      },
+    },
+  });
+
+  assert.match(wrapper.text(), /src\/index\.js/);
+  assert.match(wrapper.text(), /\+new/);
+
+  await wrapper.findAll('.git-file-item')[1].trigger('click');
+  assert.deepEqual(wrapper.emitted('select-git-file')[0], ['README.md']);
+});
+
+test('RightPanel emits git assist actions for selected diff', async () => {
+  const RightPanel = await loadComponent(path.join('components', 'RightPanel.vue'));
+  const wrapper = mount(RightPanel, {
+    props: {
+      activeTab: 'git',
+      selectedGitFile: 'src/index.js',
+      selectedGitDiff: {
+        path: 'src/index.js',
+        diff: 'diff --git a/src/index.js b/src/index.js\n+new',
+      },
+    },
+  });
+
+  const buttons = wrapper.findAll('.git-action-btn');
+  assert.equal(buttons.length, 2);
+  assert.equal(buttons[0].attributes('disabled'), undefined);
+
+  await buttons[0].trigger('click');
+  await buttons[1].trigger('click');
+
+  assert.deepEqual(wrapper.emitted('git-assist').map((event) => event[0]), ['explain', 'commit']);
+  wrapper.unmount();
+});
+
+test('RightPanel disables git assist actions without a diff', async () => {
+  const RightPanel = await loadComponent(path.join('components', 'RightPanel.vue'));
+  const wrapper = mount(RightPanel, {
+    props: {
+      activeTab: 'git',
+      selectedGitFile: 'src/index.js',
+      selectedGitDiff: { path: 'src/index.js', diff: '' },
+    },
+  });
+
+  assert.equal(wrapper.find('.git-action-btn').attributes('disabled'), '');
+  wrapper.unmount();
+});
+
+test('TopBar shows the active session workspace scope', async () => {
+  const TopBar = await loadComponent(path.join('components', 'TopBar.vue'));
+  const wrapper = mount(TopBar, {
+    props: {
+      title: '会话 abc12345',
+      scopeLabel: '当前工作区: HaxAgent',
+      scopeTitle: 'E:\\HaxAgent',
+      models: [],
+    },
+  });
+
+  assert.match(wrapper.text(), /会话 abc12345/);
+  assert.match(wrapper.text(), /当前工作区: HaxAgent/);
+  assert.equal(wrapper.find('.topbar-scope').attributes('title'), 'E:\\HaxAgent');
+
+  wrapper.unmount();
+});
+
 test('Sidebar groups sessions by project scope', async () => {
   const Sidebar = await loadComponent(path.join('components', 'Sidebar.vue'));
   const wrapper = mount(Sidebar, {
@@ -302,4 +383,31 @@ test('Sidebar groups all sessions before applying per-group limits', async () =>
   assert.match(wrapper.text(), /Late current task/);
   assert.match(wrapper.text(), /Late loose chat/);
   assert.doesNotMatch(wrapper.text(), /Other 11/);
+});
+
+test('ApprovalModal emits approval decisions', async () => {
+  const ApprovalModal = await loadComponent(path.join('components', 'ApprovalModal.vue'));
+  const wrapper = mount(ApprovalModal, {
+    props: {
+      request: {
+        id: 'approval-1',
+        toolName: 'file.write',
+        toolKey: 'file.write',
+        level: 'ask',
+        description: 'Write README.md',
+        toolArgs: { path: 'README.md', content: '# Test\n' },
+      },
+    },
+    attachTo: document.body,
+  });
+
+  assert.match(document.body.textContent, /允许这次工具调用/);
+  assert.match(document.body.textContent, /file\.write/);
+
+  const buttons = document.body.querySelectorAll('.approval-actions button');
+  buttons[buttons.length - 1].click();
+  await wrapper.vm.$nextTick();
+
+  assert.deepEqual(wrapper.emitted('decide')[0], ['approve']);
+  wrapper.unmount();
 });

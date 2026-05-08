@@ -2,6 +2,7 @@
 
 const path = require("node:path");
 const fs = require("node:fs");
+const crypto = require("node:crypto");
 const { spawn } = require("node:child_process");
 const electron = require("electron");
 
@@ -41,7 +42,13 @@ const IGNORED_DIRS = new Set([".git", "node_modules", "dist", "coverage", ".hax-
 const MAX_TREE_DEPTH = 4;
 const MAX_TREE_ENTRIES = 500;
 const MAX_RECENT_SESSIONS = 30;
+const MAX_SEARCH_FILES = 2000;
+const MAX_SEARCH_RESULTS = 200;
+const MAX_SEARCH_FILE_BYTES = 512 * 1024;
+const MAX_PREVIEW_BYTES = 512 * 1024;
+const MAX_DIFF_BYTES = 200 * 1024;
 const MOCK_ASSISTANT_PREFIX = "I’m in local mock mode right now";
+const pendingApprovals = new Map();
 
 function isDevMode() {
   if (process.env.HAX_AGENT_DESKTOP_MODE === "production") return false;
@@ -50,6 +57,10 @@ function isDevMode() {
 
 function getDevUrl() {
   return process.env.HAX_AGENT_DESKTOP_URL || "http://127.0.0.1:5173";
+}
+
+function shouldOpenDevTools() {
+  return process.env.HAX_AGENT_DESKTOP_DEVTOOLS === "1";
 }
 
 function getRendererDistIndex() {
@@ -90,7 +101,9 @@ function createMainWindow() {
 
   if (isDevMode()) {
     mainWindow.loadURL(getDevUrl());
-    mainWindow.webContents.openDevTools({ mode: "detach" });
+    if (shouldOpenDevTools()) {
+      mainWindow.webContents.openDevTools({ mode: "detach" });
+    }
   } else {
     mainWindow.loadFile(getRendererDistIndex());
   }
@@ -144,6 +157,67 @@ function createDesktopSession(options = {}) {
   return record;
 }
 
+function createDesktopApprovalPrompt(sender, session) {
+  return ({ toolName, toolArgs, level, description, toolKey }) => new Promise((resolve) => {
+    if (!sender || typeof sender.send !== "function") {
+      resolve("deny");
+      return;
+    }
+
+    const id = crypto.randomUUID();
+    pendingApprovals.set(id, { resolve, sessionId: session?.id || "" });
+    sender.send("approval:request", {
+      id,
+      sessionId: session?.id || "",
+      toolName,
+      toolArgs: sanitizeApprovalArgs(toolArgs),
+      toolKey,
+      level,
+      description,
+      requestedAt: new Date().toISOString(),
+    });
+  });
+}
+
+function resolvePendingApproval(id, decision) {
+  const pending = pendingApprovals.get(id);
+  if (!pending) {
+    return { resolved: false };
+  }
+
+  pendingApprovals.delete(id);
+  pending.resolve(normalizeApprovalDecision(decision));
+  return { resolved: true };
+}
+
+function resolvePendingApprovalsForSession(sessionId, decision = "deny") {
+  let count = 0;
+  for (const [id, pending] of pendingApprovals.entries()) {
+    if (pending.sessionId !== sessionId) continue;
+    pendingApprovals.delete(id);
+    pending.resolve(normalizeApprovalDecision(decision));
+    count += 1;
+  }
+  return count;
+}
+
+function normalizeApprovalDecision(decision) {
+  return ["approve", "deny", "always_allow", "always_deny"].includes(decision)
+    ? decision
+    : "deny";
+}
+
+function sanitizeApprovalArgs(value) {
+  if (value == null) return value;
+  const text = typeof value === "string" ? value : JSON.stringify(value, null, 2);
+  const maxLength = 6000;
+  if (text.length <= maxLength) return value;
+  return {
+    truncated: true,
+    preview: `${text.slice(0, maxLength)}\n...`,
+  };
+}
+
 function mergePlainObjects(...objects) {
   return Object.assign({}, ...objects.filter((item) => item && typeof item === "object"));
 }
@@ -156,6 +230,21 @@ function getSessionRecord(sessionId) {
   }
 
   return record;
+}
+
+function retargetSessionRecord(record, projectRoot) {
+  const nextProjectRoot = path.resolve(projectRoot || process.cwd());
+
+  if (pathsEqual(record.projectRoot, nextProjectRoot)) {
+    return record;
+  }
+
+  return createDesktopSession({
+    projectRoot: nextProjectRoot,
+    sessionId: record.session.id,
+    messages: record.session.messages,
+    permissionMode: record.session.permissionManager?.mode,
+  });
 }
 
 function serializeSession(session) {
@@ -232,11 +321,18 @@ function registerIpcHandlers(ipc = ipcMain) {
   ipc.handle("agent:sendMessage", async (event, payload = {}) => {
     const { sessionId, options } = payload;
     const content = payload.content ?? payload.message;
-    const record = getSessionRecord(sessionId);
+    let record = getSessionRecord(sessionId);
+    const requestedProjectRoot = payload.projectRoot || options?.projectRoot;
 
     if (record.session.isStreaming) {
       throw new Error("Session is already streaming a response.");
     }
+
+    if (String(requestedProjectRoot || "").trim()) {
+      record = retargetSessionRecord(record, requestedProjectRoot);
+    }
+
+    record.session.toolRegistry.approvalCallback = createDesktopApprovalPrompt(event.sender, record.session);
 
     try {
       for await (const agentEvent of record.engine.sendMessage(content, options || {})) {
@@ -259,9 +355,14 @@ function registerIpcHandlers(ipc = ipcMain) {
 
   ipc.handle("agent:interrupt", async (_event, payload = {}) => {
     const record = getSessionRecord(payload.sessionId);
+    resolvePendingApprovalsForSession(record.session.id, "deny");
     record.engine.interrupt();
     return serializeSession(record.session);
   });
+
+  ipc.handle("approval:respond", async (_event, payload = {}) => (
+    resolvePendingApproval(payload.id, payload.decision)
+  ));
 
   ipc.handle("settings:get", async (_event, options = {}) => {
     const bootstrap = resolveSettings({ projectRoot: options.projectRoot || process.cwd() });
@@ -300,6 +401,24 @@ function registerIpcHandlers(ipc = ipcMain) {
       git: await readGitStatus(projectRoot),
       sessions: readSessionList(settings, { currentProjectRoot: hasWorkspace ? projectRoot : "" }),
     };
+  });
+
+  ipc.handle("workspace:search", async (_event, options = {}) => {
+    const hasWorkspace = Boolean(String(options.projectRoot || "").trim());
+    const projectRoot = path.resolve(hasWorkspace ? options.projectRoot : process.cwd());
+    return searchWorkspaceContent(projectRoot, options);
+  });
+
+  ipc.handle("workspace:readFile", async (_event, options = {}) => {
+    const hasWorkspace = Boolean(String(options.projectRoot || "").trim());
+    const projectRoot = path.resolve(hasWorkspace ? options.projectRoot : process.cwd());
+    return readWorkspaceFile(projectRoot, options);
+  });
+
+  ipc.handle("git:getDiff", async (_event, options = {}) => {
+    const hasWorkspace = Boolean(String(options.projectRoot || "").trim());
+    const projectRoot = path.resolve(hasWorkspace ? options.projectRoot : process.cwd());
+    return readGitDiff(projectRoot, options);
   });
 
   ipc.handle("workspace:chooseDirectory", async (_event, options = {}) => {
@@ -393,6 +512,151 @@ function readWorkspaceTree(projectRoot) {
   }
 
   return walk(projectRoot, 0);
+}
+
+function searchWorkspaceContent(projectRoot, options = {}) {
+  const root = path.resolve(projectRoot || process.cwd());
+  const query = String(options.query || "").trim();
+  const caseSensitive = options.caseSensitive === true;
+  const maxResults = clampPositiveInteger(options.maxResults, MAX_SEARCH_RESULTS, 1, MAX_SEARCH_RESULTS);
+  const maxFiles = clampPositiveInteger(options.maxFiles, MAX_SEARCH_FILES, 1, MAX_SEARCH_FILES);
+  const matches = [];
+  let scannedFiles = 0;
+  let truncated = false;
+
+  if (!query) {
+    return { projectRoot: root, query, matches, scannedFiles, truncated: false };
+  }
+
+  const needle = caseSensitive ? query : query.toLocaleLowerCase();
+
+  function walk(directory) {
+    if (matches.length >= maxResults || scannedFiles >= maxFiles) {
+      truncated = true;
+      return;
+    }
+
+    let entries;
+    try {
+      entries = fs.readdirSync(directory, { withFileTypes: true });
+    } catch {
+      return;
+    }
+
+    entries.sort(sortDirectoryEntries);
+
+    for (const entry of entries) {
+      if (matches.length >= maxResults || scannedFiles >= maxFiles) {
+        truncated = true;
+        return;
+      }
+
+      if (shouldIgnoreEntry(entry)) continue;
+
+      const fullPath = path.join(directory, entry.name);
+      if (entry.isDirectory() && !entry.isSymbolicLink()) {
+        walk(fullPath);
+        continue;
+      }
+
+      if (!entry.isFile()) continue;
+      const stat = safeStat(fullPath);
+      if (!stat || stat.size > MAX_SEARCH_FILE_BYTES) continue;
+
+      scannedFiles += 1;
+      let content;
+      try {
+        content = fs.readFileSync(fullPath, "utf8");
+      } catch {
+        continue;
+      }
+
+      if (content.includes("\0")) continue;
+
+      const lines = content.split(/\r?\n/);
+      for (let index = 0; index < lines.length; index += 1) {
+        const line = lines[index];
+        const haystack = caseSensitive ? line : line.toLocaleLowerCase();
+        const column = haystack.indexOf(needle);
+        if (column === -1) continue;
+
+        matches.push({
+          path: normalizeSlashes(path.relative(root, fullPath)),
+          line: index + 1,
+          column: column + 1,
+          text: line.length > 240 ? `${line.slice(0, 237)}...` : line,
+        });
+
+        if (matches.length >= maxResults) {
+          truncated = true;
+          return;
+        }
+      }
+    }
+  }
+
+  walk(root);
+
+  return { projectRoot: root, query, matches, scannedFiles, truncated };
+}
+
+function readWorkspaceFile(projectRoot, options = {}) {
+  const root = path.resolve(projectRoot || process.cwd());
+  const requestedPath = String(options.path || "");
+  const resolvedPath = resolveWorkspacePath(root, requestedPath);
+  const stat = safeStat(resolvedPath);
+
+  if (!stat || !stat.isFile()) {
+    throw new Error(`Path is not a file: ${requestedPath}`);
+  }
+
+  if (stat.size > MAX_PREVIEW_BYTES) {
+    return {
+      projectRoot: root,
+      path: normalizeSlashes(path.relative(root, resolvedPath)),
+      bytes: stat.size,
+      truncated: true,
+      content: "",
+      lines: [],
+    };
+  }
+
+  const content = fs.readFileSync(resolvedPath, "utf8");
+  if (content.includes("\0")) {
+    throw new Error(`Cannot preview binary file: ${requestedPath}`);
+  }
+
+  return {
+    projectRoot: root,
+    path: normalizeSlashes(path.relative(root, resolvedPath)),
+    bytes: stat.size,
+    truncated: false,
+    content,
+    lines: content.split(/\r?\n/).map((text, index) => ({ number: index + 1, text })),
+  };
+}
+
+function resolveWorkspacePath(root, requestedPath) {
+  const resolved = path.resolve(root, requestedPath || ".");
+  const relative = path.relative(root, resolved);
+  if (relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative))) {
+    return resolved;
+  }
+  throw new Error(`Path escapes workspace root: ${requestedPath}`);
+}
+
+function safeStat(filePath) {
+  try {
+    return fs.statSync(filePath);
+  } catch {
+    return null;
+  }
+}
+
+function clampPositiveInteger(value, fallback, min, max) {
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed)) return fallback;
+  return Math.min(max, Math.max(min, parsed));
 }
 
 function shouldIgnoreEntry(entry) {
@@ -514,13 +778,15 @@ function readGitStatus(projectRoot) {
       const lines = result.stdout.split(/\r?\n/).filter(Boolean);
       const branchLine = lines.find((line) => line.startsWith("## ")) || "";
       const branch = parseGitBranch(branchLine);
+      const files = parseGitStatusFiles(lines.filter((line) => !line.startsWith("## ")));
 
       resolve({
         available: true,
         branch: branch.name,
         ahead: branch.ahead,
         behind: branch.behind,
-        changed: lines.filter((line) => !line.startsWith("## ")).length,
+        changed: files.length,
+        files,
         raw: result.stdout,
       });
     }).catch((error) => {
@@ -534,6 +800,83 @@ function readGitStatus(projectRoot) {
       });
     });
   });
+}
+
+async function readGitDiff(projectRoot, options = {}) {
+  const root = path.resolve(projectRoot || process.cwd());
+  const filePath = String(options.path || "");
+  const resolvedPath = resolveWorkspacePath(root, filePath);
+  const relativePath = normalizeSlashes(path.relative(root, resolvedPath));
+  const diffParts = [];
+
+  const staged = await runGit(root, ["diff", "--cached", "--", relativePath]);
+  const unstaged = await runGit(root, ["diff", "--", relativePath]);
+
+  if (staged.exitCode === 0 && staged.stdout.trim()) {
+    diffParts.push(`# staged\n${staged.stdout}`);
+  }
+  if (unstaged.exitCode === 0 && unstaged.stdout.trim()) {
+    diffParts.push(`# unstaged\n${unstaged.stdout}`);
+  }
+
+  let diff = diffParts.join("\n");
+
+  if (!diff.trim() && safeStat(resolvedPath)?.isFile()) {
+    const content = fs.readFileSync(resolvedPath, "utf8");
+    if (!content.includes("\0")) {
+      diff = synthesizeUntrackedDiff(relativePath, content);
+    }
+  }
+
+  const truncated = Buffer.byteLength(diff, "utf8") > MAX_DIFF_BYTES;
+  if (truncated) {
+    diff = diff.slice(0, MAX_DIFF_BYTES) + "\n...diff truncated...\n";
+  }
+
+  return {
+    projectRoot: root,
+    path: relativePath,
+    diff,
+    truncated,
+  };
+}
+
+function synthesizeUntrackedDiff(filePath, content) {
+  const lines = content.split(/\r?\n/).slice(0, 400);
+  return [
+    `diff --git a/${filePath} b/${filePath}`,
+    "new file mode 100644",
+    "index 0000000..0000000",
+    "--- /dev/null",
+    `+++ b/${filePath}`,
+    `@@ -0,0 +1,${lines.length} @@`,
+    ...lines.map((line) => `+${line}`),
+  ].join("\n");
+}
+
+function parseGitStatusFiles(lines) {
+  return lines.map((line) => {
+    const rawStatus = line.slice(0, 2);
+    const rawPath = line.slice(3);
+    const renameParts = rawPath.split(" -> ");
+    const filePath = renameParts.at(-1) || rawPath;
+    return {
+      path: normalizeSlashes(filePath),
+      previousPath: renameParts.length > 1 ? normalizeSlashes(renameParts[0]) : "",
+      index: rawStatus[0],
+      worktree: rawStatus[1],
+      status: summarizeGitFileStatus(rawStatus),
+    };
+  }).filter((item) => item.path);
+}
+
+function summarizeGitFileStatus(rawStatus) {
+  if (rawStatus === "??") return "untracked";
+  if (rawStatus.includes("D")) return "deleted";
+  if (rawStatus.includes("R")) return "renamed";
+  if (rawStatus.includes("A")) return "added";
+  if (rawStatus.includes("M")) return "modified";
+  return "changed";
 }
 
 function readSkillsSnapshot(projectRoot) {
@@ -771,6 +1114,7 @@ if (app && typeof app.whenReady === "function" && (require.main === module || pr
 
 module.exports = {
   createDesktopSession,
+  createDesktopApprovalPrompt,
   createMainWindow,
   findTranscriptSession,
   getDevUrl,
@@ -779,13 +1123,20 @@ module.exports = {
   normalizeSettingsUpdates,
   openExternalUrl,
   readSessionList,
+  readGitDiff,
+  readWorkspaceFile,
   readSkillsSnapshot,
   readToolSnapshot,
   readPermissionSnapshot,
   readTeamSnapshot,
+  readGitStatus,
+  searchWorkspaceContent,
   readWorkspaceTree,
   registerIpcHandlers,
+  resolvePendingApproval,
+  resolvePendingApprovalsForSession,
   serializeSession,
+  shouldOpenDevTools,
   startElectronApp,
   summarizeTranscriptEntries,
 };

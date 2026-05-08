@@ -16,12 +16,18 @@ const props = defineProps({
   gitAhead: { type: Number, default: 0 },
   gitBehind: { type: Number, default: 0 },
   gitChanged: { type: Number, default: 0 },
+  gitFiles: { type: Array, default: () => [] },
+  selectedGitFile: { type: String, default: '' },
+  selectedGitDiff: { type: Object, default: null },
+  isLoadingGitDiff: { type: Boolean, default: false },
+  isBusy: { type: Boolean, default: false },
 });
 
-const emit = defineEmits(['select-tab']);
+const emit = defineEmits(['select-tab', 'select-git-file', 'git-assist']);
 
 const tabs = [
   { key: 'summary', label: '摘要' },
+  { key: 'git', label: 'Git' },
   { key: 'logs', label: '日志' },
   { key: 'files', label: '文件' },
   { key: 'tools', label: '工具' },
@@ -35,6 +41,27 @@ function formatTime(date) {
 
 const hasToolActivity = computed(() => props.toolCalls.some((tc) => tc && tc.status));
 const sessionMode = computed(() => (hasToolActivity.value ? '工具执行中' : '普通对话'));
+const hasSelectedDiff = computed(() => Boolean(String(props.selectedGitDiff?.diff || '').trim()));
+const diffLines = computed(() => String(props.selectedGitDiff?.diff || '').split(/\r?\n/).map((text, index) => ({
+  id: `${index}:${text}`,
+  text,
+  type: text.startsWith('+') && !text.startsWith('+++') ? 'added'
+    : text.startsWith('-') && !text.startsWith('---') ? 'removed'
+      : text.startsWith('@@') ? 'hunk'
+        : text.startsWith('diff --git') || text.startsWith('# ') ? 'header'
+          : 'context',
+})));
+
+function statusLabel(status) {
+  switch (status) {
+    case 'modified': return 'M';
+    case 'added': return 'A';
+    case 'deleted': return 'D';
+    case 'renamed': return 'R';
+    case 'untracked': return '?';
+    default: return '•';
+  }
+}
 </script>
 
 <template>
@@ -119,6 +146,80 @@ const sessionMode = computed(() => (hasToolActivity.value ? '工具执行中' : 
           <div class="info-card-header"><span>工作区</span></div>
           <div style="font-size:12px;font-family:var(--font-mono);color:var(--text-secondary);word-break:break-all;">
             {{ workspace || '当前项目根目录' }}
+          </div>
+        </div>
+      </div>
+
+      <!-- Git -->
+      <div v-if="activeTab === 'git'" class="git-panel">
+        <div class="info-card">
+          <div class="info-card-header">
+            <span>变更概览</span>
+            <span class="badge">{{ gitBranch }}</span>
+          </div>
+          <div class="info-card-row">
+            <span class="label">变更文件</span>
+            <span class="value accent">{{ gitFiles.length }}</span>
+          </div>
+          <div class="info-card-row" v-if="gitAhead > 0 || gitBehind > 0">
+            <span class="label">远端</span>
+            <span class="value">{{ gitAhead }}↑ {{ gitBehind }}↓</span>
+          </div>
+        </div>
+
+        <div class="git-file-list">
+          <button
+            v-for="file in gitFiles"
+            :key="file.path"
+            class="git-file-item"
+            :class="{ active: selectedGitFile === file.path }"
+            type="button"
+            @click="emit('select-git-file', file.path)"
+          >
+            <span class="git-file-status" :class="file.status">{{ statusLabel(file.status) }}</span>
+            <span class="git-file-path">{{ file.path }}</span>
+          </button>
+          <div v-if="gitFiles.length === 0" class="empty-panel">
+            没有工作区变更
+          </div>
+        </div>
+
+        <div class="git-diff-card">
+          <div class="git-diff-head">
+            <span>{{ selectedGitFile || '选择文件查看 diff' }}</span>
+            <span v-if="isLoadingGitDiff">loading…</span>
+          </div>
+          <div class="git-actions">
+            <button
+              class="git-action-btn"
+              type="button"
+              :disabled="!hasSelectedDiff || isBusy"
+              @click="emit('git-assist', 'explain')"
+            >
+              解释 diff
+            </button>
+            <button
+              class="git-action-btn"
+              type="button"
+              :disabled="!hasSelectedDiff || isBusy"
+              @click="emit('git-assist', 'commit')"
+            >
+              提交说明
+            </button>
+          </div>
+          <div v-if="selectedGitDiff?.truncated" class="empty-panel">Diff 已截断</div>
+          <div v-if="selectedGitDiff?.diff" class="git-diff-lines">
+            <div
+              v-for="line in diffLines"
+              :key="line.id"
+              class="git-diff-line"
+              :class="line.type"
+            >
+              {{ line.text || ' ' }}
+            </div>
+          </div>
+          <div v-else-if="selectedGitFile && !isLoadingGitDiff" class="empty-panel">
+            没有可显示的 diff
           </div>
         </div>
       </div>

@@ -7,6 +7,8 @@ const props = defineProps({
   isBusy: { type: Boolean, default: false },
   model: { type: String, default: '' },
   models: { type: Array, default: () => [] },
+  scopeLabel: { type: String, default: '' },
+  scopeTitle: { type: String, default: '' },
 });
 
 const emit = defineEmits(['interrupt', 'select-model']);
@@ -28,7 +30,10 @@ function selectModel(m) { emit('select-model', m); modelOpen.value = false; }
 
 <template>
   <header class="topbar">
-    <div class="topbar-title">{{ title }}</div>
+    <div class="topbar-title-group">
+      <div class="topbar-title">{{ title }}</div>
+      <div v-if="scopeLabel" class="topbar-scope" :title="scopeTitle">{{ scopeLabel }}</div>
+    </div>
     <div class="topbar-actions">
       <span class="status-badge" :class="status">
         <span class="status-dot"></span> {{ displayStatus }}

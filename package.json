@@ -44,7 +44,7 @@
   "author": "IdiotTIQS",
   "license": "MIT",
   "dependencies": {
-    "@anthropic-ai/sdk": "latest",
+    "@anthropic-ai/sdk": "^0.91.1",
     "@google/generative-ai": "^0.24.1",
     "dompurify": "^3.4.2",
     "markdown-it": "^14.1.1",

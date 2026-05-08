@@ -3,14 +3,23 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
+const { spawnSync } = require('node:child_process');
 
 const { config, memory } = require('../src');
 const {
+  createDesktopApprovalPrompt,
   normalizeSettingsUpdates,
   openExternalUrl,
   readSessionList,
+  readGitDiff,
+  readGitStatus,
+  readWorkspaceFile,
   readWorkspaceTree,
   registerIpcHandlers,
+  resolvePendingApproval,
+  resolvePendingApprovalsForSession,
+  searchWorkspaceContent,
+  shouldOpenDevTools,
 } = require('../desktop/main/index.js');
 
 function createTempProject() {
@@ -28,6 +37,14 @@ function createFakeIpc() {
   };
 }
 
+function runGit(cwd, args) {
+  const result = spawnSync('git', args, { cwd, encoding: 'utf8' });
+  if (result.status !== 0) {
+    throw new Error(result.stderr || result.stdout || `git ${args.join(' ')} failed`);
+  }
+  return result;
+}
+
 test('desktop main registers IPC handlers and creates mock sessions', async () => {
   const projectRoot = createTempProject();
   const ipc = createFakeIpc();
@@ -37,6 +54,8 @@ test('desktop main registers IPC handlers and creates mock sessions', async () =
   assert.ok(ipc.handlers.has('agent:createSession'));
   assert.ok(ipc.handlers.has('agent:resumeSession'));
   assert.ok(ipc.handlers.has('workspace:getSnapshot'));
+  assert.ok(ipc.handlers.has('workspace:search'));
+  assert.ok(ipc.handlers.has('workspace:readFile'));
   assert.ok(ipc.handlers.has('skills:getSnapshot'));
   assert.ok(ipc.handlers.has('tools:getSnapshot'));
   assert.ok(ipc.handlers.has('permissions:getSnapshot'));
@@ -53,6 +72,88 @@ test('desktop main registers IPC handlers and creates mock sessions', async () =
   assert.ok(created.settings.agent.apiKey === undefined || created.settings.agent.apiKey === '***');
 });
 
+test('desktop sendMessage retargets an existing session to the selected workspace', async () => {
+  const firstProjectRoot = createTempProject();
+  const secondProjectRoot = createTempProject();
+  const ipc = createFakeIpc();
+  const sentEvents = [];
+  const event = {
+    sender: {
+      send(channel, payload) {
+        sentEvents.push({ channel, payload });
+      },
+    },
+  };
+
+  fs.mkdirSync(path.join(firstProjectRoot, '.hax-agent'), { recursive: true });
+  fs.writeFileSync(path.join(firstProjectRoot, '.hax-agent', 'settings.json'), JSON.stringify({
+    agent: { provider: 'mock' },
+  }));
+  fs.mkdirSync(path.join(secondProjectRoot, '.hax-agent'), { recursive: true });
+  fs.writeFileSync(path.join(secondProjectRoot, '.hax-agent', 'settings.json'), JSON.stringify({
+    agent: { provider: 'mock' },
+  }));
+
+  registerIpcHandlers(ipc);
+  const created = await ipc.handlers.get('agent:createSession')(null, {
+    projectRoot: firstProjectRoot,
+  });
+
+  const result = await ipc.handlers.get('agent:sendMessage')(event, {
+    sessionId: created.id,
+    projectRoot: secondProjectRoot,
+    content: 'Use the new workspace',
+  });
+
+  assert.equal(result.id, created.id);
+  assert.equal(result.settings.projectRoot, path.resolve(secondProjectRoot));
+  assert.ok(sentEvents.some(({ payload }) => payload?.type === 'turn.completed'));
+});
+
+test('desktop approval prompt sends a request and resolves from renderer response', async () => {
+  const sentEvents = [];
+  const sender = {
+    send(channel, payload) {
+      sentEvents.push({ channel, payload });
+    },
+  };
+  const prompt = createDesktopApprovalPrompt(sender, { id: 'session-1' });
+  const approvalPromise = prompt({
+    toolName: 'file.write',
+    toolArgs: { path: 'README.md', content: '# Test\n' },
+    level: 'ask',
+    description: 'Write README.md',
+    toolKey: 'file.write',
+  });
+  const approval = sentEvents.find(({ channel }) => channel === 'approval:request').payload;
+
+  assert.equal(approval.toolName, 'file.write');
+  assert.equal(approval.level, 'ask');
+  assert.equal(approval.sessionId, 'session-1');
+  assert.equal(resolvePendingApproval(approval.id, 'approve').resolved, true);
+  assert.equal(await approvalPromise, 'approve');
+});
+
+test('desktop approval prompt can be denied when a session is interrupted', async () => {
+  const sentEvents = [];
+  const sender = {
+    send(channel, payload) {
+      sentEvents.push({ channel, payload });
+    },
+  };
+  const prompt = createDesktopApprovalPrompt(sender, { id: 'session-interrupt' });
+  const approvalPromise = prompt({
+    toolName: 'shell.run',
+    toolArgs: { command: 'npm test' },
+    level: 'ask',
+    description: 'Run npm test',
+    toolKey: 'shell.run:npm',
+  });
+
+  assert.equal(resolvePendingApprovalsForSession('session-interrupt', 'deny'), 1);
+  assert.equal(await approvalPromise, 'deny');
+});
+
 test('desktop external links only open http and https URLs', async () => {
   const opened = [];
   const opener = {
@@ -67,6 +168,24 @@ test('desktop external links only open http and https URLs', async () => {
   assert.deepEqual(opened, ['https://example.com/path']);
   await assert.rejects(() => openExternalUrl('javascript:alert(1)', opener), /Unsupported external URL protocol/);
   await assert.rejects(() => openExternalUrl('file:///etc/passwd', opener), /Unsupported external URL protocol/);
+});
+
+test('desktop devtools open only when explicitly enabled', () => {
+  const previous = process.env.HAX_AGENT_DESKTOP_DEVTOOLS;
+
+  try {
+    delete process.env.HAX_AGENT_DESKTOP_DEVTOOLS;
+    assert.equal(shouldOpenDevTools(), false);
+
+    process.env.HAX_AGENT_DESKTOP_DEVTOOLS = '0';
+    assert.equal(shouldOpenDevTools(), false);
+
+    process.env.HAX_AGENT_DESKTOP_DEVTOOLS = '1';
+    assert.equal(shouldOpenDevTools(), true);
+  } finally {
+    if (previous === undefined) delete process.env.HAX_AGENT_DESKTOP_DEVTOOLS;
+    else process.env.HAX_AGENT_DESKTOP_DEVTOOLS = previous;
+  }
 });
 
 test('desktop workspace snapshot reads real files and hides mock transcripts', async () => {
@@ -250,6 +369,53 @@ test('desktop workspace tree keeps files as leaves', () => {
   assert.equal(nested.type, 'directory');
   assert.equal(file.type, 'file');
   assert.equal('children' in file, false);
+});
+
+test('desktop workspace content search finds text and skips ignored runtime folders', () => {
+  const projectRoot = createTempProject();
+  fs.mkdirSync(path.join(projectRoot, 'src'), { recursive: true });
+  fs.mkdirSync(path.join(projectRoot, '.hax-agent'), { recursive: true });
+  fs.writeFileSync(path.join(projectRoot, 'src', 'index.js'), 'const needle = "visible";\n');
+  fs.writeFileSync(path.join(projectRoot, '.hax-agent', 'secret.txt'), 'needle hidden\n');
+
+  const result = searchWorkspaceContent(projectRoot, { query: 'needle' });
+
+  assert.deepEqual(result.matches.map((match) => match.path), ['src/index.js']);
+  assert.equal(result.matches[0].line, 1);
+  assert.equal(result.truncated, false);
+});
+
+test('desktop workspace file preview reads text and rejects paths outside root', () => {
+  const projectRoot = createTempProject();
+  fs.writeFileSync(path.join(projectRoot, 'README.md'), '# Hello\nLine two\n');
+
+  const preview = readWorkspaceFile(projectRoot, { path: 'README.md' });
+
+  assert.equal(preview.path, 'README.md');
+  assert.equal(preview.lines[0].text, '# Hello');
+  assert.throws(() => readWorkspaceFile(projectRoot, { path: '..\\outside.txt' }), /escapes workspace root/);
+});
+
+test('desktop git status lists changed files and reads file diff', async () => {
+  const projectRoot = createTempProject();
+  runGit(projectRoot, ['init']);
+  runGit(projectRoot, ['config', 'user.email', 'test@example.com']);
+  runGit(projectRoot, ['config', 'user.name', 'Test User']);
+  fs.writeFileSync(path.join(projectRoot, 'tracked.txt'), 'old\n');
+  runGit(projectRoot, ['add', 'tracked.txt']);
+  runGit(projectRoot, ['commit', '-m', 'initial']);
+  fs.writeFileSync(path.join(projectRoot, 'tracked.txt'), 'old\nnew\n');
+  fs.writeFileSync(path.join(projectRoot, 'fresh.txt'), 'hello\n');
+
+  const status = await readGitStatus(projectRoot);
+  const diff = await readGitDiff(projectRoot, { path: 'tracked.txt' });
+  const untrackedDiff = await readGitDiff(projectRoot, { path: 'fresh.txt' });
+
+  assert.equal(status.available, true);
+  assert.ok(status.files.some((file) => file.path === 'tracked.txt' && file.status === 'modified'));
+  assert.ok(status.files.some((file) => file.path === 'fresh.txt' && file.status === 'untracked'));
+  assert.match(diff.diff, /\+new/);
+  assert.match(untrackedDiff.diff, /new file mode/);
 });
 
 test('desktop insight snapshots expose skills, tools, permissions, and teams', async () => {

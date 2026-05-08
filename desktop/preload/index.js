@@ -51,6 +51,14 @@ const workspace = {
   chooseDirectory(options) {
     return ipcRenderer.invoke("workspace:chooseDirectory", options);
   },
+
+  search(options) {
+    return ipcRenderer.invoke("workspace:search", options);
+  },
+
+  readFile(options) {
+    return ipcRenderer.invoke("workspace:readFile", options);
+  },
 };
 
 const skills = {
@@ -69,11 +77,34 @@ const permissions = {
   getSnapshot(options) {
     return ipcRenderer.invoke("permissions:getSnapshot", options);
   },
+
+  respondApproval(payload) {
+    return ipcRenderer.invoke("approval:respond", payload);
+  },
+
+  onApprovalRequest(listener) {
+    if (typeof listener !== "function") {
+      throw new TypeError("permissions.onApprovalRequest requires a listener function");
+    }
+
+    const wrapped = (_event, approvalRequest) => listener(approvalRequest);
+    ipcRenderer.on("approval:request", wrapped);
+
+    return () => {
+      ipcRenderer.removeListener("approval:request", wrapped);
+    };
+  },
 };
 
 const team = {
   getSnapshot(options) {
     return ipcRenderer.invoke("team:getSnapshot", options);
+  },
+};
+
+const git = {
+  getDiff(options) {
+    return ipcRenderer.invoke("git:getDiff", options);
   },
 };
 
@@ -101,9 +132,14 @@ contextBridge.exposeInMainWorld("haxAgent", {
   updateSettings: settings.update,
   getWorkspaceSnapshot: workspace.getSnapshot,
   chooseWorkspaceDirectory: workspace.chooseDirectory,
+  searchWorkspace: workspace.search,
+  readWorkspaceFile: workspace.readFile,
   getSkillsSnapshot: skills.getSnapshot,
   getToolsSnapshot: tools.getSnapshot,
   getPermissionsSnapshot: permissions.getSnapshot,
+  respondApproval: permissions.respondApproval,
+  onApprovalRequest: permissions.onApprovalRequest,
   getTeamSnapshot: team.getSnapshot,
+  getGitDiff: git.getDiff,
   openExternal: shell.openExternal,
 });

@@ -16,7 +16,6 @@ const {
   createThinkingChunk,
   extractToolError,
   parseToolResultContent,
-  getPermissionLevel,
   stripToolCallMarkup,
   parseDsmlToolCalls,
   splitPotentialDsmlPrefix,
@@ -249,35 +248,6 @@ class OpenAIProvider extends ChatProvider {
       }
 
       messages.push(message);
-
-      const permissionResults = await Promise.all(
-        sortedToolCalls.map(async (tc) => {
-          const toolName = toRegistryToolName(tc.function.name);
-          const level = getPermissionLevel(toolRegistry, toolName);
-          if (level === "allow") {
-            return null;
-          }
-          const toolInput = parseToolInput(tc.function.arguments);
-          return { tc, toolName, level, toolInput };
-        })
-      );
-
-      const needsApproval = permissionResults.filter(Boolean);
-      if (needsApproval.length > 0) {
-        for (const { tc, toolName, level, toolInput } of needsApproval) {
-          const toolResult = {
-            type: "tool_result",
-            tool_use_id: tc.id,
-            toolName,
-            requiresApproval: true,
-            level,
-            input: toolInput,
-            description: tc.function?.description,
-          };
-          yield toolResult;
-        }
-        return;
-      }
 
       for (const tc of sortedToolCalls) {
         const toolName = toRegistryToolName(tc.function.name);
