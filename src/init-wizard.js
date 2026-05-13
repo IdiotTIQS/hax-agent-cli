@@ -69,6 +69,10 @@ async function runInitWizard(options = {}) {
       output.write('\n');
     }
 
+    // Quick mode: ask if they want defaults for everything except provider+key
+    const quickAnswer = await question(t('init.quickMode'));
+    const quickMode = readYesNo(quickAnswer, true);
+
     const provider = await chooseOption(question, output, {
       name: t('init.provider'),
       options: PROVIDERS,
@@ -84,17 +88,49 @@ async function runInitWizard(options = {}) {
   let apiUrl;
 
   if (provider !== 'mock') {
-    const keyHint = detectedApiKey
-      ? t('init.keyDetected')
-      : t('init.keyLater');
-    output.write(`${keyHint}\n`);
-    apiKey = (await question(t('init.apiKeyPrompt', { provider: providerInfo.label }))).trim();
+    if (detectedApiKey) {
+      output.write(`${t('init.keyDetected')}\n`);
+      apiKey = detectedApiKey;
+    } else {
+      const keyHint = t('init.keyLater');
+      output.write(`${keyHint}\n`);
+      apiKey = (await question(t('init.apiKeyPrompt', { provider: providerInfo.label }))).trim();
+    }
 
-    const urlHint = detectedApiUrl
-      ? t('init.apiUrlPromptDetected', { url: detectedApiUrl })
-      : t('init.apiUrlPromptDefault');
-    apiUrl = (await question(urlHint)).trim();
+    if (detectedApiUrl) {
+      output.write(`${t('init.apiUrlPromptDetected', { url: detectedApiUrl })}\n`);
+      apiUrl = detectedApiUrl;
+    } else if (!quickMode) {
+      apiUrl = (await question(t('init.apiUrlPromptDefault'))).trim();
+    }
   }
+
+    if (quickMode) {
+      output.write(`\n${t('init.quickModeActive')}\n`);
+      const model = providerInfo.defaultModel;
+      const locale = initialLocale;
+      const permissionMode = 'normal';
+      const memoryEnabled = true;
+      const contextEnabled = true;
+      const fileContextEnabled = true;
+
+      const updates = {
+        setup: { initialized: true },
+        agent: { provider, model },
+        ui: { locale },
+        permissions: { mode: permissionMode },
+        memory: { enabled: memoryEnabled },
+        context: { enabled: contextEnabled, reserveOutputTokens: 8192 },
+        fileContext: { enabled: fileContextEnabled },
+      };
+      if (apiKey) updates.agent.apiKey = apiKey;
+      if (apiUrl) updates.agent.apiUrl = apiUrl;
+
+      const saved = updateUserSettings(updates, { env });
+      output.write(`\n${t('init.complete', { path: saved.path })}\n`);
+      output.write(`${t('init.next')}\n\n`);
+      return { saved: true, path: saved.path, settings: updates };
+    }
 
     const modelInput = (await question(t('init.defaultModel', { model: providerInfo.defaultModel }))).trim();
     const model = modelInput || providerInfo.defaultModel;

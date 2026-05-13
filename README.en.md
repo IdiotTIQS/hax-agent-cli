@@ -132,6 +132,9 @@ hax-agent init
 # List available models for the current provider
 hax-agent models
 
+# Run diagnostics (script-friendly)
+hax-agent doctor --json
+
 # Output the auth-refactor team plan
 hax-agent team auth-refactor
 
@@ -148,6 +151,7 @@ hax-agent            # Available from any directory
 | `npm run desktop:dev` | Start the Electron + Vue desktop app in development mode |
 | `npm run desktop:build` | Build the desktop frontend assets |
 | `npm run auth:team` | Output the auth-refactor team plan |
+| `npm run lint` | Run syntax checks for JS/MJS files |
 | `npm test` | Run the test suite |
 
 ---
@@ -161,13 +165,28 @@ Type the following slash commands in the Shell:
 | `/help` | View all available commands |
 | `/exit` or `/quit` | Exit the Shell |
 | `/clear` or `/new` | Clear the current context and start a new session |
+| `/compact` | Compact the current conversation to reduce context usage |
 | `/tools` | List available local tools |
+| `/skills [list|usage]` | List skills or view usage statistics |
+| `/skillify [description]` | Capture the current session as a reusable skill |
 | `/agents` | View built-in agent roles |
+| `/team [command]` | Manage agent teams, tasks, and messages |
 | `/models` | List available models for the current provider |
 | `/model <id-or-number>` | Switch models |
 | `/provider <name>` | Switch AI provider (`anthropic`, `openai`, `google`) |
 | `/api-url <base-url>` | Set the API Base URL |
 | `/api-key <key>` | Set the API Key |
+| `/language <en|zh-CN|zh-TW|ru>` | Switch CLI language |
+| `/cost` | View token usage and cost for this session |
+| `/sessions` | List previous sessions |
+| `/resume [session-id]` | Resume a previous session |
+| `/config` | Show current configuration |
+| `/doctor [--json]` | Run diagnostics; `--json` prints machine-readable output |
+| `/theme` | Toggle terminal color theme |
+| `/vim` | Toggle Vim keybindings mode |
+| `/memory [list|read|write|delete]` | Manage persistent memory |
+| `/permissions [status|mode|reset]` | View or manage tool permissions |
+| `/update [install]` | Check for or install CLI updates |
 
 ---
 
@@ -292,7 +311,7 @@ The system automatically tracks each skill's usage frequency and last-used time,
 | `OPENAI_API_KEY` | OpenAI API Key | — |
 | `GOOGLE_API_KEY` | Google API Key | — |
 | `HAX_AGENT_API_URL` / `ANTHROPIC_BASE_URL` / `OPENAI_BASE_URL` / `GOOGLE_BASE_URL` | API Base URL | — |
-| `HAX_AGENT_MODEL` / `AI_MODEL` | Model ID | `claude-sonnet-4-20250514` |
+| `HAX_AGENT_MODEL` | Model ID | `claude-sonnet-4-20250514` |
 | `HAX_AGENT_MAX_TURNS` | Maximum conversation turns | `20` |
 | `HAX_AGENT_TEMPERATURE` | Sampling temperature | `0.2` |
 | `HAX_AGENT_MAX_TOKENS` | Maximum generation tokens | — |
@@ -300,16 +319,30 @@ The system automatically tracks each skill's usage frequency and last-used time,
 | `HAX_AGENT_MOCK_DELAY_MS` | Delay in milliseconds for mock mode | `0` |
 | `HAX_AGENT_MOCK_TOOL_TRACE` | Mock tool call trace (`1` to enable) | — |
 | `HAX_AGENT_MEMORY_ENABLED` | Enable memory | `true` |
-| `HAX_AGENT_MEMORY_DIR` | Memory directory | `.hax-agent/memory` |
+| `HAX_AGENT_MEMORY_DIR` | Memory directory | `memory` under the system app data directory |
 | `HAX_AGENT_MEMORY_MAX_ITEMS` | Maximum memory items | `20` |
-| `HAX_AGENT_SESSION_DIR` | Session directory | `.hax-agent/sessions` |
+| `HAX_AGENT_SESSION_DIR` | Session directory | `sessions` under the system app data directory |
 | `HAX_AGENT_TRANSCRIPT_LIMIT` | Transcript save/read limit | `100` |
 | `HAX_AGENT_INCLUDE_SETTINGS` | Include settings in prompt | `true` |
 | `HAX_AGENT_INCLUDE_MEMORY` | Include memory in prompt | `true` |
 | `HAX_AGENT_INCLUDE_TRANSCRIPT` | Include recent conversation in prompt | `true` |
 | `HAX_AGENT_MAX_TRANSCRIPT_MESSAGES` | Maximum conversation messages in prompt | `20` |
+| `HAX_AGENT_CONTEXT_ENABLED` | Enable context window management | `true` |
+| `HAX_AGENT_CONTEXT_WINDOW_TOKENS` | Context window token budget | Inferred from the active model |
+| `HAX_AGENT_CONTEXT_RESERVE_OUTPUT_TOKENS` | Reserved output tokens | `8192` |
+| `HAX_AGENT_CONTEXT_CHARS_PER_TOKEN` | Character-to-token estimate | `4` |
+| `HAX_AGENT_FILE_CONTEXT_ENABLED` | Enable relevant file context recall | `true` |
+| `HAX_AGENT_FILE_CONTEXT_MAX_FILES` | Maximum recalled files per turn | `8` |
+| `HAX_AGENT_FILE_CONTEXT_MAX_INDEX_FILES` | Maximum files scanned for indexing | `2000` |
+| `HAX_AGENT_FILE_CONTEXT_MAX_FILE_SIZE` | Max file size for indexing | `512000` |
+| `HAX_AGENT_FILE_CONTEXT_MAX_BYTES_PER_FILE` | Max injected bytes per file | `32000` |
+| `HAX_AGENT_FILE_CONTEXT_MAX_TOTAL_BYTES` | Max total injected file bytes | `120000` |
+| `HAX_AGENT_PERMISSIONS_MODE` | Default permission mode (`normal`, `yolo`) | `normal` |
+| `HAX_AGENT_UPDATES_AUTO_INSTALL` | Auto-install CLI updates | `false` |
+| `HAX_AGENT_DESKTOP_WORKSPACE` | Default desktop workspace | — |
+| `HAX_AGENT_LOCALE` / `HAX_AGENT_LANGUAGE` | CLI language | `en` |
 | `HAX_AGENT_SHELL_ENABLED` | Enable shell tool | `true` |
-| `HAX_AGENT_SHELL_COMMANDS` | Allowed commands (comma-separated) | `node,npm,git` |
+| `HAX_AGENT_SHELL_COMMANDS` | Allowed commands (comma-separated) | See the default allowlist in `src/config.js` |
 | `HAX_AGENT_SHELL_TIMEOUT_MS` | Shell command timeout in milliseconds | `10000` |
 | `HAX_AGENT_SHELL_MAX_BUFFER` | Shell command max output bytes | `200000` |
 | `HAX_AGENT_PROJECT_ROOT` | Project root directory (overrides `process.cwd()`) | — |

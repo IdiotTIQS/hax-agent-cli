@@ -19,7 +19,7 @@ const { createTranslator } = require('./i18n');
 
 const VERSION = require('../package.json').version;
 
-const KNOWN_COMMANDS = ['chat', 'init', 'models', 'agents', 'team', 'resume', 'sessions', 'help', '--help', '-h'];
+const KNOWN_COMMANDS = ['chat', 'init', 'models', 'agents', 'team', 'resume', 'sessions', 'config', 'help', '--help', '-h'];
 const TOP_LEVEL_COMMAND_SUGGESTIONS = KNOWN_COMMANDS
   .filter((command) => !command.startsWith('-'))
   .map((command) => ({ match: command, suggest: command }));
@@ -41,6 +41,7 @@ function main(argv = process.argv) {
       console.log('  hax-agent help                 Show this help');
       console.log('  hax-agent sessions             List previous sessions');
       console.log('  hax-agent resume [session-id]  Resume a previous session');
+      console.log('  hax-agent config [edit]        Show or edit configuration');
       break;
     case 'init': runInitCommand(args.slice(1)); break;
     case 'models': runModelsCommand(args.slice(1)); break;
@@ -48,6 +49,7 @@ function main(argv = process.argv) {
     case 'team': runTeamCommand(args.slice(1)); break;
     case 'resume': runResumeCommand(args.slice(1)); break;
     case 'sessions': runSessionsCommand(args.slice(1)); break;
+    case 'config': runConfigCommand(args.slice(1)); break;
     default:
       if (primary && !KNOWN_COMMANDS.includes(primary)) {
         const suggestion = suggestCommand(primary, TOP_LEVEL_COMMAND_SUGGESTIONS);
@@ -126,6 +128,42 @@ function runTeamCommand(args) {
       console.error(`Error: ${err.message}`);
       process.exit(1);
     });
+}
+
+function runConfigCommand(args) {
+  const { resolveSettings } = require('./config');
+  const resolved = resolveSettings();
+  const settings = resolved.settings;
+  const configPath = resolved.sources.find(s => s.type === 'user')?.path;
+
+  if (args[0] === 'edit') {
+    // Open config file in default editor
+    const editor = process.env.EDITOR || process.env.VISUAL || (process.platform === 'win32' ? 'notepad' : 'vi');
+    const child = spawn(editor, configPath ? [configPath] : [], {
+      stdio: 'inherit',
+      shell: true,
+    });
+    child.on('exit', (code) => {
+      if (code !== 0) console.error(`Editor exited with code ${code}`);
+    });
+    return;
+  }
+
+  // Show config
+  const { getLocaleLabel, normalizeLocale } = require('./i18n');
+  const locale = normalizeLocale(settings.ui?.locale);
+  console.log('Current configuration:');
+  console.log(`  Provider:     ${settings.agent?.provider || 'not set'}`);
+  console.log(`  Model:        ${settings.agent?.model || 'not set'}`);
+  console.log(`  API Key:      ${settings.agent?.apiKey ? '********' : 'not set'}`);
+  console.log(`  API URL:      ${settings.agent?.apiUrl || 'default'}`);
+  console.log(`  Language:     ${getLocaleLabel(locale)} (${locale})`);
+  console.log(`  Max turns:    ${settings.agent?.maxTurns ?? 20}`);
+  console.log(`  Temperature:  ${settings.agent?.temperature ?? 0.2}`);
+  console.log(`  Shell tools:  ${settings.tools?.shell?.enabled !== false ? 'enabled' : 'disabled'}`);
+  console.log(`  Memory:       ${settings.memory?.enabled !== false ? 'enabled' : 'disabled'}`);
+  if (configPath) console.log(`\nConfig file: ${configPath}`);
+  console.log(`\nRun 'hax-agent config edit' to edit, or 'hax-agent init' to re-run setup.`);
 }
 
 function runResumeCommand(args) {

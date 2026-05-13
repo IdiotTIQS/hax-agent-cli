@@ -85,7 +85,7 @@ test('runs the init wizard and saves settings', () => {
   const result = spawnSync(process.execPath, [cliPath, 'init'], {
     encoding: 'utf8',
     env: createIsolatedEnv({ HAX_AGENT_USER_SETTINGS: settingsPath }),
-    input: '2\nsk-test\nhttps://api.example.test/v1\ncustom-model\ny\n\n8192\nn\n\n1\n1\nn\n',
+    input: 'n\n2\nsk-test\nhttps://api.example.test/v1\ncustom-model\ny\n\n8192\nn\n\n1\n1\nn\n',
   });
   const saved = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
 

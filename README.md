@@ -132,6 +132,9 @@ hax-agent init
 # 查看当前 Provider 可用模型
 hax-agent models
 
+# 运行诊断（可用于脚本）
+hax-agent doctor --json
+
 # 输出认证模块重构团队计划
 hax-agent team auth-refactor
 
@@ -148,6 +151,7 @@ hax-agent            # 任意目录下可用
 | `npm run desktop:dev` | 启动 Electron + Vue 桌面端开发模式 |
 | `npm run desktop:build` | 构建桌面端前端资源 |
 | `npm run auth:team` | 输出认证重构团队计划 |
+| `npm run lint` | 对 JS/MJS 文件运行语法检查 |
 | `npm test` | 运行测试套件 |
 
 ---
@@ -161,13 +165,28 @@ hax-agent            # 任意目录下可用
 | `/help` | 查看所有可用命令 |
 | `/exit` 或 `/quit` | 退出 Shell |
 | `/clear` 或 `/new` | 清空当前上下文并新建会话 |
+| `/compact` | 压缩当前对话，降低上下文占用 |
 | `/tools` | 查看可用本地工具列表 |
+| `/skills [list|usage]` | 列出 Skills 或查看使用统计 |
+| `/skillify [description]` | 将当前会话捕获为可复用 Skill |
 | `/agents` | 查看内置 Agent 角色 |
+| `/team [command]` | 管理 Agent 团队、任务和消息 |
 | `/models` | 查看当前 Provider 可用模型 |
 | `/model <id-or-number>` | 切换模型 |
 | `/provider <name>` | 切换 AI Provider（`anthropic`、`openai`、`google`） |
 | `/api-url <base-url>` | 设置 API Base URL |
 | `/api-key <key>` | 设置 API Key |
+| `/language <en|zh-CN|zh-TW|ru>` | 切换 CLI 语言 |
+| `/cost` | 查看当前会话 token 和费用 |
+| `/sessions` | 列出历史会话 |
+| `/resume [session-id]` | 恢复历史会话 |
+| `/config` | 查看当前配置 |
+| `/doctor [--json]` | 运行环境诊断，`--json` 输出机器可读结果 |
+| `/theme` | 切换终端颜色主题 |
+| `/vim` | 切换 Vim 键位模式 |
+| `/memory [list|read|write|delete]` | 管理持久化记忆 |
+| `/permissions [status|mode|reset]` | 查看或管理工具权限 |
+| `/update [install]` | 检查或安装 CLI 更新 |
 
 ---
 
@@ -292,7 +311,7 @@ AI 会分析会话内容，识别可复用的步骤，并引导你创建 SKILL.m
 | `OPENAI_API_KEY` | OpenAI API Key | — |
 | `GOOGLE_API_KEY` | Google API Key | — |
 | `HAX_AGENT_API_URL` / `ANTHROPIC_BASE_URL` / `OPENAI_BASE_URL` / `GOOGLE_BASE_URL` | API Base URL | — |
-| `HAX_AGENT_MODEL` / `AI_MODEL` | 模型 ID | `claude-sonnet-4-20250514` |
+| `HAX_AGENT_MODEL` | 模型 ID | `claude-sonnet-4-20250514` |
 | `HAX_AGENT_MAX_TURNS` | 最大对话轮数 | `20` |
 | `HAX_AGENT_TEMPERATURE` | 采样温度 | `0.2` |
 | `HAX_AGENT_MAX_TOKENS` | 最大生成 Token 数 | — |
@@ -300,16 +319,30 @@ AI 会分析会话内容，识别可复用的步骤，并引导你创建 SKILL.m
 | `HAX_AGENT_MOCK_DELAY_MS` | Mock 模式下的延迟毫秒数 | `0` |
 | `HAX_AGENT_MOCK_TOOL_TRACE` | Mock 工具调用追踪（`1` 启用） | — |
 | `HAX_AGENT_MEMORY_ENABLED` | 是否启用记忆 | `true` |
-| `HAX_AGENT_MEMORY_DIR` | 记忆目录 | `.hax-agent/memory` |
+| `HAX_AGENT_MEMORY_DIR` | 记忆目录 | 系统应用数据目录下的 `memory` |
 | `HAX_AGENT_MEMORY_MAX_ITEMS` | 记忆最大条目数 | `20` |
-| `HAX_AGENT_SESSION_DIR` | 会话目录 | `.hax-agent/sessions` |
+| `HAX_AGENT_SESSION_DIR` | 会话目录 | 系统应用数据目录下的 `sessions` |
 | `HAX_AGENT_TRANSCRIPT_LIMIT` | Transcript 保存/读取限制 | `100` |
 | `HAX_AGENT_INCLUDE_SETTINGS` | 提示词中是否包含设置 | `true` |
 | `HAX_AGENT_INCLUDE_MEMORY` | 提示词中是否包含记忆 | `true` |
 | `HAX_AGENT_INCLUDE_TRANSCRIPT` | 提示词中是否包含最近对话 | `true` |
 | `HAX_AGENT_MAX_TRANSCRIPT_MESSAGES` | 提示词中最大对话消息数 | `20` |
+| `HAX_AGENT_CONTEXT_ENABLED` | 是否启用上下文窗口管理 | `true` |
+| `HAX_AGENT_CONTEXT_WINDOW_TOKENS` | 上下文窗口 token 数 | 按模型自动推断 |
+| `HAX_AGENT_CONTEXT_RESERVE_OUTPUT_TOKENS` | 预留输出 token 数 | `8192` |
+| `HAX_AGENT_CONTEXT_CHARS_PER_TOKEN` | 字符到 token 的估算比例 | `4` |
+| `HAX_AGENT_FILE_CONTEXT_ENABLED` | 是否启用相关文件上下文召回 | `true` |
+| `HAX_AGENT_FILE_CONTEXT_MAX_FILES` | 每轮最多召回文件数 | `8` |
+| `HAX_AGENT_FILE_CONTEXT_MAX_INDEX_FILES` | 文件索引最多扫描文件数 | `2000` |
+| `HAX_AGENT_FILE_CONTEXT_MAX_FILE_SIZE` | 文件索引单文件大小上限 | `512000` |
+| `HAX_AGENT_FILE_CONTEXT_MAX_BYTES_PER_FILE` | 注入提示词的单文件字节上限 | `32000` |
+| `HAX_AGENT_FILE_CONTEXT_MAX_TOTAL_BYTES` | 注入提示词的总字节上限 | `120000` |
+| `HAX_AGENT_PERMISSIONS_MODE` | 默认权限模式（`normal`、`yolo`） | `normal` |
+| `HAX_AGENT_UPDATES_AUTO_INSTALL` | 是否自动安装更新 | `false` |
+| `HAX_AGENT_DESKTOP_WORKSPACE` | 桌面端默认工作区 | — |
+| `HAX_AGENT_LOCALE` / `HAX_AGENT_LANGUAGE` | CLI 语言 | `en` |
 | `HAX_AGENT_SHELL_ENABLED` | 是否启用 shell 工具 | `true` |
-| `HAX_AGENT_SHELL_COMMANDS` | 允许的命令列表（逗号分隔） | `node,npm,git` |
+| `HAX_AGENT_SHELL_COMMANDS` | 允许的命令列表（逗号分隔） | 见 `src/config.js` 默认 allowlist |
 | `HAX_AGENT_SHELL_TIMEOUT_MS` | Shell 命令超时毫秒数 | `10000` |
 | `HAX_AGENT_SHELL_MAX_BUFFER` | Shell 命令最大输出字节数 | `200000` |
 | `HAX_AGENT_PROJECT_ROOT` | 项目根目录（覆盖 `process.cwd()`） | — |

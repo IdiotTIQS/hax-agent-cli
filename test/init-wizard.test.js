@@ -53,7 +53,7 @@ test('manual init stores settings in the requested user settings path', async ()
   const { runInitWizard } = require('../src/init-wizard');
   const settingsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hax-agent-init-unit-'));
   const settingsPath = path.join(settingsDir, 'settings.json');
-  const answers = ['3', 'key-google', 'https://google.example/v1', '', 'y', '1000000', '32768', 'y', 'Prefer concise answers.', '1', '2', 'y'];
+  const answers = ['n', '3', 'key-google', 'https://google.example/v1', '', 'y', '1000000', '32768', 'y', 'Prefer concise answers.', '1', '2', 'y'];
 
   await runInitWizard({
     ask: async () => answers.shift() || '',
@@ -81,7 +81,7 @@ test('manual init can use an injected selector for interactive choices', async (
   const { runInitWizard } = require('../src/init-wizard');
   const settingsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hax-agent-init-select-'));
   const settingsPath = path.join(settingsDir, 'settings.json');
-  const answers = ['key-openai', '', '', '', '', '', 'n', '', 'n'];
+  const answers = ['n', 'key-openai', '', '', '', '', '', 'n', '', 'n'];
   const selections = {
     Provider: 'openai',
     Language: 'zh-CN',
