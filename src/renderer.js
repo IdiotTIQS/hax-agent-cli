@@ -776,10 +776,20 @@ function formatToolSuccessDetail(chunk) {
 }
 
 function formatFileModificationNotice(chunk) {
-  if (chunk.name !== 'file.write' || chunk.isError || !chunk.data?.path || !chunk.data?.change) {
-    return null;
+  // file.write path (existing)
+  if (chunk.name === 'file.write' && !chunk.isError && chunk.data?.path && chunk.data?.change) {
+    return formatWriteModificationNotice(chunk);
   }
 
+  // file.edit path (new — render diff inline)
+  if (chunk.name === 'file.edit' && !chunk.isError && chunk.data?.path && chunk.data?.changed) {
+    return formatEditModificationNotice(chunk);
+  }
+
+  return null;
+}
+
+function formatWriteModificationNotice(chunk) {
   const change = chunk.data.change;
   const action = change.operation === 'create' ? 'Create' : 'Update';
   const pathDisplay = `${THEME.toolIndicator}${action}${ANSI.reset}(${THEME.accent}${formatDisplayPath(chunk.data.path)}${ANSI.reset})`;
@@ -789,20 +799,56 @@ function formatFileModificationNotice(chunk) {
   ];
 
   if (change.preview && Array.isArray(change.preview) && change.preview.length > 0) {
-    const maxPreview = 6;
-    const preview = change.preview.slice(0, maxPreview);
-    for (const item of preview) {
-      const lineNum = String(item.line).padStart(4);
-      const marker = item.marker === '+' ? THEME.diffAdd : item.marker === '-' ? THEME.diffRemove : THEME.diffContext;
-      const textColor = item.marker === '+' ? THEME.diffAdd : item.marker === '-' ? THEME.diffRemove : THEME.diffContext;
-      lines.push(`    ${THEME.dim}${lineNum} ${ANSI.reset}${marker}${item.marker}${ANSI.reset} ${textColor}${item.text || ''}${ANSI.reset}`);
+    renderPreviewLines(lines, change.preview);
+  }
+
+  return lines;
+}
+
+function formatEditModificationNotice(chunk) {
+  const data = chunk.data;
+  const applied = data.applied !== false;
+  const action = applied ? 'Edit' : 'Preview';
+  const pathDisplay = `${THEME.toolIndicator}${action}${ANSI.reset}(${THEME.accent}${formatDisplayPath(data.path)}${ANSI.reset})`;
+  const summary = data.summary || `Modified ${data.oldLines || 1} → ${data.newLines || 1} lines`;
+  const lines = [
+    pathDisplay,
+    `  ${THEME.border}└─${ANSI.reset}  ${summary}`,
+  ];
+
+  // Parse the raw diff string into preview items
+  if (data.diff && typeof data.diff === 'string') {
+    const rawDiffLines = data.diff.split('\n');
+    const preview = [];
+    for (const dLine of rawDiffLines) {
+      if (dLine.startsWith('- ')) {
+        preview.push({ line: preview.length + 1, marker: '-', text: dLine.slice(2) });
+      } else if (dLine.startsWith('+ ')) {
+        preview.push({ line: preview.length + 1, marker: '+', text: dLine.slice(2) });
+      }
+      // Skip context lines (no prefix) to keep the display compact
     }
-    if (change.preview.length > maxPreview) {
-      lines.push(`    ${THEME.dim}… +${change.preview.length - maxPreview} more ${pluralize('line', change.preview.length - maxPreview)}${ANSI.reset}`);
+
+    if (preview.length > 0) {
+      renderPreviewLines(lines, preview);
     }
   }
 
   return lines;
+}
+
+function renderPreviewLines(lines, preview) {
+  const maxPreview = 6;
+  const shown = preview.slice(0, maxPreview);
+  for (const item of shown) {
+    const lineNum = String(item.line).padStart(4);
+    const marker = item.marker === '+' ? THEME.diffAdd : item.marker === '-' ? THEME.diffRemove : THEME.diffContext;
+    const textColor = item.marker === '+' ? THEME.diffAdd : item.marker === '-' ? THEME.diffRemove : THEME.diffContext;
+    lines.push(`    ${THEME.dim}${lineNum} ${ANSI.reset}${marker}${item.marker}${ANSI.reset} ${textColor}${item.text || ''}${ANSI.reset}`);
+  }
+  if (preview.length > maxPreview) {
+    lines.push(`    ${THEME.dim}… +${preview.length - maxPreview} more ${pluralize('line', preview.length - maxPreview)}${ANSI.reset}`);
+  }
 }
 
 function formatChangeSummary(change) {
