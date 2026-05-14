@@ -286,12 +286,14 @@ function exitShell({ screen, session }) {
 
 function clearShell({ screen, session }) {
   const t = getTranslator(session);
+  const clearedCount = session.messages.length;
   session.messages = [];
   session.id = createSessionId();
   session.costTracker = new CostTracker();
   screen.clear();
   renderBanner(screen, session);
-  screen.write(`${THEME.success}${t('shell.contextCleared')}${ANSI.reset || ''}\n\n`);
+  screen.write(`${THEME.success}${t('shell.contextCleared', { count: clearedCount })}${ANSI.reset || ''}\n`);
+  screen.write(`${THEME.dim}${t('shell.clearHint')}${ANSI.reset || ''}\n\n`);
 }
 
 function compactShell({ screen, session }) {

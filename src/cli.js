@@ -685,9 +685,26 @@ async function runShell(args, explicitSession) {
   let pendingExitCount = 0;
   let lineQueue = Promise.resolve();
   session.interactivePromptActive = false;
+  let multilineBuffer = [];
 
   rl.on('line', (line) => {
-    lineQueue = lineQueue.then(() => processLine(line));
+    // Multi-line continuation: trailing backslash (bash-style)
+    if (line.endsWith('\\')) {
+      multilineBuffer.push(line.slice(0, -1));
+      rl.setPrompt(styled(THEME.dim, '│ ') + ' ');
+      rl.prompt();
+      return;
+    }
+
+    let finalLine = line;
+    if (multilineBuffer.length > 0) {
+      multilineBuffer.push(line);
+      finalLine = multilineBuffer.join('\n');
+      multilineBuffer = [];
+      rl.setPrompt(`${styled(THEME.promptPrefix, '>')} `);
+    }
+
+    lineQueue = lineQueue.then(() => processLine(finalLine));
   });
 
   async function processLine(line) {
@@ -719,12 +736,14 @@ async function runShell(args, explicitSession) {
 
       if (commandName === 'clear' || commandName === 'c') {
         session.isStreaming = false;
+        const clearedCount = session.messages.length;
         session.messages = [];
         session.id = require('./memory').createSessionId();
         session.costTracker = new (require('./session').CostTracker)();
         screen.clear();
         renderBanner(screen, session);
-        screen.write(styled(THEME.success, t('shell.contextCleared')) + '\n\n');
+        screen.write(styled(THEME.success, t('shell.contextCleared', { count: clearedCount })) + '\n');
+        screen.write(styled(THEME.dim, t('shell.clearHint')) + '\n\n');
         rl.prompt();
         return;
       }
