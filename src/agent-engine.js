@@ -153,6 +153,8 @@ class AgentEngine {
       model: session.provider?.model,
       outputTokens: options.maxTokens || session.provider?.maxTokens,
     });
+    // Persist stats so the status line can display a context-usage meter
+    session.contextStats = contextWindow.stats;
 
     yield createEvent(AgentEventType.started, {
       userMessage,

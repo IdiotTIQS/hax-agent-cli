@@ -216,7 +216,21 @@ class Session {
     const costColor = '\x1B[93m';
     const cwd = this.settings?.projectRoot || process.cwd();
     const cwdShort = cwd.length > 30 ? '...' + cwd.slice(-27) : cwd;
-    return `${dim}${cwdShort}${reset} · ${dim}${provider}${reset} · ${dim}${model}${reset} · ${costColor}$${cost.toFixed(4)}${reset} · ${dim}${turns} turns${reset} · ${dim}${elapsed}${reset}${permMode}`;
+
+    // Context window usage meter
+    let ctxMeter = '';
+    const stats = this.contextStats;
+    if (stats && stats.budgetTokens > 0) {
+      const ratio = Math.min(1, stats.inputTokens / stats.budgetTokens);
+      const totalSegs = 8;
+      const filled = Math.round(ratio * totalSegs);
+      const empty = totalSegs - filled;
+      const pct = Math.round(ratio * 100);
+      const barColor = ratio >= 0.9 ? '\x1B[91m' : ratio >= 0.7 ? '\x1B[93m' : dim;
+      ctxMeter = `[${barColor}${'█'.repeat(filled)}${dim}${'░'.repeat(empty)}${reset}] ${pct}% · `;
+    }
+
+    return `${ctxMeter}${dim}${cwdShort}${reset} · ${dim}${provider}${reset} · ${dim}${model}${reset} · ${costColor}$${cost.toFixed(4)}${reset} · ${dim}${turns} turns${reset} · ${dim}${elapsed}${reset}${permMode}`;
   }
 }
 
