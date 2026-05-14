@@ -386,7 +386,19 @@ async function runShell(args, explicitSession) {
       rl.cursor = rl.line.length;
       rl._refreshLine();
     } else if (key.name === 'tab') {
-      autoCompleteSlashCommand(rl, session);
+      const display = autoCompleteSlashCommand(rl, session);
+      // readline inserts a literal tab after this handler; undo it, then render the list
+      setImmediate(() => {
+        if (rl.line.includes('\t')) {
+          rl.line = rl.line.replace(/\t/g, '');
+          rl.cursor = rl.line.length;
+          rl._refreshLine();
+        }
+        if (display && display.length) {
+          process.stdout.write('\n' + display.join('\n') + '\n');
+          rl.prompt(true);
+        }
+      });
     }
   });
 
