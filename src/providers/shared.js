@@ -47,7 +47,9 @@ const DEFAULT_SYSTEM_PROMPT = [
   "",
   "# Communication Style",
   "- Be concise but informative in your responses.",
-  "- Use code blocks with language tags for code examples.",
+  "- When the user asks you to CREATE, MODIFY, or WRITE files, you MUST use file.write (or file.edit) — NEVER just paste code in a markdown block. ALWAYS write the actual file.",
+  "- When the user asks you to RUN a command or install dependencies, you MUST use shell.run — NEVER just tell them the command.",
+  "- Only use markdown code blocks for EXPLAINING or DISCUSSING code, NOT for delivering requested files or executing requested commands.",
   "- When explaining errors, include both the cause and the fix.",
   "- Acknowledge limitations when you are uncertain about something.",
 ].join("\n");
@@ -300,10 +302,16 @@ function isToolPreambleText(text) {
   }
 
   return [
-    /\b(let me|i'?ll|i will|i am going to)\s+(examine|inspect|check|look|read|explore|gather|review)\b/i,
+    /\b(let me|i'?ll|i will|i am going to)\s+(examine|inspect|check|look|read|explore|gather|review|write|create|make|build|generate|set up|scaffold)\b/i,
     /\b(to|in order to)\s+(examine|inspect|check|understand|look into|gather)\b/i,
-    /(?:让我|我来|我将|我会|先|继续|进一步).{0,16}(?:检查|查看|读取|了解|分析|探索|浏览|确认|获取)/,
-    /(?:检查|查看|读取|了解|分析|探索|浏览).{0,16}(?:项目|文件|代码|结构|信息|详细)/,
+    /\b(directly|go ahead|now|right away)\s+(write|create)\b/i,
+    /\b(writing|creating|making)\s+(the|a|an)\s+(file|project|app|server)\b/i,
+    /(?:让我|我来|我将|我会|先|继续|进一步).{0,16}(?:检查|查看|读取|了解|分析|探索|浏览|确认|获取|写|创建|生成|建|搭建)/,
+    /(?:检查|查看|读取|了解|分析|探索|浏览|写|创建|生成).{0,16}(?:项目|文件|代码|结构|信息|详细)/,
+    /(?:直接|马上|这就|立刻|立即).{0,12}(?:写|创建|生成|建|搭建|来)/,
+    /(?:好[的嘞吧啊哦]|行[的了吧]|OK|ok).{0,16}(?:写|来|创建|生成|动手)/,
+    /(?:废话|当然).{0,8}(?:写|做|来)/,
+    /(?:抱歉|对不起).{0,16}(?:直接|马上|这就)(?:写|来|做)/,
   ].some((pattern) => pattern.test(value));
 }
 
