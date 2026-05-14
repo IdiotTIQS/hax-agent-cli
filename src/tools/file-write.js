@@ -15,7 +15,7 @@ const {
 function createWriteFileTool() {
   return {
     name: 'file.write',
-    description: 'Write a UTF-8 text file inside the workspace root.',
+    description: 'Write a UTF-8 text file inside the workspace root. Default limit is 50MB.',
     inputSchema: {
       type: 'object',
       required: ['path', 'content'],
@@ -25,7 +25,7 @@ function createWriteFileTool() {
         encoding: { type: 'string', default: 'utf8' },
         overwrite: { type: 'boolean', default: true },
         createParentDirectories: { type: 'boolean', default: false },
-        maxBytes: { type: 'number', default: DEFAULT_MAX_FILE_BYTES },
+        maxBytes: { type: 'number', default: DEFAULT_MAX_FILE_BYTES, description: 'Max content bytes. Default 50MB.' },
       },
     },
     async execute(args, context) {

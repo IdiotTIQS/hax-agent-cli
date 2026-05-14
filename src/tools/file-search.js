@@ -13,7 +13,7 @@ const { collectGlobMatches } = require('./file-glob');
 function createSearchTool() {
   return {
     name: 'file.search',
-    description: 'Search text files inside the workspace root.',
+    description: 'Search text files inside the workspace root. Files up to 50MB are searched by default — do NOT restrict maxFileBytes for normal source code.',
     inputSchema: {
       type: 'object',
       required: ['query'],
@@ -24,7 +24,7 @@ function createSearchTool() {
         regex: { type: 'boolean', default: false },
         caseSensitive: { type: 'boolean', default: true },
         maxResults: { type: 'number', default: 100 },
-        maxFileBytes: { type: 'number', default: DEFAULT_MAX_FILE_BYTES },
+        maxFileBytes: { type: 'number', default: DEFAULT_MAX_FILE_BYTES, description: 'Max bytes per file. Default 50MB. Omit for normal files.' },
       },
     },
     async execute(args, context) {

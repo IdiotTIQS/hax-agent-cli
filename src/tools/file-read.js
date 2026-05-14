@@ -12,14 +12,14 @@ const {
 function createReadFileTool() {
   return {
     name: 'file.read',
-    description: 'Read a UTF-8 text file inside the workspace root.',
+    description: 'Read a UTF-8 text file inside the workspace root. Default limit is 50MB — do NOT pass a small maxBytes unless the file is known to be huge (e.g. logs, data dumps). For normal source files just omit maxBytes.',
     inputSchema: {
       type: 'object',
       required: ['path'],
       properties: {
         path: { type: 'string' },
         encoding: { type: 'string', default: 'utf8' },
-        maxBytes: { type: 'number', default: DEFAULT_MAX_FILE_BYTES },
+        maxBytes: { type: 'number', default: DEFAULT_MAX_FILE_BYTES, description: 'Maximum bytes to read. Default 50MB (52428800). Only set this for huge files — omit for normal source code.' },
       },
     },
     async execute(args, context) {
