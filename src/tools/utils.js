@@ -2,9 +2,34 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const { ToolExecutionError } = require('./error');
 
+const DEFAULT_FILE_OP_TIMEOUT_MS = 30_000;
+
+/**
+ * Wraps a promise-based fs operation with a timeout.
+ * @param {Promise} promise
+ * @param {number} timeoutMs
+ * @param {string} operationName - for error messages
+ */
+async function withTimeout(promise, timeoutMs = DEFAULT_FILE_OP_TIMEOUT_MS, operationName = 'file operation') {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      reject(new ToolExecutionError('FILE_OP_TIMEOUT', `${operationName} timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+  });
+  try {
+    const result = await Promise.race([promise, timeout]);
+    clearTimeout(timer);
+    return result;
+  } catch (err) {
+    clearTimeout(timer);
+    throw err;
+  }
+}
+const IGNORED_DIRECTORY_NAMES = new Set(['.git', 'node_modules', '.hg', '.svn']);
+
 const DEFAULT_MAX_FILE_BYTES = 50 * 1024 * 1024;
 const DEFAULT_MAX_RESULTS = 1000;
-const IGNORED_DIRECTORY_NAMES = new Set(['.git', 'node_modules', '.hg', '.svn']);
 
 function requireString(value, name) {
   if (!isNonEmptyString(value)) {
@@ -58,6 +83,28 @@ function resolveWithinRoot(root, requestedPath) {
   throw new ToolExecutionError('PATH_OUTSIDE_ROOT', `Path escapes workspace root: ${value}`);
 }
 
+/**
+ * Resolve a path within the workspace root, verifying it doesn't escape via symlinks.
+ * Use this for security-sensitive operations.
+ */
+async function resolveWithinRootSafe(root, requestedPath) {
+  const direct = resolveWithinRoot(root, requestedPath);
+  let realPath;
+  try {
+    realPath = await fs.realpath(direct);
+  } catch (err) {
+    if (err.code === 'ENOENT') {
+      return direct;
+    }
+    throw err;
+  }
+  const relativeReal = path.relative(root, realPath);
+  if (relativeReal === '' || (!relativeReal.startsWith('..') && !path.isAbsolute(relativeReal))) {
+    return realPath;
+  }
+  throw new ToolExecutionError('PATH_OUTSIDE_ROOT', `Symlink escapes workspace root: ${requestedPath} → ${realPath}`);
+}
+
 function toWorkspacePath(root, resolvedPath) {
   const relativePath = path.relative(root, resolvedPath);
   return relativePath === '' ? '.' : normalizeSlashes(relativePath);
@@ -65,6 +112,12 @@ function toWorkspacePath(root, resolvedPath) {
 
 async function statPath(filePath) {
   try {
+    // Use lstat first to detect symlinks without following them
+    const lstats = await fs.lstat(filePath);
+    if (lstats.isSymbolicLink()) {
+      const realPath = await fs.realpath(filePath);
+      return await fs.stat(realPath);
+    }
     return await fs.stat(filePath);
   } catch (error) {
     if (error && error.code === 'ENOENT') {
@@ -198,6 +251,7 @@ function stringifyToolResult(result) {
 module.exports = {
   DEFAULT_MAX_FILE_BYTES,
   DEFAULT_MAX_RESULTS,
+  DEFAULT_FILE_OP_TIMEOUT_MS,
   IGNORED_DIRECTORY_NAMES,
   requireString,
   readPositiveInteger,
@@ -207,8 +261,10 @@ module.exports = {
   escapeRegExp,
   normalizeCommandName,
   resolveWithinRoot,
+  resolveWithinRootSafe,
   toWorkspacePath,
   statPath,
+  withTimeout,
   readExistingFileContent,
   splitLines,
   createLineDiff,

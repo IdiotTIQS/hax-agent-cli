@@ -653,6 +653,11 @@ function createGoogleClient(apiKey, apiUrl) {
     throw new Error("No API key provided. Set GEMINI_API_KEY or GOOGLE_API_KEY environment variable, or use config set google.apiKey");
   }
 
+  // NOTE: The @google/generative-ai SDK transmits the API key as a URL query parameter
+  // (e.g. https://generativelanguage.googleapis.com/v1/models/...?key=YOUR_KEY).
+  // This means the key may appear in server logs, proxies, and network traces.
+  // For production deployments, consider using a proxy that rewrites the key into an
+  // Authorization header, or use the Google Cloud Vertex AI authentication instead.
   return new GoogleGenerativeAI({ apiKey: resolvedApiKey });
 }
 

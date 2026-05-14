@@ -2,11 +2,13 @@ const fs = require('node:fs/promises');
 const { ToolExecutionError } = require('./error');
 const {
   DEFAULT_MAX_FILE_BYTES,
+  DEFAULT_FILE_OP_TIMEOUT_MS,
   requireString,
   readPositiveInteger,
   resolveWithinRoot,
   toWorkspacePath,
   statPath,
+  withTimeout,
 } = require('./utils');
 
 function createReadFileTool() {
@@ -36,7 +38,7 @@ function createReadFileTool() {
       }
 
       const resolvedPath = resolveWithinRoot(context.root, filePath);
-      const stats = await statPath(resolvedPath);
+      const stats = await withTimeout(statPath(resolvedPath), DEFAULT_FILE_OP_TIMEOUT_MS, `stat ${filePath}`);
 
       if (!stats.isFile()) {
         throw new ToolExecutionError('NOT_A_FILE', `Path is not a file: ${filePath}`);

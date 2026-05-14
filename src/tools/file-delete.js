@@ -2,10 +2,12 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const { ToolExecutionError } = require('./error');
 const {
+  DEFAULT_FILE_OP_TIMEOUT_MS,
   requireString,
   resolveWithinRoot,
   toWorkspacePath,
   statPath,
+  withTimeout,
 } = require('./utils');
 
 function createDeleteFileTool() {
@@ -25,21 +27,21 @@ function createDeleteFileTool() {
       const permanent = args.permanent === true;
 
       const resolvedPath = resolveWithinRoot(context.root, filePath);
-      const stats = await statPath(resolvedPath);
+      const stats = await withTimeout(statPath(resolvedPath), DEFAULT_FILE_OP_TIMEOUT_MS, `stat ${filePath}`);
 
       if (!stats.isFile()) {
         throw new ToolExecutionError('NOT_A_FILE', `Path is not a file: ${filePath}`);
       }
 
       if (permanent) {
-        await fs.unlink(resolvedPath);
+        await withTimeout(fs.unlink(resolvedPath), DEFAULT_FILE_OP_TIMEOUT_MS, `unlink ${filePath}`);
       } else {
         const trashDir = path.join(context.root, '.hax-agent', 'trash');
-        await fs.mkdir(trashDir, { recursive: true });
+        await withTimeout(fs.mkdir(trashDir, { recursive: true }), DEFAULT_FILE_OP_TIMEOUT_MS, `mkdir trash`);
         const baseName = path.basename(filePath);
         const timestamp = Date.now();
         const trashPath = path.join(trashDir, `${timestamp}-${baseName}`);
-        await fs.rename(resolvedPath, trashPath);
+        await withTimeout(fs.rename(resolvedPath, trashPath), DEFAULT_FILE_OP_TIMEOUT_MS, `move ${filePath} to trash`);
       }
 
       return {

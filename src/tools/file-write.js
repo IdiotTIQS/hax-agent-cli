@@ -3,11 +3,13 @@ const path = require('node:path');
 const { ToolExecutionError } = require('./error');
 const {
   DEFAULT_MAX_FILE_BYTES,
+  DEFAULT_FILE_OP_TIMEOUT_MS,
   requireString,
   readPositiveInteger,
   resolveWithinRoot,
   toWorkspacePath,
   statPath,
+  withTimeout,
   readExistingFileContent,
   createFileChangeSummary,
 } = require('./utils');
@@ -51,22 +53,22 @@ function createWriteFileTool() {
 
       const resolvedPath = resolveWithinRoot(context.root, filePath);
       const parentPath = resolveWithinRoot(context.root, path.dirname(filePath));
-      const previousContent = await readExistingFileContent(resolvedPath, encoding);
+      const previousContent = await withTimeout(readExistingFileContent(resolvedPath, encoding), DEFAULT_FILE_OP_TIMEOUT_MS, `read ${filePath}`);
 
       if (createParentDirectories) {
-        await fs.mkdir(parentPath, { recursive: true });
+        await withTimeout(fs.mkdir(parentPath, { recursive: true }), DEFAULT_FILE_OP_TIMEOUT_MS, `mkdir ${path.dirname(filePath)}`);
       } else {
-        const parentStats = await statPath(parentPath);
+        const parentStats = await withTimeout(statPath(parentPath), DEFAULT_FILE_OP_TIMEOUT_MS, `stat dir ${path.dirname(filePath)}`);
 
         if (!parentStats.isDirectory()) {
           throw new ToolExecutionError('PARENT_NOT_DIRECTORY', `Parent path is not a directory: ${path.dirname(filePath)}`);
         }
       }
 
-      await fs.writeFile(resolvedPath, content, {
+      await withTimeout(fs.writeFile(resolvedPath, content, {
         encoding,
         flag: overwrite ? 'w' : 'wx',
-      });
+      }), DEFAULT_FILE_OP_TIMEOUT_MS, `write ${filePath}`);
 
       return {
         path: toWorkspacePath(context.root, resolvedPath),

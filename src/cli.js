@@ -16,6 +16,7 @@ const { Session, InputHistory } = require('./session');
 const { THEME, ANSI, TerminalScreen, MarkdownRenderer, stripAnsi, styled } = require('./renderer');
 const { checkForUpdate, performUpdate, restartProcess, wasRestarted } = require('./updater');
 const { runInitWizard, shouldRunFirstRunInit } = require('./init-wizard');
+const { debug, isDebugEnabled } = require('./debug');
 const { createTranslator } = require('./i18n');
 
 const VERSION = require('../package.json').version;
@@ -708,7 +709,9 @@ async function runShell(args, explicitSession) {
         );
         rl.prompt();
       }
-    }).catch(() => {});
+    }).catch((err) => {
+      debug('updater', `Update check failed: ${err.message}`);
+    });
   }
 
   let pendingExitCount = 0;
@@ -849,6 +852,18 @@ async function runShell(args, explicitSession) {
     if (trimmed.startsWith('!')) {
       const shellLine = trimmed.slice(1).trim();
       if (!shellLine) {
+        rl.prompt();
+        return;
+      }
+
+      // Check permission before executing !command
+      const bangPermission = await session.permissionManager.checkPermission(
+        'shell.run',
+        { command: shellLine },
+        session.approvalCallback || null,
+      );
+      if (!bangPermission.approved) {
+        screen.write(styled(THEME.warning, `! Command denied: ${bangPermission.reason}`) + '\n');
         rl.prompt();
         return;
       }

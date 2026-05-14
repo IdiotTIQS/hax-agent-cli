@@ -2,8 +2,10 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const { ToolExecutionError } = require('./error');
 const {
+  DEFAULT_FILE_OP_TIMEOUT_MS,
   requireString,
   toWorkspacePath,
+  withTimeout,
 } = require('./utils');
 
 function createFileEditTool() {
@@ -41,7 +43,7 @@ function createFileEditTool() {
       }
 
       const resolvedPath = path.resolve(context.root, filePath);
-      const content = await fs.readFile(resolvedPath, { encoding });
+      const content = await withTimeout(fs.readFile(resolvedPath, { encoding }), DEFAULT_FILE_OP_TIMEOUT_MS, `read ${filePath}`);
 
       const firstIndex = content.indexOf(oldStr);
 
@@ -60,7 +62,7 @@ function createFileEditTool() {
       const diff = generateDiff(oldStr, newStr);
 
       if (!dryRun) {
-        await fs.writeFile(resolvedPath, updatedContent, { encoding });
+        await withTimeout(fs.writeFile(resolvedPath, updatedContent, { encoding }), DEFAULT_FILE_OP_TIMEOUT_MS, `write ${filePath}`);
       }
 
       const oldLines = oldStr.split(/\r?\n/).length;

@@ -158,9 +158,17 @@ class PermissionManager {
     this._alwaysAllow = new Set();
     this._alwaysDeny = new Set();
     this._persistPath = options.persistPath || null;
-    if (this._persistPath) {
-      this._loadFromDisk().catch(() => {});
-    }
+    this._ready = this._persistPath
+      ? this._loadFromDisk().catch(() => {})
+      : Promise.resolve();
+  }
+
+  /**
+   * Returns a promise that resolves when persisted overrides have finished loading.
+   * Callers that need to be certain overrides are applied should await this.
+   */
+  async ready() {
+    return this._ready;
   }
 
   get mode() {
@@ -251,6 +259,9 @@ class PermissionManager {
   }
 
   async checkPermission(toolName, toolArgs, promptFn) {
+    // Ensure persisted overrides are loaded before checking
+    await this._ready;
+
     const t = createTranslator(this.locale);
     if (this.globalMode === 'yolo') {
       return { approved: true, level: PermissionLevel.AUTO, reason: t('permission.reason.yolo') };

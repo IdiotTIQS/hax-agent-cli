@@ -100,7 +100,29 @@ async function fetchUrl({ parsedUrl, method, maxBodyBytes, timeoutMs }) {
       const err = new ToolExecutionError("HTTP_ERROR", `HTTP ${response.status}: ${response.statusText || "Error"}`);
       err.status = response.status; throw err;
     }
-    const buf = Buffer.from(await response.arrayBuffer());
+
+    // Stream response with size limit to avoid buffering huge bodies in memory
+    const reader = response.body.getReader();
+    const chunks = [];
+    let totalBytes = 0;
+    let done = false;
+
+    while (!done) {
+      const { value, done: streamDone } = await reader.read();
+      done = streamDone;
+      if (value) {
+        totalBytes += value.length;
+        if (totalBytes > maxBodyBytes) {
+          reader.cancel();
+          const buf = Buffer.concat(chunks);
+          const truncated = buf.slice(0, maxBodyBytes);
+          return { body: truncated.toString("utf8"), truncated: true, status: response.status };
+        }
+        chunks.push(value);
+      }
+    }
+
+    const buf = Buffer.concat(chunks);
     const truncated = buf.length >= maxBodyBytes;
     return { body: (truncated ? buf.slice(0, maxBodyBytes) : buf).toString("utf8"), truncated, status: response.status };
   } finally { clearTimeout(timeoutId); }
