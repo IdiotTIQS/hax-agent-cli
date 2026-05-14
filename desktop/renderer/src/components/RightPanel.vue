@@ -1,6 +1,8 @@
 <script setup>
-import { computed } from 'vue';
+import { computed, inject } from 'vue';
 import FileTreeNode from './FileTreeNode.vue';
+
+const t = inject('t');
 
 const props = defineProps({
   activeTab: { type: String, default: 'summary' },
@@ -25,13 +27,13 @@ const props = defineProps({
 
 const emit = defineEmits(['select-tab', 'select-git-file', 'git-assist']);
 
-const tabs = [
-  { key: 'summary', label: '摘要' },
-  { key: 'git', label: 'Git' },
-  { key: 'logs', label: '日志' },
-  { key: 'files', label: '文件' },
-  { key: 'tools', label: '工具' },
-];
+const tabs = computed(() => [
+  { key: 'summary', label: t('desktop.panel.summary') },
+  { key: 'git', label: t('desktop.panel.git') },
+  { key: 'logs', label: t('desktop.panel.logs') },
+  { key: 'files', label: t('desktop.panel.files') },
+  { key: 'tools', label: t('desktop.panel.tools') },
+]);
 
 function formatTime(date) {
   if (!date) return '';
@@ -40,7 +42,7 @@ function formatTime(date) {
 }
 
 const hasToolActivity = computed(() => props.toolCalls.some((tc) => tc && tc.status));
-const sessionMode = computed(() => (hasToolActivity.value ? '工具执行中' : '普通对话'));
+const sessionMode = computed(() => hasToolActivity.value ? t('desktop.panel.toolRunning') : t('desktop.panel.normalChat'));
 const hasSelectedDiff = computed(() => Boolean(String(props.selectedGitDiff?.diff || '').trim()));
 const diffLines = computed(() => String(props.selectedGitDiff?.diff || '').split(/\r?\n/).map((text, index) => ({
   id: `${index}:${text}`,
@@ -59,9 +61,15 @@ function statusLabel(status) {
     case 'deleted': return 'D';
     case 'renamed': return 'R';
     case 'untracked': return '?';
-    default: return '•';
+    default: return '\u2022';
   }
 }
+
+const toolStatusLabel = (tc) => {
+  if (tc.status === 'running') return t('desktop.panel.running');
+  if (tc.status === 'done') return t('desktop.panel.done');
+  return t('desktop.panel.failed');
+};
 </script>
 
 <template>
@@ -81,71 +89,71 @@ function statusLabel(status) {
         <!-- Session card -->
         <div class="info-card">
           <div class="info-card-header">
-            <span>会话状态</span>
+            <span>{{ t('desktop.panel.sessionStatus') }}</span>
             <span class="badge">{{ sessionMode }}</span>
           </div>
           <div class="info-card-row">
-            <span class="label">已处理</span>
+            <span class="label">{{ t('desktop.panel.processed') }}</span>
             <span class="value">{{ elapsed }}</span>
           </div>
           <div class="info-card-row">
-            <span class="label">工具调用</span>
-            <span class="value">{{ toolCalls.length }} 次</span>
+            <span class="label">{{ t('desktop.panel.toolCalls') }}</span>
+            <span class="value">{{ toolCalls.length }}</span>
           </div>
         </div>
 
         <!-- Performance card -->
         <div class="info-card">
           <div class="info-card-header">
-            <span>性能指标</span>
+            <span>{{ t('desktop.panel.performance') }}</span>
           </div>
           <div class="info-card-row">
-            <span class="label">Token 消耗</span>
+            <span class="label">{{ t('desktop.panel.tokenUsed') }}</span>
             <span class="value">{{ tokenUsed.toLocaleString() }}</span>
           </div>
           <div class="info-card-row">
-            <span class="label">预估费用</span>
+            <span class="label">{{ t('desktop.panel.estimatedCost') }}</span>
             <span class="value accent">{{ cost }}</span>
           </div>
           <div class="info-card-row">
-            <span class="label">工具调用</span>
-            <span class="value">{{ toolCalls.length }} 次</span>
+            <span class="label">{{ t('desktop.panel.toolCalls') }}</span>
+            <span class="value">{{ toolCalls.length }}</span>
           </div>
         </div>
 
         <!-- Git card -->
         <div class="info-card">
           <div class="info-card-header">
-            <span>Git 状态</span>
+            <span>{{ t('desktop.panel.gitStatus') }}</span>
             <span class="badge">{{ gitBranch }}</span>
           </div>
           <div class="info-card-row">
-            <span class="label">分支</span>
+            <span class="label">{{ t('desktop.panel.branch') }}</span>
             <span class="value">{{ gitBranch }}</span>
           </div>
           <div class="info-card-row" v-if="gitAhead > 0">
-            <span class="label">领先</span>
+            <span class="label">{{ t('desktop.panel.ahead') }}</span>
             <span class="value success">{{ gitAhead }} commits</span>
           </div>
           <div class="info-card-row" v-if="gitBehind > 0">
-            <span class="label">落后</span>
+            <span class="label">{{ t('desktop.panel.behind') }}</span>
             <span class="value error">{{ gitBehind }} commits</span>
           </div>
           <div class="info-card-row" v-if="gitChanged > 0">
-            <span class="label">变更</span>
+            <span class="label">{{ t('desktop.panel.changes') }}</span>
             <span class="value accent">{{ gitChanged }} files</span>
           </div>
           <div class="info-card-row" v-if="gitAhead === 0 && gitBehind === 0 && gitChanged === 0">
-            <span class="label">状态</span>
-            <span class="value success">已同步</span>
+            <span class="label">{{ t('desktop.panel.status') }}</span>
+            <span class="value success">{{ t('desktop.panel.synced') }}</span>
           </div>
         </div>
 
         <!-- Workspace -->
         <div class="info-card">
-          <div class="info-card-header"><span>工作区</span></div>
+          <div class="info-card-header"><span>{{ t('desktop.panel.workspace') }}</span></div>
           <div style="font-size:12px;font-family:var(--font-mono);color:var(--text-secondary);word-break:break-all;">
-            {{ workspace || '当前项目根目录' }}
+            {{ workspace || t('desktop.panel.currentProjectRoot') }}
           </div>
         </div>
       </div>
@@ -154,15 +162,15 @@ function statusLabel(status) {
       <div v-if="activeTab === 'git'" class="git-panel">
         <div class="info-card">
           <div class="info-card-header">
-            <span>变更概览</span>
+            <span>{{ t('desktop.panel.changeOverview') }}</span>
             <span class="badge">{{ gitBranch }}</span>
           </div>
           <div class="info-card-row">
-            <span class="label">变更文件</span>
+            <span class="label">{{ t('desktop.panel.changedFiles') }}</span>
             <span class="value accent">{{ gitFiles.length }}</span>
           </div>
           <div class="info-card-row" v-if="gitAhead > 0 || gitBehind > 0">
-            <span class="label">远端</span>
+            <span class="label">{{ t('desktop.panel.remote') }}</span>
             <span class="value">{{ gitAhead }}↑ {{ gitBehind }}↓</span>
           </div>
         </div>
@@ -180,13 +188,13 @@ function statusLabel(status) {
             <span class="git-file-path">{{ file.path }}</span>
           </button>
           <div v-if="gitFiles.length === 0" class="empty-panel">
-            没有工作区变更
+            {{ t('desktop.panel.noChanges') }}
           </div>
         </div>
 
         <div class="git-diff-card">
           <div class="git-diff-head">
-            <span>{{ selectedGitFile || '选择文件查看 diff' }}</span>
+            <span>{{ selectedGitFile || t('desktop.panel.selectFile') }}</span>
             <span v-if="isLoadingGitDiff">loading…</span>
           </div>
           <div class="git-actions">
@@ -196,7 +204,7 @@ function statusLabel(status) {
               :disabled="!hasSelectedDiff || isBusy"
               @click="emit('git-assist', 'explain')"
             >
-              解释 diff
+              {{ t('desktop.panel.explainDiff') }}
             </button>
             <button
               class="git-action-btn"
@@ -204,10 +212,10 @@ function statusLabel(status) {
               :disabled="!hasSelectedDiff || isBusy"
               @click="emit('git-assist', 'commit')"
             >
-              提交说明
+              {{ t('desktop.panel.commitMessage') }}
             </button>
           </div>
-          <div v-if="selectedGitDiff?.truncated" class="empty-panel">Diff 已截断</div>
+          <div v-if="selectedGitDiff?.truncated" class="empty-panel">{{ t('desktop.panel.diffTruncated') }}</div>
           <div v-if="selectedGitDiff?.diff" class="git-diff-lines">
             <div
               v-for="line in diffLines"
@@ -219,7 +227,7 @@ function statusLabel(status) {
             </div>
           </div>
           <div v-else-if="selectedGitFile && !isLoadingGitDiff" class="empty-panel">
-            没有可显示的 diff
+            {{ t('desktop.panel.noDiff') }}
           </div>
         </div>
       </div>
@@ -227,7 +235,7 @@ function statusLabel(status) {
       <!-- Logs -->
       <div v-if="activeTab === 'logs'" class="log-list">
         <div v-if="logEntries.length === 0" style="padding:16px;color:var(--text-disabled);font-size:12px;text-align:center;">
-          暂无日志
+          {{ t('desktop.panel.noLogs') }}
         </div>
         <div v-for="entry in logEntries" :key="entry.id" class="log-entry">
           <span class="log-entry-time">{{ formatTime(entry.time) }}</span>
@@ -238,7 +246,7 @@ function statusLabel(status) {
       <!-- Files -->
       <div v-if="activeTab === 'files'">
         <div v-if="!fileTree || fileTree.length === 0" style="padding:16px;color:var(--text-disabled);font-size:12px;text-align:center;">
-          暂无文件
+          {{ t('desktop.panel.noFiles') }}
         </div>
         <div v-else class="file-tree">
           <FileTreeNode
@@ -252,16 +260,16 @@ function statusLabel(status) {
       <!-- Tools -->
       <div v-if="activeTab === 'tools'" class="tool-list-inspector">
         <div v-if="toolCalls.length === 0" style="padding:16px;color:var(--text-disabled);font-size:12px;text-align:center;">
-          暂无工具调用
+          {{ t('desktop.panel.noToolCalls') }}
         </div>
         <div v-for="tc in toolCalls" :key="tc.id" class="tool-item-inspector">
           <div class="tool-item-header">
             <span class="tool-item-name">{{ tc.name }}</span>
             <span class="tool-item-status" :class="tc.status">
-              {{ tc.status === 'running' ? '执行中' : tc.status === 'done' ? '完成' : '失败' }}
+              {{ toolStatusLabel(tc) }}
             </span>
           </div>
-          <div class="tool-item-detail">{{ tc.summary || tc.detail || '等待输出…' }}</div>
+          <div class="tool-item-detail">{{ tc.summary || tc.detail || t('desktop.panel.waitingOutput') }}</div>
         </div>
       </div>
     </div>

@@ -1,5 +1,7 @@
 <script setup>
-import { ref } from 'vue';
+import { inject, ref } from 'vue';
+
+const t = inject('t');
 
 const toasts = ref([]);
 let nextId = 1;
@@ -37,7 +39,7 @@ defineExpose({ add, dismiss, success, error, warning, info });
       :class="[t.type, { dismissing: t.leaving }]"
     >
       <span>{{ t.message }}</span>
-      <button class="toast-btn" @click="dismiss(t.id)">撤销</button>
+      <button class="toast-btn" @click="dismiss(t.id)">\u2715</button>
     </div>
   </div>
 </template>

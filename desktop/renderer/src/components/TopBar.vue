@@ -1,8 +1,10 @@
 <script setup>
-import { computed, ref } from 'vue';
+import { computed, inject, ref } from 'vue';
+
+const t = inject('t');
 
 const props = defineProps({
-  title: { type: String, default: 'Agent 工作区' },
+  title: { type: String, default: '' },
   status: { type: String, default: 'idle' },
   isBusy: { type: Boolean, default: false },
   model: { type: String, default: '' },
@@ -17,12 +19,14 @@ const modelOpen = ref(false);
 
 const displayStatus = computed(() => {
   switch (props.status) {
-    case 'running': return '运行中';
-    case 'thinking': return '思考中';
-    case 'error': return '错误';
-    default: return '空闲';
+    case 'running': return t('desktop.topbar.running');
+    case 'thinking': return t('desktop.topbar.thinking');
+    case 'error': return t('desktop.topbar.error');
+    default: return t('desktop.topbar.idle');
   }
 });
+
+const resolvedTitle = computed(() => props.title || t('desktop.topbar.title'));
 
 function toggleDropdown() { modelOpen.value = !modelOpen.value; }
 function selectModel(m) { emit('select-model', m); modelOpen.value = false; }
@@ -31,7 +35,7 @@ function selectModel(m) { emit('select-model', m); modelOpen.value = false; }
 <template>
   <header class="topbar">
     <div class="topbar-title-group">
-      <div class="topbar-title">{{ title }}</div>
+      <div class="topbar-title">{{ resolvedTitle }}</div>
       <div v-if="scopeLabel" class="topbar-scope" :title="scopeTitle">{{ scopeLabel }}</div>
     </div>
     <div class="topbar-actions">
@@ -41,8 +45,8 @@ function selectModel(m) { emit('select-model', m); modelOpen.value = false; }
 
       <div class="model-selector">
         <button class="model-select-trigger" :class="{ open: modelOpen }" @click="toggleDropdown">
-          <span>{{ model || '默认模型' }}</span>
-          <span class="arrow">▼</span>
+          <span>{{ model || t('desktop.topbar.defaultModel') }}</span>
+          <span class="arrow">\u25BC</span>
         </button>
         <div v-if="modelOpen" class="model-select-dropdown">
           <button
@@ -52,12 +56,12 @@ function selectModel(m) { emit('select-model', m); modelOpen.value = false; }
             @click="selectModel(m.value)"
           >
             <span>{{ m.label }}</span>
-            <span v-if="m.value === model" class="check">✓</span>
+            <span v-if="m.value === model" class="check">\u2713</span>
           </button>
         </div>
       </div>
 
-      <button class="btn btn-danger" :disabled="!isBusy" @click="emit('interrupt')">■ 中断</button>
+      <button class="btn btn-danger" :disabled="!isBusy" @click="emit('interrupt')">{{ t('desktop.topbar.interrupt') }}</button>
     </div>
   </header>
 </template>

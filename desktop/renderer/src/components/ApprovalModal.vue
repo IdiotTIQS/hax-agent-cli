@@ -1,5 +1,7 @@
 <script setup>
-import { computed } from 'vue';
+import { computed, inject } from 'vue';
+
+const t = inject('t');
 
 const props = defineProps({
   request: { type: Object, default: null },
@@ -10,8 +12,8 @@ const emit = defineEmits(['decide']);
 const visible = computed(() => Boolean(props.request));
 const levelLabel = computed(() => {
   const level = props.request?.level || 'ask';
-  if (level === 'dangerous') return '高风险';
-  if (level === 'ask') return '需要确认';
+  if (level === 'dangerous') return t('desktop.approval.highRisk');
+  if (level === 'ask') return t('desktop.approval.needsConfirm');
   return level;
 });
 const levelTone = computed(() => (props.request?.level === 'dangerous' ? 'danger' : 'ask'));
@@ -34,7 +36,7 @@ function decide(decision) {
         <div class="approval-header">
           <div>
             <div class="approval-kicker">Tool Approval</div>
-            <h2 id="approval-title">允许这次工具调用？</h2>
+            <h2 id="approval-title">{{ t('desktop.approval.title') }}</h2>
           </div>
           <span class="approval-level" :class="levelTone">{{ levelLabel }}</span>
         </div>
@@ -49,10 +51,10 @@ function decide(decision) {
         </div>
 
         <div class="approval-actions">
-          <button class="btn btn-ghost" type="button" @click="decide('deny')">拒绝</button>
-          <button class="btn btn-danger" type="button" @click="decide('always_deny')">始终拒绝</button>
-          <button class="btn btn-ghost" type="button" @click="decide('always_allow')">始终允许</button>
-          <button class="btn btn-primary" type="button" autofocus @click="decide('approve')">允许本次</button>
+          <button class="btn btn-ghost" type="button" @click="decide('deny')">{{ t('desktop.approval.deny') }}</button>
+          <button class="btn btn-danger" type="button" @click="decide('always_deny')">{{ t('desktop.approval.alwaysDeny') }}</button>
+          <button class="btn btn-ghost" type="button" @click="decide('always_allow')">{{ t('desktop.approval.alwaysAllow') }}</button>
+          <button class="btn btn-primary" type="button" autofocus @click="decide('approve')">{{ t('desktop.approval.allowOnce') }}</button>
         </div>
       </section>
     </div>

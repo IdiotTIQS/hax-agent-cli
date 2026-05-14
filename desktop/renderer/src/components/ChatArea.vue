@@ -1,6 +1,8 @@
 <script setup>
-import { nextTick, onMounted, onUpdated, ref, watch } from 'vue';
+import { inject, nextTick, onMounted, onUpdated, ref, watch } from 'vue';
 import { renderMarkdown } from '../markdown.mjs';
+
+const t = inject('t');
 
 const props = defineProps({
   messages: { type: Array, default: () => [] },
@@ -46,13 +48,16 @@ function isSafeExternalUrl(value) {
   }
 }
 
+const copyLabel = ref(t('desktop.chat.copy'));
+const copiedLabel = ref(t('desktop.chat.copied'));
+
 function onMessageClick(e) {
   const btn = e.target.closest('.code-block-btn');
   if (btn?.dataset.copy) {
     navigator.clipboard?.writeText(btn.dataset.copy);
-    btn.textContent = '已复制';
+    btn.textContent = copiedLabel.value;
     btn.classList.add('copied');
-    setTimeout(() => { btn.textContent = '复制'; btn.classList.remove('copied'); }, 2000);
+    setTimeout(() => { btn.textContent = copyLabel.value; btn.classList.remove('copied'); }, 2000);
     return;
   }
 
@@ -69,7 +74,19 @@ function getToolsForMessage(msg) {
   return props.toolCalls.filter((tc) => tc.turn === msg.turn || tc.messageId === msg.id);
 }
 
-// ── Demo terminal & diff data (embedded in specific messages) ──
+function msgRoleLabel(msg) {
+  if (msg.role === 'user') return t('desktop.chat.you');
+  if (msg.role === 'system') return t('desktop.chat.system');
+  return 'Hax Agent';
+}
+
+function toolStatusLabel(tc) {
+  if (tc.status === 'running') return t('desktop.chat.running');
+  if (tc.status === 'done') return t('desktop.chat.done');
+  return t('desktop.chat.failed');
+}
+
+// ── Demo terminal & diff data ──
 function isTerminalMessage(msg) {
   return msg.terminal && typeof msg.terminal === 'object';
 }
@@ -83,38 +100,38 @@ function isDiffMessage(msg) {
     <div class="chat-inner">
       <!-- Empty -->
       <div v-if="messages.length === 0 && !isThinking" class="empty-state">
-        <div class="empty-state-icon">◈</div>
-        <h2>开始对话</h2>
-        <p>输入任务指令，Agent 将自动读取项目文件、执行命令、调用工具来帮助您完成工作。</p>
+        <div class="empty-state-icon">\u25C8</div>
+        <h2>{{ t('desktop.chat.startChat') }}</h2>
+        <p>{{ t('desktop.chat.startSubtitle') }}</p>
       </div>
 
       <template v-for="msg in messages" :key="msg.id">
         <!-- Regular message -->
         <div class="msg" :class="[msg.role, msg.tone]">
           <div class="msg-header">
-            <span class="msg-role">{{ msg.role === 'user' ? '你' : msg.role === 'system' ? '系统' : 'Hax Agent' }}</span>
+            <span class="msg-role">{{ msgRoleLabel(msg) }}</span>
             <span class="msg-time">{{ formatTime(msg.createdAt) }}</span>
             <span v-if="msg.elapsed" class="msg-time" style="margin-left:4px">· {{ msg.elapsed }}</span>
           </div>
           <div class="msg-body" v-html="renderMarkdown(msg.content)"></div>
         </div>
 
-        <!-- File change indicator (attached to message) -->
+        <!-- File change indicator -->
         <div v-if="msg.fileChanges" style="padding:0 4px;display:flex;gap:6px;flex-wrap:wrap;">
           <div v-for="fc in msg.fileChanges" :key="fc.file" class="file-change-indicator">
             <span class="file-name">{{ fc.file }}</span>
             <span class="added">+{{ fc.added }}</span>
-            <span class="removed">−{{ fc.removed }}</span>
+            <span class="removed">\u2212{{ fc.removed }}</span>
           </div>
         </div>
 
-        <!-- Diff view (embedded) -->
+        <!-- Diff view -->
         <div v-if="isDiffMessage(msg)" class="diff-view">
           <div class="diff-header">
             <span class="diff-file">{{ msg.diff.file }}</span>
             <span class="diff-stats">
               <span class="diff-added-count">+{{ msg.diff.added }}</span>
-              <span class="diff-removed-count">−{{ msg.diff.removed }}</span>
+              <span class="diff-removed-count">\u2212{{ msg.diff.removed }}</span>
             </span>
           </div>
           <div class="diff-lines">
@@ -130,13 +147,13 @@ function isDiffMessage(msg) {
           </div>
         </div>
 
-        <!-- Terminal block (embedded) -->
+        <!-- Terminal block -->
         <div v-if="isTerminalMessage(msg)" class="terminal-block">
           <div class="terminal-header">
             <span class="terminal-dot red"></span>
             <span class="terminal-dot yellow"></span>
             <span class="terminal-dot green"></span>
-            <span class="terminal-title">{{ msg.terminal.title || '终端' }}</span>
+            <span class="terminal-title">{{ msg.terminal.title || t('desktop.chat.terminal') }}</span>
           </div>
           <div class="terminal-body">
             <div v-for="(line, li) in msg.terminal.lines" :key="li" :class="'terminal-' + (line.type || 'output')">
@@ -155,24 +172,24 @@ function isDiffMessage(msg) {
         >
           <div class="tool-call-header" @click="toggleTool(tc.id)">
             <div class="tool-call-icon" :class="tc.status">
-              {{ tc.status === 'running' ? '↻' : tc.status === 'done' ? '✓' : '✕' }}
+              {{ tc.status === 'running' ? '\u21BB' : tc.status === 'done' ? '\u2713' : '\u2715' }}
             </div>
             <div class="tool-call-info">
               <div class="tool-call-name">{{ tc.name }}</div>
-              <div class="tool-call-summary">{{ tc.summary || '点击展开详情' }}</div>
+              <div class="tool-call-summary">{{ tc.summary || t('desktop.chat.clickToExpand') }}</div>
             </div>
             <span class="tool-call-status" :class="tc.status">
-              {{ tc.status === 'running' ? '执行中' : tc.status === 'done' ? '完成' : '失败' }}
+              {{ toolStatusLabel(tc) }}
             </span>
-            <span class="tool-call-chevron">▼</span>
+            <span class="tool-call-chevron">\u25BC</span>
           </div>
           <div class="tool-call-detail">
             <div v-if="tc.input" class="tool-call-section">
-              <div class="tool-call-section-label">输入</div>
+              <div class="tool-call-section-label">{{ t('desktop.chat.input') }}</div>
               <div class="tool-call-section-content">{{ tc.input }}</div>
             </div>
             <div v-if="tc.output" class="tool-call-section">
-              <div class="tool-call-section-label">输出</div>
+              <div class="tool-call-section-label">{{ t('desktop.chat.output') }}</div>
               <div class="tool-call-section-content">{{ tc.output }}</div>
             </div>
           </div>
@@ -183,7 +200,7 @@ function isDiffMessage(msg) {
       <div v-if="isThinking || isStreaming" class="thinking-indicator" :class="{ streaming: isStreaming && !isThinking }">
         <div class="thinking-avatar">HX</div>
         <div class="thinking-dots"><span></span><span></span><span></span></div>
-        <span class="thinking-text">{{ isStreaming && !isThinking ? '输出中…' : '思考中…' }}</span>
+        <span class="thinking-text">{{ isStreaming && !isThinking ? t('desktop.chat.outputting') : t('desktop.chat.thinking') }}</span>
       </div>
     </div>
   </div>

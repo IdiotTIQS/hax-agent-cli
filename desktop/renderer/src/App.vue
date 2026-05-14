@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
+import { computed, onMounted, onUnmounted, provide, reactive, ref, watch } from 'vue';
 
 import Sidebar from './components/Sidebar.vue';
 import TopBar from './components/TopBar.vue';
@@ -9,12 +9,15 @@ import RightPanel from './components/RightPanel.vue';
 import SettingsModal from './components/SettingsModal.vue';
 import Toast from './components/Toast.vue';
 import ApprovalModal from './components/ApprovalModal.vue';
+import { setLocale, t, DEFAULT_LOCALE } from './i18n.js';
+
+provide('t', t);
 
 const api = window.haxAgent ?? {};
 
 function ensureApi(name) {
   if (typeof api[name] !== 'function') {
-    throw new Error(`window.haxAgent.${name} 不可用`);
+    throw new Error(`window.haxAgent.${name} ${t('desktop.app.unavailable')}`);
   }
   return api[name];
 }
@@ -36,6 +39,7 @@ const showSettings = ref(false);
 const sidebarWidth = ref(260);
 const inspectorWidth = ref(290);
 const resizing = ref(null);
+const locale = ref(DEFAULT_LOCALE);
 
 const messages = ref([{
   id: crypto.randomUUID(),
@@ -45,7 +49,7 @@ const messages = ref([{
   turn: 0,
 }]);
 const toolCalls = ref([]);
-const runLog = ref([{ id: crypto.randomUUID(), label: '桌面端已初始化', time: new Date(), type: 'info' }]);
+const runLog = ref([{ id: crypto.randomUUID(), label: t('desktop.app.initialized'), time: new Date(), type: 'info' }]);
 const sessionList = ref([]);
 const fileTreeData = ref([]);
 const skillsSnapshot = ref({ projectRoot: '', total: 0, visible: 0, skills: [] });
@@ -81,7 +85,7 @@ const settings = reactive({
 });
 
 const modelOptions = [
-  { value: '', label: '默认模型' },
+  { value: '', label: t('desktop.app.defaultModel') },
   { value: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6' },
   { value: 'claude-opus-4-7', label: 'Claude Opus 4.7' },
   { value: 'gpt-4.1', label: 'GPT-4.1' },
@@ -166,31 +170,31 @@ const matchingSessions = computed(() => {
 
 const panelPlaceholder = computed(() => {
   switch (activeNav.value) {
-    case 'search': return '搜索文件、路径、会话';
-    case 'skills': return '筛选技能';
-    case 'plugins': return '筛选工具';
-    case 'auto': return '筛选权限或团队';
-    default: return '搜索';
+    case 'search': return t('desktop.app.searchFiles');
+    case 'skills': return t('desktop.app.filterSkills');
+    case 'plugins': return t('desktop.app.filterTools');
+    case 'auto': return t('desktop.app.filterPermissions');
+    default: return t('desktop.app.search');
   }
 });
 
 const workspaceDisplayPath = computed(() => (
-  workspaceSummary.value.path || settings.workspace || sessionProjectRoot.value || '当前项目根目录'
+  workspaceSummary.value.path || settings.workspace || sessionProjectRoot.value || t('desktop.app.currentProjectRoot')
 ));
 
 const sessionScopeLabel = computed(() => {
-  if (!sessionId.value) return '未创建会话';
-  if (!sessionProjectRoot.value) return '未绑定项目';
+  if (!sessionId.value) return t('desktop.app.noSession');
+  if (!sessionProjectRoot.value) return t('desktop.app.noProject');
 
   const selectedWorkspace = settings.workspace || workspaceSummary.value.path;
   if (selectedWorkspace && pathsMatch(sessionProjectRoot.value, selectedWorkspace)) {
-    return `当前工作区: ${pathBasename(sessionProjectRoot.value)}`;
+    return `${t('desktop.app.currentWorkspace')}: ${pathBasename(sessionProjectRoot.value)}`;
   }
 
-  return `会话工作区: ${pathBasename(sessionProjectRoot.value)}`;
+  return `${t('desktop.app.sessionWorkspace')}: ${pathBasename(sessionProjectRoot.value)}`;
 });
 
-const sessionScopeTitle = computed(() => sessionProjectRoot.value || '当前还没有活动会话');
+const sessionScopeTitle = computed(() => sessionProjectRoot.value || t('desktop.app.noActiveSession'));
 
 let elapsedTimer = null;
 let turnStartTime = null;
@@ -215,7 +219,7 @@ function stopElapsedTimer() {
 }
 
 function getWelcomeMessage() {
-  return '欢迎使用 Hax Agent。我可以读取项目文件、执行命令、调用外部工具来完成你的任务。输入指令即可开始。';
+  return t('desktop.app.welcomeMessage');
 }
 
 function appendLog(label, type = 'info') {
@@ -250,6 +254,11 @@ function normalizeSettings(payload) {
   if (typeof agent.temperature === 'number') settings.temperature = agent.temperature;
   if (src.desktop?.workspace !== undefined || src.workspace !== undefined) {
     settings.workspace = src.desktop?.workspace ?? src.workspace ?? '';
+  }
+  const nextLocale = src.ui?.locale;
+  if (nextLocale) {
+    locale.value = nextLocale;
+    setLocale(nextLocale);
   }
 }
 
@@ -295,7 +304,7 @@ function pathsMatch(left, right) {
 
 function pathBasename(value) {
   const parts = String(value || '').split(/[\\/]+/).filter(Boolean);
-  return parts.at(-1) || value || '未命名项目';
+  return parts.at(-1) || value || t('desktop.app.unnamedProject');
 }
 
 function updateSessionWorkspace(sessionResult, options = {}) {
@@ -367,7 +376,7 @@ function upsertToolCall(event) {
     name,
     status: event.status ?? (isResult ? (event.isError ? 'failed' : 'done') : 'running'),
     summary: isResult
-      ? (event.isError ? `错误 — ${event.durationMs ?? '?'}ms` : `完成 — ${event.durationMs ?? '?'}ms`)
+        ? (event.isError ? `${t('desktop.app.error')} — ${event.durationMs ?? '?'}ms` : `${t('desktop.app.done')} — ${event.durationMs ?? '?'}ms`)
       : (event.displayInput ?? event.summary ?? ''),
     input: event.input ? (typeof event.input === 'object' ? JSON.stringify(event.input, null, 2) : String(event.input)) : '',
     output: isResult && event.data
@@ -417,7 +426,7 @@ async function loadWorkspaceSnapshot() {
       }
     }
   } catch (e) {
-    appendLog('工作区快照加载失败', 'fail');
+    appendLog(t('desktop.app.loadFailed'), 'fail');
     errorText.value = e.message;
   }
 }
@@ -438,7 +447,7 @@ async function loadInsightPanels() {
     if (typeof api.getPermissionsSnapshot === 'function') permissionsSnapshot.value = results[index++] || permissionsSnapshot.value;
     if (typeof api.getTeamSnapshot === 'function') teamSnapshot.value = results[index++] || teamSnapshot.value;
   } catch (e) {
-    appendLog('面板数据加载失败', 'fail');
+    appendLog(t('desktop.app.panelLoadFailed'), 'fail');
     errorText.value = e.message;
   }
 }
@@ -456,7 +465,7 @@ function setMessagesFromSession(sessionResult) {
     : [{
         id: crypto.randomUUID(),
         role: 'assistant',
-        content: '这个会话没有可显示的历史消息。',
+        content: t('desktop.app.noMessages'),
         createdAt: new Date(),
         turn: 0,
       }];
@@ -469,7 +478,7 @@ function handleSelectNav(key) {
 }
 
 function handleSelectFile(path) {
-  appendLog('选中文件: ' + path);
+  appendLog(`${t('desktop.app.selectedFile')}: ` + path);
   activeNav.value = 'search';
   panelQuery.value = path;
   void previewWorkspaceFile(path);
@@ -485,7 +494,7 @@ function handleTogglePermission() {
 
 async function createSession() {
   errorText.value = '';
-  appendLog('正在创建会话…', 'start');
+  appendLog(t('desktop.app.creatingSession'), 'start');
   try {
     const result = await ensureApi('createSession')({ projectRoot: settings.workspace || undefined });
     sessionId.value = serializeSession(result) || crypto.randomUUID();
@@ -494,16 +503,16 @@ async function createSession() {
     updateStats(result);
     const provider = result?.provider;
     if (provider) {
-      appendLog(`提供商: ${provider.name} / ${provider.model || '默认模型'}`, 'done');
+      appendLog(`${t('desktop.app.providerLabel')}: ${provider.name} / ${provider.model || t('desktop.app.defaultModel')}`, 'done');
     }
-    appendLog(`会话 ${sessionId.value.slice(0, 8)} 已就绪`, 'done');
-    toastRef.value?.success('会话已创建');
+    appendLog(`${t('desktop.app.sessionReady')}: ${sessionId.value.slice(0, 8)}`, 'done');
+    toastRef.value?.success(t('desktop.app.sessionCreated'));
     await Promise.all([loadWorkspaceSnapshot(), loadInsightPanels()]);
     return sessionId.value;
   } catch (e) {
     errorText.value = e.message;
-    appendLog('会话创建失败', 'fail');
-    toastRef.value?.error('创建失败: ' + e.message);
+    appendLog(t('desktop.app.sessionCreateFailed'), 'fail');
+    toastRef.value?.error(`${t('desktop.app.createFailed')}: ` + e.message);
     throw e;
   }
 }
@@ -511,7 +520,7 @@ async function createSession() {
 async function resumeSession(targetSessionId) {
   if (!targetSessionId || isBusy.value) return;
   errorText.value = '';
-  appendLog(`切换会话 ${targetSessionId.slice(0, 8)}…`, 'start');
+  appendLog(`${t('desktop.app.switchingSession')}: ${targetSessionId.slice(0, 8)}…`, 'start');
   try {
     const targetSession = sessionList.value.find((item) => item.id === targetSessionId);
     const result = await ensureApi('resumeSession')({
@@ -526,15 +535,15 @@ async function resumeSession(targetSessionId) {
     isStreaming.value = false;
     updateStats(result);
     if (switchedWorkspace) {
-      appendLog(`工作区已切换到 ${pathBasename(settings.workspace)}`, 'done');
+      appendLog(`${t('desktop.app.workspaceSwitched')}: ${pathBasename(settings.workspace)}`, 'done');
     }
-    appendLog(`已切换到 ${sessionId.value.slice(0, 8)}`, 'done');
-    toastRef.value?.success('会话已切换');
+    appendLog(`${t('desktop.app.sessionSwitched')}: ${sessionId.value.slice(0, 8)}`, 'done');
+    toastRef.value?.success(t('desktop.app.sessionSwitchedToast'));
     await Promise.all([loadWorkspaceSnapshot(), loadInsightPanels()]);
   } catch (e) {
     errorText.value = e.message;
-    appendLog('会话切换失败', 'fail');
-    toastRef.value?.error('会话切换失败: ' + e.message);
+    appendLog(t('desktop.app.switchFailed'), 'fail');
+    toastRef.value?.error(`${t('desktop.app.switchFailedToast')}: ` + e.message);
   }
 }
 
@@ -559,7 +568,7 @@ async function submitAgentMessage(content, options = {}) {
   activeAssistantId.value = '';
   errorText.value = '';
   startElapsedTimer();
-  appendLog(options.logLabel || '发送指令', 'start');
+  appendLog(options.logLabel || t('desktop.app.sendingCommand'), 'start');
 
   try {
     const result = await ensureApi('sendMessage')({
@@ -579,14 +588,14 @@ async function submitAgentMessage(content, options = {}) {
     }
 
     statusState.value = 'idle';
-    appendLog(options.doneLabel || '任务完成', 'done');
+    appendLog(options.doneLabel || t('desktop.app.taskComplete'), 'done');
     return true;
   } catch (e) {
     errorText.value = e.message;
-    appendMessage('system', `错误: ${e.message}`, { tone: 'danger' });
+    appendMessage('system', `${t('desktop.app.errorPrefix')}: ${e.message}`, { tone: 'danger' });
     statusState.value = 'error';
-    appendLog(options.failLabel || '任务失败', 'fail');
-    toastRef.value?.error('发送失败: ' + e.message);
+    appendLog(options.failLabel || t('desktop.app.taskFailed'), 'fail');
+    toastRef.value?.error(`${t('desktop.app.sendFailed')}: ` + e.message);
     return false;
   } finally {
     isBusy.value = false;
@@ -607,7 +616,7 @@ async function sendMessage() {
 
 async function interruptAgent() {
   if (!sessionId.value || !isBusy.value) return;
-  appendLog('请求中断…', 'start');
+  appendLog(t('desktop.app.interrupting'), 'start');
   try {
     await ensureApi('interrupt')({ sessionId: sessionId.value });
     isBusy.value = false;
@@ -616,12 +625,11 @@ async function interruptAgent() {
     activeAssistantId.value = '';
     statusState.value = 'idle';
     stopElapsedTimer();
-    appendLog('已中断', 'done');
-    appendMessage('system', '任务已被中断。');
-    toastRef.value?.warning('任务已中断');
+    appendLog(t('desktop.app.interrupted'), 'done');
+    appendMessage('system', t('desktop.app.taskInterrupted'));
+    toastRef.value?.warning(t('desktop.app.interruptWarning'));
   } catch (e) {
-    errorText.value = e.message;
-    appendLog('中断失败', 'fail');
+    appendLog(t('desktop.app.interruptFailed'), 'fail');
   }
 }
 
@@ -648,7 +656,7 @@ async function searchWorkspaceContent() {
     };
   } catch (e) {
     errorText.value = e.message;
-    appendLog('内容搜索失败', 'fail');
+    appendLog(t('desktop.app.searchFailed'), 'fail');
   } finally {
     isSearching.value = false;
   }
@@ -663,10 +671,10 @@ async function previewWorkspaceFile(filePath, match = null) {
       path: filePath,
     });
     selectedPreview.value = result;
-    appendLog(`预览文件: ${result.path}`, 'done');
+    appendLog(`${t('desktop.app.previewFile')}: ${result.path}`, 'done');
   } catch (e) {
     errorText.value = e.message;
-    appendLog('文件预览失败', 'fail');
+    appendLog(t('desktop.app.previewFailed'), 'fail');
   }
 }
 
@@ -680,11 +688,11 @@ async function loadGitDiff(filePath) {
       path: filePath,
     });
     selectedGitDiff.value = result;
-    appendLog(`读取 diff: ${result.path}`, 'done');
+      appendLog(`${t('desktop.app.readDiff')}: ${result.path}`, 'done');
   } catch (e) {
     selectedGitDiff.value = null;
     errorText.value = e.message;
-    appendLog('Diff 读取失败', 'fail');
+    appendLog(t('desktop.app.diffReadFailed'), 'fail');
   } finally {
     isLoadingGitDiff.value = false;
   }
@@ -728,14 +736,14 @@ function buildGitPrompt(intent) {
 async function handleGitAssist(intent) {
   const prompt = buildGitPrompt(intent);
   if (!prompt) {
-    toastRef.value?.warning('请先选择一个有 diff 的文件');
+    toastRef.value?.warning(t('desktop.app.selectDiffFirst'));
     return;
   }
 
   await submitAgentMessage(prompt, {
-    logLabel: intent === 'commit' ? '生成提交说明' : '解释 diff',
-    doneLabel: intent === 'commit' ? '提交说明已生成' : 'Diff 解释完成',
-    failLabel: intent === 'commit' ? '提交说明生成失败' : 'Diff 解释失败',
+    logLabel: intent === 'commit' ? t('desktop.app.generateCommit') : t('desktop.app.explainDiffAction'),
+    doneLabel: intent === 'commit' ? t('desktop.app.commitGenerated') : t('desktop.app.diffExplained'),
+    failLabel: intent === 'commit' ? t('desktop.app.commitFailed') : t('desktop.app.explainFailed'),
   });
 }
 
@@ -779,7 +787,7 @@ function handleAgentEvent(event) {
       isStreaming.value = false;
       activeAssistantId.value = '';
       statusState.value = 'thinking';
-      appendLog('回合开始', 'start');
+      appendLog(t('desktop.app.turnStart'), 'start');
       break;
     case 'message.delta':
       appendAssistantDelta(event.delta);
@@ -793,15 +801,15 @@ function handleAgentEvent(event) {
     case 'tool.start':
       upsertToolCall({ ...event, status: 'running' });
       statusState.value = 'running';
-      appendLog(`工具 ${event.name} 开始执行`, 'start');
+      appendLog(`${t('desktop.app.toolStart')}: ${event.name}`, 'start');
       break;
     case 'tool.result':
       upsertToolCall({ ...event, status: event.isError ? 'failed' : 'done' });
-      appendLog(`工具 ${event.name} ${event.isError ? '执行失败' : '完成'}`, event.isError ? 'fail' : 'done');
+      appendLog(`${event.name} ${event.isError ? t('desktop.app.toolFailed') : t('desktop.app.toolDone')}`, event.isError ? 'fail' : 'done');
       break;
     case 'tool.limit':
-      appendMessage('system', '已达到工具调用上限。');
-      appendLog('工具调用上限');
+      appendMessage('system', t('desktop.app.toolLimitReached'));
+      appendLog(t('desktop.app.toolLimit'));
       break;
     case 'usage':
       if (event.status) {
@@ -812,10 +820,10 @@ function handleAgentEvent(event) {
       }
       break;
     case 'skill.start':
-      appendLog(`技能开始: ${event.name || event.skill || '未知'}`);
+      appendLog(`${t('desktop.app.skillStart')}: ${event.name || event.skill || '?'}`);
       break;
     case 'skill.matched':
-      appendLog(`技能匹配: ${event.name || event.skill || '未知'}`);
+      appendLog(`${t('desktop.app.skillMatched')}: ${event.name || event.skill || '?'}`);
       break;
     case 'turn.completed':
       isBusy.value = false;
@@ -825,7 +833,7 @@ function handleAgentEvent(event) {
       statusState.value = 'idle';
       updateStats(event);
       stopElapsedTimer();
-      appendLog('回合完成', 'done');
+      appendLog(t('desktop.app.turnComplete'), 'done');
       void loadWorkspaceSnapshot();
       break;
     case 'turn.interrupted':
@@ -835,19 +843,19 @@ function handleAgentEvent(event) {
       activeAssistantId.value = '';
       statusState.value = 'idle';
       stopElapsedTimer();
-      appendMessage('system', '任务已被中断。');
-      appendLog('回合被中断');
+      appendMessage('system', t('desktop.app.taskInterrupted'));
+      appendLog(t('desktop.app.turnInterrupted'));
       break;
     case 'turn.failed':
       isBusy.value = false;
       isThinking.value = false;
       isStreaming.value = false;
       activeAssistantId.value = '';
-      errorText.value = event.error?.message ?? 'Agent 错误';
+      errorText.value = event.error?.message ?? t('desktop.app.agentError');
       statusState.value = 'error';
       stopElapsedTimer();
-      appendMessage('system', `错误: ${errorText.value}`, { tone: 'danger' });
-      appendLog('回合失败', 'fail');
+      appendMessage('system', `${t('desktop.app.errorPrefix')}: ${errorText.value}`, { tone: 'danger' });
+      appendLog(t('desktop.app.turnFailed'), 'fail');
       break;
     default:
       break;
@@ -856,7 +864,7 @@ function handleAgentEvent(event) {
 
 function handleApprovalRequest(request) {
   approvalQueue.value.push(request);
-  appendLog(`等待审批: ${request.toolName}`, 'start');
+  appendLog(`${t('desktop.app.waitingApproval')}: ${request.toolName}`, 'start');
 }
 
 async function decideApproval(decision) {
@@ -867,18 +875,18 @@ async function decideApproval(decision) {
   try {
     const result = await ensureApi('respondApproval')({ id: request.id, decision });
     if (!result?.resolved) {
-      appendLog(`审批请求已过期: ${request.toolName}`, 'fail');
-      toastRef.value?.warning('审批请求已过期');
+      appendLog(`${t('desktop.app.approvalExpired')}: ${request.toolName}`, 'fail');
+      toastRef.value?.warning(t('desktop.app.approvalExpiredToast'));
       return;
     }
 
     const approved = decision === 'approve' || decision === 'always_allow';
-    appendLog(`${approved ? '已允许' : '已拒绝'}: ${request.toolName}`, approved ? 'done' : 'fail');
+    appendLog(`${approved ? t('desktop.app.approved') : t('desktop.app.denied')}: ${request.toolName}`, approved ? 'done' : 'fail');
     void loadInsightPanels();
   } catch (e) {
     errorText.value = e.message;
-    appendLog('审批响应失败', 'fail');
-    toastRef.value?.error('审批失败: ' + e.message);
+    appendLog(t('desktop.app.approvalFailed'), 'fail');
+    toastRef.value?.error(`${t('desktop.app.approvalFailedToast')}: ` + e.message);
   }
 }
 
@@ -888,12 +896,12 @@ async function saveSettings(updates) {
     const result = await ensureApi('updateSettings')(updates);
     normalizeSettings(result);
     showSettings.value = false;
-    appendLog('设置已保存', 'done');
-    toastRef.value?.success('设置已保存');
+    appendLog(t('desktop.app.settingsSaved'), 'done');
+    toastRef.value?.success(t('desktop.app.settingsSavedToast'));
     await Promise.all([loadWorkspaceSnapshot(), loadInsightPanels()]);
   } catch (e) {
     errorText.value = e.message;
-    toastRef.value?.error('保存设置失败');
+    toastRef.value?.error(t('desktop.app.settingsSaveFailed'));
   }
 }
 
@@ -963,7 +971,7 @@ watch([activeNav, panelQuery], () => {
     <section class="workspace">
       <div>
         <TopBar
-          :title="sessionId ? `会话 ${sessionId.slice(0, 8)}` : 'Agent 工作区'"
+          :title="sessionId ? `${t('desktop.app.sessionBar')} ${sessionId.slice(0, 8)}` : t('desktop.topbar.title')"
           :scope-label="sessionScopeLabel"
           :scope-title="sessionScopeTitle"
           :status="statusState"
@@ -975,17 +983,17 @@ watch([activeNav, panelQuery], () => {
         />
         <div class="workspace-rail">
           <div class="workspace-rail-item workspace-rail-wide">
-            <span class="rail-label">工作区</span>
+            <span class="rail-label">{{ t('desktop.app.workspaceRail') }}</span>
             <span class="rail-value">{{ workspaceDisplayPath }}</span>
           </div>
-          <div class="workspace-rail-item"><span class="rail-label">文件</span><span class="rail-value">{{ workspaceSummary.files }}</span></div>
-          <div class="workspace-rail-item"><span class="rail-label">目录</span><span class="rail-value">{{ workspaceSummary.directories }}</span></div>
-          <div class="workspace-rail-item"><span class="rail-label">深度</span><span class="rail-value">{{ workspaceSummary.depth }}</span></div>
-          <div class="workspace-rail-item"><span class="rail-label">消息</span><span class="rail-value">{{ messages.length }}</span></div>
-          <div class="workspace-rail-item"><span class="rail-label">工具</span><span class="rail-value">{{ toolCalls.length }}</span></div>
+          <div class="workspace-rail-item"><span class="rail-label">{{ t('desktop.app.filesRail') }}</span><span class="rail-value">{{ workspaceSummary.files }}</span></div>
+          <div class="workspace-rail-item"><span class="rail-label">{{ t('desktop.app.dirsRail') }}</span><span class="rail-value">{{ workspaceSummary.directories }}</span></div>
+          <div class="workspace-rail-item"><span class="rail-label">{{ t('desktop.app.depthRail') }}</span><span class="rail-value">{{ workspaceSummary.depth }}</span></div>
+          <div class="workspace-rail-item"><span class="rail-label">{{ t('desktop.app.messagesRail') }}</span><span class="rail-value">{{ messages.length }}</span></div>
+          <div class="workspace-rail-item"><span class="rail-label">{{ t('desktop.app.toolsRail') }}</span><span class="rail-value">{{ toolCalls.length }}</span></div>
         </div>
         <div v-if="errorText" class="error-banner" role="alert">
-          <strong>错误</strong>
+          <strong>{{ t('desktop.app.errorPrefix') }}</strong>
           <span>{{ errorText }}</span>
         </div>
       </div>
@@ -1055,10 +1063,10 @@ watch([activeNav, panelQuery], () => {
                   <div class="search-hit-text">{{ match.text }}</div>
                 </button>
                 <div v-if="contentSearch.truncated" class="empty-panel">
-                  结果已截断
+                  {{ t('desktop.app.searchTruncated') }}
                 </div>
                 <div v-if="contentSearch.matches.length === 0 && !isSearching" class="empty-panel">
-                  没有内容匹配
+                  {{ t('desktop.app.searchNoMatch') }}
                 </div>
               </div>
 
@@ -1074,7 +1082,7 @@ watch([activeNav, panelQuery], () => {
                   <div class="nav-row-meta">{{ node.type }}</div>
                 </button>
                 <div v-if="searchResults.length === 0" class="empty-panel">
-                  没有匹配结果
+                  {{ t('desktop.app.searchNoResults') }}
                 </div>
               </div>
 
@@ -1085,7 +1093,7 @@ watch([activeNav, panelQuery], () => {
                   <div class="nav-card-meta">{{ session.preview }}</div>
                 </div>
                 <div v-if="matchingSessions.length === 0" class="empty-panel">
-                  没有匹配会话
+                  {{ t('desktop.app.searchNoSessions') }}
                 </div>
               </div>
             </div>
@@ -1100,7 +1108,7 @@ watch([activeNav, panelQuery], () => {
                   <span class="file-preview-meta">{{ selectedPreview.bytes }} bytes</span>
                 </div>
                 <div v-if="selectedPreview.truncated" class="empty-panel">
-                  文件过大，未加载预览
+                  {{ t('desktop.app.fileTooLarge') }}
                 </div>
                 <div v-else class="file-preview-code"><div
                   v-for="line in selectedPreview.lines"
@@ -1111,7 +1119,7 @@ watch([activeNav, panelQuery], () => {
               </div>
               <div v-else class="file-preview-empty">
                 <div class="panel-kicker">Preview</div>
-                <h3>选择一个文件</h3>
+                <h3>{{ t('desktop.app.selectFile') }}</h3>
               </div>
             </div>
           </div>
@@ -1135,7 +1143,7 @@ watch([activeNav, panelQuery], () => {
               </div>
             </div>
             <div v-if="filteredSkills.length === 0" class="empty-panel">
-              没有匹配的技能
+              {{ t('desktop.app.noMatchingSkills') }}
             </div>
           </div>
         </div>
@@ -1154,7 +1162,7 @@ watch([activeNav, panelQuery], () => {
               <div class="nav-card-meta">{{ tool.description || 'No description' }}</div>
             </div>
             <div v-if="filteredTools.length === 0" class="empty-panel">
-              没有匹配的工具
+              {{ t('desktop.app.noMatchingTools') }}
             </div>
           </div>
         </div>
@@ -1176,7 +1184,7 @@ watch([activeNav, panelQuery], () => {
                   <div class="nav-row-meta">{{ item.level }}</div>
                 </div>
                 <div v-if="filteredPermissions.length === 0" class="empty-panel">
-                  没有匹配的权限规则
+                  {{ t('desktop.app.noMatchingPermissions') }}
                 </div>
               </div>
             </div>
@@ -1192,7 +1200,7 @@ watch([activeNav, panelQuery], () => {
                   </div>
                 </div>
                 <div v-if="filteredTeams.length === 0" class="empty-panel">
-                  没有匹配的团队
+                  {{ t('desktop.app.noMatchingTeams') }}
                 </div>
               </div>
             </div>

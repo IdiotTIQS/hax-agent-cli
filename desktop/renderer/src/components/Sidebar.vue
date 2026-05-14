@@ -1,6 +1,8 @@
 <script setup>
-import { computed, ref } from 'vue';
+import { computed, inject, ref } from 'vue';
 import FileTreeNode from './FileTreeNode.vue';
+
+const t = inject('t');
 
 const props = defineProps({
   sessions: { type: Array, default: () => [] },
@@ -19,21 +21,21 @@ const emit = defineEmits([
 const collapsedSections = ref({ project: false });
 
 // Navigation modules
-const navItems = [
-  { key: 'chat',    icon: '▸', label: '对话' },
-  { key: 'search',  icon: '⌕', label: '搜索' },
-  { key: 'skills',  icon: '◆', label: '技能' },
-  { key: 'plugins', icon: '⬡', label: '插件' },
-  { key: 'auto',    icon: '↻', label: '自动化' },
-];
+const navItems = computed(() => [
+  { key: 'chat',    icon: '\u25B8', label: t('desktop.sidebar.chat') },
+  { key: 'search',  icon: '\u2315', label: t('desktop.sidebar.search') },
+  { key: 'skills',  icon: '\u25C6', label: t('desktop.sidebar.skills') },
+  { key: 'plugins', icon: '\u2B21', label: t('desktop.sidebar.plugins') },
+  { key: 'auto',    icon: '\u21BB', label: t('desktop.sidebar.automation') },
+]);
 
 const maxSessionsPerGroup = 6;
 
 const sessionGroups = computed(() => {
   const groups = [
-    { key: 'current', label: '当前项目', sessions: [] },
-    { key: 'other', label: '其他项目', sessions: [] },
-    { key: 'unassigned', label: '未归属对话', sessions: [] },
+    { key: 'current', label: t('desktop.sidebar.currentProject'), sessions: [] },
+    { key: 'other', label: t('desktop.sidebar.otherProjects'), sessions: [] },
+    { key: 'unassigned', label: t('desktop.sidebar.unassignedChats'), sessions: [] },
   ];
   const byKey = new Map(groups.map((group) => [group.key, group]));
 
@@ -64,7 +66,7 @@ function sectionArrow(key) {
       <div class="sidebar-logo">HX</div>
       <div class="sidebar-brand-text">
         <h1>Hax Agent</h1>
-        <span>控制面板</span>
+        <span>{{ t('desktop.sidebar.controlPanel') }}</span>
       </div>
     </div>
 
@@ -84,13 +86,13 @@ function sectionArrow(key) {
       <div class="nav-separator"></div>
       <button class="nav-item" @click="emit('new-task')" :disabled="isBusy">
         <span class="nav-icon">+</span>
-        新任务
+        {{ t('desktop.sidebar.newTask') }}
       </button>
     </nav>
 
     <div class="sidebar-sessions">
       <div class="sidebar-section-label">
-        <span>最近会话</span>
+        <span>{{ t('desktop.sidebar.recentSessions') }}</span>
         <span class="count">{{ sessions.length }}</span>
       </div>
       <div v-if="sessionGroups.length" class="session-list">
@@ -108,7 +110,7 @@ function sectionArrow(key) {
           </button>
         </div>
       </div>
-      <div v-else class="session-empty">暂无历史会话</div>
+      <div v-else class="session-empty">{{ t('desktop.sidebar.noHistory') }}</div>
     </div>
 
     <!-- File Tree -->
@@ -118,8 +120,8 @@ function sectionArrow(key) {
         :class="sectionArrow('project')"
         @click="toggleSection('project')"
       >
-        <span>项目文件</span>
-        <span class="arrow">▼</span>
+        <span>{{ t('desktop.sidebar.projectFiles') }}</span>
+        <span class="arrow">\u25BC</span>
       </div>
       <div v-if="!collapsedSections.project" class="file-tree">
         <FileTreeNode
@@ -135,7 +137,7 @@ function sectionArrow(key) {
     <!-- Footer -->
     <div class="sidebar-footer">
       <button class="sidebar-footer-btn" @click="emit('open-settings')">
-        <span style="margin-right:6px">⚙</span> 设置
+        <span style="margin-right:6px">\u2699</span> {{ t('desktop.sidebar.settings') }}
       </button>
     </div>
   </aside>
