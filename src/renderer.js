@@ -792,7 +792,8 @@ function formatFileModificationNotice(chunk) {
 function formatWriteModificationNotice(chunk) {
   const change = chunk.data.change;
   const action = change.operation === 'create' ? 'Create' : 'Update';
-  const pathDisplay = `${THEME.toolIndicator}${action}${ANSI.reset}(${THEME.accent}${formatDisplayPath(chunk.data.path)}${ANSI.reset})`;
+  const duration = formatDuration(chunk.durationMs);
+  const pathDisplay = `${THEME.toolIndicator}${action}${ANSI.reset}(${THEME.accent}${formatDisplayPath(chunk.data.path)}${ANSI.reset})${THEME.dim}${duration}${ANSI.reset}`;
   const lines = [
     pathDisplay,
     `  ${THEME.border}└─${ANSI.reset}  ${formatChangeSummary(change)}`,
@@ -809,7 +810,8 @@ function formatEditModificationNotice(chunk) {
   const data = chunk.data;
   const applied = data.applied !== false;
   const action = applied ? 'Edit' : 'Preview';
-  const pathDisplay = `${THEME.toolIndicator}${action}${ANSI.reset}(${THEME.accent}${formatDisplayPath(data.path)}${ANSI.reset})`;
+  const duration = formatDuration(chunk.durationMs);
+  const pathDisplay = `${THEME.toolIndicator}${action}${ANSI.reset}(${THEME.accent}${formatDisplayPath(data.path)}${ANSI.reset})${THEME.dim}${duration}${ANSI.reset}`;
   const summary = data.summary || `Modified ${data.oldLines || 1} → ${data.newLines || 1} lines`;
   const lines = [
     pathDisplay,
