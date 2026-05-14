@@ -543,7 +543,7 @@ test('anthropic provider summarizes final tool result instead of limiting immedi
   assert.match(chunks.at(-1).delta, /hax-agent-cli 项目/);
 });
 
-test('anthropic provider fails if final-answer fallback is also an empty preamble', async () => {
+test('anthropic provider accepts final text after forceTextResponse prompt even if it matches preamble patterns', async () => {
   const requests = [];
   const registry = new ToolRegistry();
   registry.register({
@@ -597,14 +597,13 @@ test('anthropic provider fails if final-answer fallback is also an empty preambl
     chunks.push(chunk);
   }
 
+  // Should have made 3 requests: initial, final-answer prompt, final text
   assert.equal(requests.length, 3);
   assert.equal(chunks.some((chunk) => chunk.type === 'tool_start' && chunk.name === 'file.readDirectory'), true);
-  assert.deepEqual(chunks.find((chunk) => chunk.type === 'tool_limit'), {
-    type: 'tool_limit',
-    reason: 'empty_tool_preamble',
-    maxToolTurns: 3,
-  });
-  assert.match(chunks.at(-1).delta, /did not call any available tool/);
+  // The final text should NOT be killed as a tool preamble — it's the
+  // model's answer after being prompted for a final response.
+  assert.equal(chunks.some((chunk) => chunk.type === 'tool_limit'), false);
+  assert.equal(chunks.some((chunk) => chunk.type === 'text' && chunk.delta && chunk.delta.includes('深入查看')), true);
 });
 
 test('anthropic provider surfaces empty preambles after repeated single-call tools force text', async () => {

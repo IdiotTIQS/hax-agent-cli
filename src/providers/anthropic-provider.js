@@ -220,6 +220,13 @@ class AnthropicProvider extends ChatProvider {
             forceTextResponse = true;
             continue;
           }
+          // When forceTextResponse is already active and we've already given
+          // a final-answer prompt, accept the response instead of killing it
+          // as a tool preamble (fixes false positives on Chinese text like
+          // "让我直接访问..." being mistaken for tool-call intent).
+          if (forceTextResponse) {
+            return;
+          }
           yield createToolLimitChunk(turn + 1, "empty_tool_preamble");
           yield createTextChunk(createToolPreambleLimitText());
           return;
