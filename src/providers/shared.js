@@ -56,7 +56,7 @@ const DSML_TOOL_CALLS_PATTERN = /<\uFF5C\uFF5CDSML\uFF5C\uFF5Ctool_calls\b[^>]*>
 const DSML_INVOKE_PATTERN = /<\uFF5C\uFF5CDSML\uFF5C\uFF5Cinvoke\s+name="([^"]+)"[^>]*>([\s\S]*?)<\/\uFF5C\uFF5CDSML\uFF5C\uFF5Cinvoke>/g;
 const DSML_PARAMETER_PATTERN = /<\uFF5C\uFF5CDSML\uFF5C\uFF5Cparameter\s+name="([^"]+)"([^>]*)>([\s\S]*?)<\/\uFF5C\uFF5CDSML\uFF5C\uFF5Cparameter>/g;
 const DSML_PREFIX = "<\uFF5C\uFF5CDSML\uFF5C\uFF5C";
-const MAX_EMPTY_TOOL_PREAMBLE_CONTINUATIONS = 1;
+const MAX_EMPTY_TOOL_PREAMBLE_CONTINUATIONS = 3;
 
 function withRetry(fn, maxRetries = 3, baseDelayMs = 1000) {
   return async (...args) => {
@@ -309,10 +309,12 @@ function isToolPreambleText(text) {
 
 function createToolPreambleContinuationPrompt() {
   return [
-    "You said you would inspect or gather more context, but you did not call a tool.",
-    "Continue the task now. If you need project context, call an available tool such as file.readDirectory, file.glob, file.search, or file.read with valid arguments.",
-    "If the API only supports text-form tool calls, emit a valid DSML tool call instead of prose.",
-    "Do not stop after another preamble.",
+    "You said you would take action but did not call any tool.",
+    "Do NOT describe what you plan to do — CALL a tool RIGHT NOW.",
+    "Available tools include: file.read, file.write, file.edit, file.glob, file.search,",
+    "shell.run, web.fetch, web.search, file.readDirectory.",
+    "If the API only supports text-form tool calls, emit a valid DSML tool call.",
+    `This is retry attempt. You MUST emit a tool call this time.`,
   ].join(" ");
 }
 

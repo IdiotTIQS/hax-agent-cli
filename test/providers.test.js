@@ -1500,7 +1500,7 @@ test('openai provider continues after empty tool preamble instead of completing 
   assert.equal(executions, 1);
   assert.equal(requests.length, 3);
   assert.equal(requests.some((request) =>
-    request.messages.some((message) => /did not call a tool/i.test(message.content || ''))
+    request.messages.some((message) => /did not call any tool/i.test(message.content || ''))
   ), true);
   assert.equal(chunks.some((chunk) => chunk.type === 'tool_start' && chunk.name === 'file.readDirectory'), true);
   assert.equal(chunks.at(-1).type, 'text');
