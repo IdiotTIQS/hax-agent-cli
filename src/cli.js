@@ -688,6 +688,26 @@ async function runShell(args, explicitSession) {
   session.interactivePromptActive = false;
   let multilineBuffer = [];
 
+  /**
+   * Perform a clean exit: show file changes, session stats, save transcript, then quit.
+   * Shared by /exit, /quit, /q, and double-Ctrl+C.
+   */
+  function performCleanExit(session, screen, t) {
+    session.shouldExit = true;
+    // Show file change summary if any files were modified
+    if (session.modifiedFiles && session.modifiedFiles.size > 0) {
+      const files = [...session.modifiedFiles].sort();
+      screen.write(`\n${styled(THEME.heading, t('shell.filesModified', { count: files.length }))}\n`);
+      for (const f of files) {
+        screen.write(`  ${styled(THEME.accent, f)}\n`);
+      }
+    }
+    const cost = session.costTracker.getCost(session.provider?.model);
+    screen.write(`\n${styled(THEME.success, t('shell.sessionEnded'))} ${styled(THEME.dim, t('shell.sessionStats', { cost: cost.toFixed(4), turns: session.costTracker.turnCount }))}\n`);
+    screen.deactivate();
+    process.exit(0);
+  }
+
   rl.on('line', (line) => {
     // Multi-line continuation: trailing backslash (bash-style)
     if (line.endsWith('\\')) {
@@ -716,19 +736,8 @@ async function runShell(args, explicitSession) {
       if (trimmed === '/exit' || trimmed === '/quit' || trimmed === '/q') {
         screen.clearLine();
         screen.write(trimmed + '\n');
-        session.shouldExit = true;
-        // Show file change summary if any files were modified
-        if (session.modifiedFiles && session.modifiedFiles.size > 0) {
-          const files = [...session.modifiedFiles].sort();
-          screen.write(`\n${styled(THEME.heading, t('shell.filesModified', { count: files.length }))}\n`);
-          for (const f of files) {
-            screen.write(`  ${styled(THEME.accent, f)}\n`);
-          }
-        }
-        const cost = session.costTracker.getCost(session.provider?.model);
-          screen.write(`\n${styled(THEME.success, t('shell.sessionEnded'))} ${styled(THEME.dim, t('shell.sessionStats', { cost: cost.toFixed(4), turns: session.costTracker.turnCount }))}\n`);
-        screen.deactivate();
-        process.exit(0);
+        performCleanExit(session, screen, t);
+        return;
       }
 
       if (trimmed === '/vim') {
@@ -868,8 +877,7 @@ async function runShell(args, explicitSession) {
         setTimeout(() => { pendingExitCount = 0; }, 2000);
       } else {
         screen.write('\n');
-        screen.deactivate();
-        process.exit(0);
+        performCleanExit(session, screen, t);
       }
       return;
     }
