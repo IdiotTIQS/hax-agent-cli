@@ -15,6 +15,9 @@ let openedExternalUrl = '';
 
 installDom();
 const { mount } = require('@vue/test-utils');
+const { createTranslator } = require('../src/i18n');
+const testT = createTranslator('zh-CN');
+const i18nMountOptions = { global: { provide: { t: testT } } };
 
 function installDom() {
   const dom = new JSDOM('<!doctype html><html><body></body></html>', {
@@ -160,6 +163,7 @@ test('ChatArea renders sanitized markdown and supports code copy', async () => {
   copiedText = '';
   openedExternalUrl = '';
   const wrapper = mount(ChatArea, {
+    ...i18nMountOptions,
     props: {
       messages: [{
         id: 'm1',
@@ -188,9 +192,10 @@ test('ChatArea renders sanitized markdown and supports code copy', async () => {
 
 test('ChatArea shows output dots while assistant stream is still active', async () => {
   const ChatArea = await loadComponent(path.join('components', 'ChatArea.vue'));
-  const wrapper = mount(ChatArea, {
-    props: {
-      messages: [{
+    const wrapper = mount(ChatArea, {
+      ...i18nMountOptions,
+      props: {
+        messages: [{
         id: 'm1',
         role: 'assistant',
         content: 'Partial answer',
@@ -243,9 +248,10 @@ test('FileTreeNode collapses directories and files have no expand button', async
 
 test('RightPanel displays token and cost metrics', async () => {
   const RightPanel = await loadComponent(path.join('components', 'RightPanel.vue'));
-  const wrapper = mount(RightPanel, {
-    props: {
-      activeTab: 'summary',
+    const wrapper = mount(RightPanel, {
+      ...i18nMountOptions,
+      props: {
+        activeTab: 'summary',
       tokenUsed: 12345,
       cost: '$0.1234',
       toolCalls: [{ id: 't1' }],
@@ -260,10 +266,11 @@ test('RightPanel displays token and cost metrics', async () => {
 
 test('RightPanel shows git changes and emits selected file', async () => {
   const RightPanel = await loadComponent(path.join('components', 'RightPanel.vue'));
-  const wrapper = mount(RightPanel, {
-    props: {
-      activeTab: 'git',
-      gitBranch: 'main',
+    const wrapper = mount(RightPanel, {
+      ...i18nMountOptions,
+      props: {
+        activeTab: 'git',
+        gitBranch: 'main',
       gitFiles: [
         { path: 'src/index.js', status: 'modified' },
         { path: 'README.md', status: 'untracked' },
@@ -286,6 +293,7 @@ test('RightPanel shows git changes and emits selected file', async () => {
 test('RightPanel emits git assist actions for selected diff', async () => {
   const RightPanel = await loadComponent(path.join('components', 'RightPanel.vue'));
   const wrapper = mount(RightPanel, {
+    ...i18nMountOptions,
     props: {
       activeTab: 'git',
       selectedGitFile: 'src/index.js',
@@ -309,11 +317,12 @@ test('RightPanel emits git assist actions for selected diff', async () => {
 
 test('RightPanel disables git assist actions without a diff', async () => {
   const RightPanel = await loadComponent(path.join('components', 'RightPanel.vue'));
-  const wrapper = mount(RightPanel, {
-    props: {
-      activeTab: 'git',
-      selectedGitFile: 'src/index.js',
-      selectedGitDiff: { path: 'src/index.js', diff: '' },
+    const wrapper = mount(RightPanel, {
+      ...i18nMountOptions,
+      props: {
+        activeTab: 'git',
+        selectedGitFile: 'src/index.js',
+        selectedGitDiff: { path: 'src/index.js', diff: '' },
     },
   });
 
@@ -323,9 +332,10 @@ test('RightPanel disables git assist actions without a diff', async () => {
 
 test('TopBar shows the active session workspace scope', async () => {
   const TopBar = await loadComponent(path.join('components', 'TopBar.vue'));
-  const wrapper = mount(TopBar, {
-    props: {
-      title: '会话 abc12345',
+    const wrapper = mount(TopBar, {
+      ...i18nMountOptions,
+      props: {
+        title: '会话 abc12345',
       scopeLabel: '当前工作区: HaxAgent',
       scopeTitle: 'E:\\HaxAgent',
       models: [],
@@ -342,6 +352,7 @@ test('TopBar shows the active session workspace scope', async () => {
 test('Sidebar groups sessions by project scope', async () => {
   const Sidebar = await loadComponent(path.join('components', 'Sidebar.vue'));
   const wrapper = mount(Sidebar, {
+    ...i18nMountOptions,
     props: {
       sessions: [
         { id: 'a', preview: 'Current task', messageCount: 2, projectScope: 'current', projectName: 'HaxAgent' },
@@ -372,10 +383,11 @@ test('Sidebar groups all sessions before applying per-group limits', async () =>
     { id: 'current-late', preview: 'Late current task', messageCount: 2, projectScope: 'current', projectName: 'HaxAgent' },
     { id: 'loose-late', preview: 'Late loose chat', messageCount: 1, projectScope: 'unassigned', projectName: '未归属' },
   ];
-  const wrapper = mount(Sidebar, {
-    props: {
-      sessions,
-      fileTree: [],
+    const wrapper = mount(Sidebar, {
+      ...i18nMountOptions,
+      props: {
+        sessions,
+        fileTree: [],
       activeNav: 'chat',
     },
   });
@@ -387,9 +399,10 @@ test('Sidebar groups all sessions before applying per-group limits', async () =>
 
 test('ApprovalModal emits approval decisions', async () => {
   const ApprovalModal = await loadComponent(path.join('components', 'ApprovalModal.vue'));
-  const wrapper = mount(ApprovalModal, {
-    props: {
-      request: {
+    const wrapper = mount(ApprovalModal, {
+      ...i18nMountOptions,
+      props: {
+        request: {
         id: 'approval-1',
         toolName: 'file.write',
         toolKey: 'file.write',
