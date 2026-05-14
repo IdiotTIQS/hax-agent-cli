@@ -151,6 +151,10 @@ function formatToolDescription(toolName, toolArgs, locale) {
   return `${toolName}: ${JSON.stringify(toolArgs || {})}`;
 }
 
+/**
+ * Manages tool execution permissions with three modes: auto(approve), ask(prompt), yolo(approve-all).
+ * Supports per-tool always-allow / always-deny overrides, persistence to disk, and callback-based approval.
+ */
 class PermissionManager {
   constructor(options = {}) {
     this.globalMode = options.mode || 'normal';

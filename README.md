@@ -322,6 +322,8 @@ AI 会分析会话内容，识别可复用的步骤，并引导你创建 SKILL.m
 | **OpenAI** | `openai`, `gpt` | `gpt-4.1` | `OPENAI_API_KEY`, `OPENAI_BASE_URL` |
 | **Google** | `google`, `gemini` | `gemini-2.5-flash-preview-05-20` | `GOOGLE_API_KEY`, `GOOGLE_BASE_URL` |
 
+> 💡 **自定义 Provider**：通过设置 `apiUrl` 指向任意 Anthropic-compatible 端点（如 `https://api.deepseek.com/anthropic`），可接入 DeepSeek 等第三方模型。搭配 `/model` 切换对应的模型 ID 即可使用。
+
 ### 完整环境变量
 
 | 变量 | 说明 | 默认值 |

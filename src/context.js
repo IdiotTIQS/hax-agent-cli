@@ -1,5 +1,11 @@
 const { listMemories, readTranscript } = require('./memory');
 
+/**
+ * Load prompt context from memories and transcript, building the system prompt
+ * and message list for the provider.
+ * @param {{ settings: object, memories?: object[], transcript?: object[], sessionId?: string, userPrompt?: string, instructions?: string, runtime?: object }} options
+ * @returns {{ systemPrompt: string, messages: object[], memories: object[], transcript: object[] }}
+ */
 function loadPromptContext(options = {}) {
   const settings = options.settings || {};
   const memories = options.memories || (settings.memory?.enabled === false ? [] : listMemories(settings));

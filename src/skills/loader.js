@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const { debug } = require('../debug');
 const { parseFrontmatter, extractDescriptionFromMarkdown, parseArgumentNames, substituteArguments } = require('./parser');
 
 function getUserSkillsDir() {
@@ -78,7 +79,7 @@ function loadSkillsFromDir(dirPath, source) {
 
       skills.push(skill);
     } catch (error) {
-      console.error(`[skills] failed to load skill from ${skillFilePath}: ${error.message}`);
+      debug('skills', `failed to load skill from ${skillFilePath}: ${error.message}`);
     }
   }
 

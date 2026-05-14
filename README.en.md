@@ -322,6 +322,8 @@ The system automatically tracks each skill's usage frequency and last-used time,
 | **OpenAI** | `openai`, `gpt` | `gpt-4.1` | `OPENAI_API_KEY`, `OPENAI_BASE_URL` |
 | **Google** | `google`, `gemini` | `gemini-2.5-flash-preview-05-20` | `GOOGLE_API_KEY`, `GOOGLE_BASE_URL` |
 
+> 💡 **Custom Providers**: Set `apiUrl` to any Anthropic-compatible endpoint (e.g. `https://api.deepseek.com/anthropic`) to use third-party models like DeepSeek. Combine with `/model` to switch to the corresponding model ID.
+
 ### Complete Environment Variables
 
 | Variable | Description | Default |

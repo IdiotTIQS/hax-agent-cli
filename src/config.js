@@ -64,6 +64,12 @@ const DEFAULT_SETTINGS = Object.freeze({
   },
 });
 
+/**
+ * Resolve final settings by merging defaults, user config, project config,
+ * explicit config, and environment variables in that priority order.
+ * @param {{ projectRoot?: string, userSettingsPath?: string, projectSettingsPath?: string, env?: Record<string,string> }} [options]
+ * @returns {object} merged settings object
+ */
 function resolveSettings(options = {}) {
   const env = options.env || process.env;
   const projectRoot = path.resolve(options.projectRoot || env.HAX_AGENT_PROJECT_ROOT || process.cwd());
@@ -98,6 +104,11 @@ function resolveSettings(options = {}) {
   return { settings, sources };
 }
 
+/**
+ * Load settings from default paths. Shortcut for resolveSettings().
+ * @param {{ projectRoot?: string }} [options]
+ * @returns {object} loaded settings
+ */
 function loadSettings(options = {}) {
   return resolveSettings(options).settings;
 }
