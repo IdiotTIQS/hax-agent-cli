@@ -26,6 +26,8 @@ const SLASH_COMMANDS = [
   { name: 'memory', descriptionKey: 'cmd.memory', description: 'Manage agent memory', aliases: [], argHint: '[list|read|write|delete] [name]' },
   { name: 'permissions', descriptionKey: 'cmd.permissions', description: 'View or manage tool permission levels', aliases: ['perm'], argHint: '[status|mode <auto|ask|yolo>|reset]' },
   { name: 'update', descriptionKey: 'cmd.update', description: 'Check for CLI updates', aliases: [], argHint: '[install]' },
+  { name: 'copy', descriptionKey: 'cmd.copy', description: 'Copy last AI response to clipboard', aliases: [] },
+  { name: 'rename', descriptionKey: 'cmd.rename', description: 'Name the current session', aliases: ['name'], argHint: '<name>' },
 ];
 
 const SKILLS_SUBCOMMANDS = ['list', 'usage'];

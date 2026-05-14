@@ -248,6 +248,8 @@ async function handleSlashCommand(line, context) {
     case 'memory': handleMemoryCommand(args, context); break;
     case 'permissions': await handlePermissionsCommand(args, context); break;
     case 'update': await handleUpdateCheck(args, context); break;
+    case 'copy': copyLastResponse(context); break;
+    case 'rename': renameSession(args, context); break;
     default:
       context.screen.write(`${THEME.error}Command not implemented: /${command.name}${ANSI.reset || ''}\n`);
   }
@@ -1155,6 +1157,57 @@ function trackFileModification(session, chunk) {
   } else if (chunk.name === 'file.edit' && !chunk.isError && data.changed) {
     session.modifiedFiles.add(path);
   }
+}
+
+function copyLastResponse({ screen, session }) {
+  const t = getTranslator(session);
+  const lastAssistant = [...session.messages].reverse().find(m => m.role === 'assistant');
+  if (!lastAssistant || !lastAssistant.content) {
+    screen.write(`${THEME.warning}${t('shell.copyNoResponse')}${ANSI.reset || ''}\n`);
+    return;
+  }
+
+  const text = typeof lastAssistant.content === 'string'
+    ? lastAssistant.content
+    : JSON.stringify(lastAssistant.content);
+
+  const { spawn } = require('node:child_process');
+  const platform = process.platform;
+  let child;
+
+  if (platform === 'win32') {
+    child = spawn('clip', [], { stdio: ['pipe', 'ignore', 'ignore'] });
+  } else if (platform === 'darwin') {
+    child = spawn('pbcopy', [], { stdio: ['pipe', 'ignore', 'ignore'] });
+  } else {
+    child = spawn('xclip', ['-selection', 'clipboard'], { stdio: ['pipe', 'ignore', 'ignore'] });
+  }
+
+  child.on('error', (err) => {
+    screen.write(`${THEME.error}${t('shell.copyFailed', { error: err.message })}${ANSI.reset || ''}\n`);
+  });
+
+  child.on('close', (code) => {
+    if (code === 0) {
+      screen.write(`${THEME.success}${t('shell.copySuccess', { chars: text.length })}${ANSI.reset || ''}\n`);
+    } else {
+      screen.write(`${THEME.error}${t('shell.copyFailed', { error: `exit code ${code}` })}${ANSI.reset || ''}\n`);
+    }
+  });
+
+  child.stdin.write(text);
+  child.stdin.end();
+}
+
+function renameSession(args, { screen, session }) {
+  const t = getTranslator(session);
+  const name = (args || []).join(' ').trim();
+  if (!name) {
+    screen.write(`${THEME.warning}${t('shell.renameNoName')}${ANSI.reset || ''}\n`);
+    return;
+  }
+  session.customName = name;
+  screen.write(`${THEME.success}${t('shell.renameSuccess', { name })}${ANSI.reset || ''}\n`);
 }
 
 module.exports = {
