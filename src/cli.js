@@ -792,6 +792,16 @@ async function runShell(args, explicitSession) {
   }
 
   async function processLine(line) {
+    // If multiple lines arrived via paste detection, process each individually
+    // to avoid losing slash commands after the first one
+    if (line.includes('\n')) {
+      const subLines = line.split('\n');
+      for (const subLine of subLines) {
+        await processLine(subLine);
+      }
+      return;
+    }
+
     history.add(line);
     const trimmed = line.trim();
 
