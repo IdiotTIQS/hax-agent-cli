@@ -36,7 +36,7 @@ Hax Agent is an AI coding assistant for developers, with CLI as the primary entr
 - **Desktop GUI** — Electron + Vue interface that keeps the CLI workflow intact while adding session lists, file tree browsing, a right-side status panel, and session recovery.
 - **Multi-Provider Support** — Built-in Anthropic (Claude), OpenAI (GPT), and Google (Gemini) providers with runtime switching.
 - **Model Management** — View available models and switch models at runtime.
-- **Local Toolset** — File read/write, search, glob matching, and allowlist-restricted shell command execution.
+- **Local Toolset** — File read/write, search, glob matching, and permission-gated shell command execution.
 - **Skills System** — Create, manage, and invoke reusable skills by packaging repetitive workflows into SKILL.md files.
 - **Session Memory** — Automatically saves conversation transcripts; new sessions automatically load recent context.
 - **Layered Configuration** — Supports 5-level priority configuration merging (default → user → project → explicit → environment variables).
@@ -362,7 +362,6 @@ The system automatically tracks each skill's usage frequency and last-used time,
 | `HAX_AGENT_DESKTOP_WORKSPACE` | Default desktop workspace | — |
 | `HAX_AGENT_LOCALE` / `HAX_AGENT_LANGUAGE` | CLI language | `en` |
 | `HAX_AGENT_SHELL_ENABLED` | Enable shell tool | `true` |
-| `HAX_AGENT_SHELL_COMMANDS` | Allowed commands (comma-separated) | See the default allowlist in `src/config.js` |
 | `HAX_AGENT_SHELL_TIMEOUT_MS` | Shell command timeout in milliseconds | `10000` |
 | `HAX_AGENT_SHELL_MAX_BUFFER` | Shell command max output bytes | `200000` |
 | `HAX_AGENT_PROJECT_ROOT` | Project root directory (overrides `process.cwd()`) | — |
@@ -400,7 +399,6 @@ The system automatically tracks each skill's usage frequency and last-used time,
   "tools": {
     "shell": {
       "enabled": true,
-      "allowedCommands": ["node", "npm", "git"],
       "timeoutMs": 10000,
       "maxBuffer": 200000
     }
@@ -423,7 +421,7 @@ The Agent Shell includes a restricted tool registry, with all file operations co
 | `file.glob` | List files matching a glob pattern | Path restricted to workspace root |
 | `file.search` | Search for content in text files | Supports regex / case sensitivity config |
 | `file.readDirectory` | List directory contents | Path restricted to workspace root |
-| `shell.run` | Execute local commands | Only allowlisted commands (default `node`, `npm`, `git`) |
+| `shell.run` | Execute local commands | Permission prompt decides in non-yolo mode; enabled flag, timeout, and output limit still apply |
 | `web.fetch` | Fetch web pages and convert to plain text | Blocks internal/private addresses |
 | `web.search` | Search the web for information | DuckDuckGo + Bing fallback |
 | `stock.quote` | Get real-time stock/index quotes | A-shares, HK stocks, US stocks |

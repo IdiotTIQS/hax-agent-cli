@@ -1,6 +1,13 @@
 "use strict";
 
-const { SLASH_COMMANDS, SKILLS_SUBCOMMANDS, PERMISSIONS_SUBCOMMANDS, MEMORY_SUBCOMMANDS, TEAM_SUBCOMMANDS } = require("./definitions");
+const {
+  SLASH_COMMANDS,
+  SKILLS_SUBCOMMANDS,
+  PERMISSIONS_SUBCOMMANDS,
+  MEMORY_SUBCOMMANDS,
+  CONTEXT_SUBCOMMANDS,
+  TEAM_SUBCOMMANDS,
+} = require("./definitions");
 
 // Self-contained ANSI codes (no dependency on session/renderer)
 const A = { reset: "\x1b[0m", bold: "\x1b[1m", dim: "\x1b[2m" };
@@ -9,6 +16,8 @@ const SUBCOMMAND_MAP = {
   skills: SKILLS_SUBCOMMANDS,
   permissions: PERMISSIONS_SUBCOMMANDS,
   memory: MEMORY_SUBCOMMANDS,
+  context: CONTEXT_SUBCOMMANDS,
+  cache: CONTEXT_SUBCOMMANDS,
   team: TEAM_SUBCOMMANDS,
 };
 

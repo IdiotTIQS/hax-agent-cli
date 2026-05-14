@@ -7,7 +7,9 @@ const test = require('node:test');
 const { AnthropicProvider, MockProvider } = require('../src/providers');
 const { OpenAIProvider } = require('../src/providers/openai-provider');
 const { ToolRegistry, createLocalToolRegistry, createWebFetchTool, createWebSearchTool, createFileEditTool, createReadDirectoryTool, ToolExecutionError } = require('../src/tools');
+const { selectWindowsExecutable, createSpawnSpec } = require('../src/tools/shell');
 const { PermissionManager } = require('../src/permissions');
+const { isToolPreambleText } = require('../src/providers/shared');
 
 test('mock provider explains local mock mode conversationally', async () => {
   const provider = new MockProvider({ model: 'mock-a' });
@@ -38,6 +40,18 @@ test('anthropic provider stores runtime configuration', () => {
   assert.equal(provider.apiUrl, 'https://example.test/v1');
 });
 
+test('tool preamble detection catches Chinese create-file promises', () => {
+  const samples = [
+    '好，我来在当前目录下创建 nodesimple 文件夹，放入一个精简的 Node.js 后端 demo，并将其加入 .gitignore。\n\n先创建所有文件：',
+    '好的，我来创建 nodesimple/ 目录，里面放一个简洁的 Node.js Express 后端 Demo，并在 .gitignore 中排除它。\n\n先创建目录结构和所有文件：',
+    '好的，我来创建这个临时文件夹、生成一个 Node.js 后端 Demo，并加入 .gitignore。分三步进行：目录和示例文件 + 更新 gitignore。',
+  ];
+
+  for (const sample of samples) {
+    assert.equal(isToolPreambleText(sample), true, sample);
+  }
+});
+
 test('file write reports inserted line preview without marking unchanged lines', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'hax-agent-tools-'));
   const registry = createLocalToolRegistry({ root });
@@ -58,13 +72,13 @@ test('file write reports inserted line preview without marking unchanged lines',
   });
 });
 
-test('shell tool runs commands allowed by policy', async () => {
+test('shell tool runs commands without policy allowlist gating', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'hax-agent-tools-'));
   const registry = createLocalToolRegistry({
     root,
     shellPolicy: {
       enabled: true,
-      allowedCommands: ['node'],
+      allowedCommands: ['definitely-not-node'],
     },
   });
 
@@ -76,6 +90,55 @@ test('shell tool runs commands allowed by policy', async () => {
   assert.equal(result.ok, true);
   assert.equal(result.data.exitCode, 0);
   assert.equal(result.data.stdout, 'ok');
+});
+
+test('shell tool still respects disabled policy in yolo mode', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'hax-agent-tools-'));
+  const permissionManager = new PermissionManager({ mode: 'yolo' });
+  const registry = createLocalToolRegistry({
+    root,
+    permissionManager,
+    shellPolicy: {
+      enabled: false,
+      allowedCommands: [process.execPath],
+    },
+  });
+
+  const result = await registry.execute('shell.run', {
+    command: process.execPath,
+    args: ['-e', 'process.stdout.write("ok")'],
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, 'SHELL_DISABLED');
+});
+
+test('windows shell command resolution prefers executable shims', () => {
+  const output = [
+    'C:\\Users\\TIQS\\AppData\\Roaming\\npm\\npm.ps1',
+    'C:\\Users\\TIQS\\AppData\\Roaming\\npm\\npm.cmd',
+    'C:\\Users\\TIQS\\AppData\\Roaming\\npm\\npm',
+  ].join('\r\n');
+
+  assert.equal(
+    selectWindowsExecutable(output, 'npm'),
+    'C:\\Users\\TIQS\\AppData\\Roaming\\npm\\npm.cmd',
+  );
+});
+
+test('windows cmd shims run through cmd.exe', () => {
+  const originalPlatform = Object.getOwnPropertyDescriptor(process, 'platform');
+  Object.defineProperty(process, 'platform', { value: 'win32' });
+  try {
+    const spec = createSpawnSpec('C:\\Users\\TIQS\\AppData\\Roaming\\npm\\npm.cmd', ['run', 'desktop:dev']);
+
+    assert.equal(spec.command.toLowerCase().endsWith('cmd.exe'), true);
+    assert.equal(spec.windowsVerbatimArguments, true);
+    assert.deepEqual(spec.args.slice(0, 2), ['/d', '/c']);
+    assert.match(spec.args[2], /call "C:\\Users\\TIQS\\AppData\\Roaming\\npm\\npm\.cmd" "run" "desktop:dev"/);
+  } finally {
+    Object.defineProperty(process, 'platform', originalPlatform);
+  }
 });
 
 test('anthropic provider creates Claude Code style request defaults', () => {
@@ -1505,6 +1568,73 @@ test('openai provider continues after empty tool preamble instead of completing 
   assert.equal(chunks.some((chunk) => chunk.type === 'tool_start' && chunk.name === 'file.readDirectory'), true);
   assert.equal(chunks.at(-1).type, 'text');
   assert.equal(chunks.at(-1).delta, '项目目录已检查。');
+});
+
+test('openai provider suppresses repeated Chinese create preambles before limiting', async () => {
+  const requests = [];
+  let executions = 0;
+  const registry = new ToolRegistry();
+
+  registry.register({
+    name: 'file.write',
+    description: 'Write a file.',
+    inputSchema: {
+      type: 'object',
+      required: ['path', 'content'],
+      properties: {
+        path: { type: 'string' },
+        content: { type: 'string' },
+      },
+    },
+    async execute(args) {
+      executions += 1;
+      return { path: args.path, bytes: args.content.length };
+    },
+  });
+
+  const provider = new OpenAIProvider({
+    client: {
+      chat: {
+        completions: {
+          create(request) {
+            requests.push(request);
+
+            if (requests.length === 1) {
+              return createOpenAIStream([
+                { choices: [{ delta: { content: '好，我来在当前目录下创建 nodesimple 文件夹，放入一个精简的 Node.js 后端 demo，并将其加入 .gitignore。' } }] },
+                { choices: [{ delta: { content: '\n\n先创建所有文件：' } }] },
+              ]);
+            }
+
+            if (requests.length === 2) {
+              return createOpenAIStream([
+                { choices: [{ delta: { content: '好的，我来创建 nodesimple/ 目录，里面放一个简洁的 Node.js Express 后端 Demo，并在 .gitignore 中排除它。' } }] },
+                { choices: [{ delta: { content: '\n\n先创建目录结构和所有文件：' } }] },
+              ]);
+            }
+
+            throw new Error('repeated empty preambles should stop before another request');
+          },
+        },
+      },
+    },
+  });
+
+  const chunks = [];
+  for await (const chunk of provider.stream({ prompt: '创建 nodesimple demo', toolRegistry: registry, maxToolTurns: 5 })) {
+    chunks.push(chunk);
+  }
+
+  const text = chunks.filter((chunk) => chunk.type === 'text').map((chunk) => chunk.delta).join('');
+  assert.equal(executions, 0);
+  assert.equal(requests.length, 2);
+  assert.equal(text.includes('我来'), false);
+  assert.equal(text.includes('先创建'), false);
+  assert.deepEqual(chunks.find((chunk) => chunk.type === 'tool_limit'), {
+    type: 'tool_limit',
+    reason: 'empty_tool_preamble',
+    maxToolTurns: 2,
+  });
 });
 
 function createOpenAIStream(events) {

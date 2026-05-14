@@ -149,11 +149,55 @@ function resolveContextWindowTokens(settings = {}, model) {
 function inferModelContextWindowTokens(model) {
   const key = String(model || "").toLowerCase();
 
-  if (/gpt-4\.1|gemini-2\.5|gemini-1\.5/.test(key)) {
+  if (/qwen(?:3\.[56])?-(?:plus|flash)|qwen3-coder-plus|qwen-deep-research/.test(key)) {
     return 1_000_000;
   }
 
-  if (/claude|sonnet|opus|haiku|gpt-4o|o3/.test(key)) {
+  if (/minimax-(?:text-01|m1)/.test(key)) {
+    return 1_000_000;
+  }
+
+  if (/gpt-5\.5|gpt-5\.4(?!.*(?:mini|nano))/.test(key)) {
+    return 1_050_000;
+  }
+
+  if (/deepseek-(?:v4|chat|reasoner)/.test(key)) {
+    return 1_000_000;
+  }
+
+  if (/kimi-k2(?:\.5|-0905|-turbo|-thinking)|moonshot-v1-256k|qwen3-(?:max|coder-next)|doubao-(?:seed-code|seed-2|seed-1-[68])|hunyuan-(?:turbos|a13b|hy3)/.test(key)) {
+    return 262_144;
+  }
+
+  if (/glm-(?:5|4\.7)|minimax-m2(?:\.5|\b)|minimax-m2\.1|baichuan4|baichuan-4|yi-.*(?:200k|long)/.test(key)) {
+    return 200_000;
+  }
+
+  if (/glm-4\.5|moonshot-v1-128k|kimi-k2-0711|yi-|hunyuan-(?:large|turbo)|doubao-pro-128k|doubao-.*128k/.test(key)) {
+    return 128_000;
+  }
+
+  if (/moonshot-v1-32k|doubao-(?:1[-.]5|pro|lite).*32k|doubao-.*32k/.test(key)) {
+    return 32_768;
+  }
+
+  if (/moonshot-v1-8k/.test(key)) {
+    return 8_192;
+  }
+
+  if (/claude-(?:opus-4-[67]|sonnet-4-6)|anthropic\.claude-(?:opus-4-[67]|sonnet-4-6)|gemini-(?:3|2\.5|2\.0|1\.5)|gpt-4\.1/.test(key)) {
+    return 1_000_000;
+  }
+
+  if (/gpt-5(?:\.[123])?(?:-|$)|gpt-5\.\d+-codex|gpt-5\.4-(?:mini|nano)|codex/.test(key)) {
+    return 400_000;
+  }
+
+  if (/deepseek-(?:v3|r1)|gpt-4o/.test(key)) {
+    return 128_000;
+  }
+
+  if (/claude|sonnet|opus|haiku|o[134](?:-|$)|o\d-mini/.test(key)) {
     return 200_000;
   }
 

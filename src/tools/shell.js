@@ -5,7 +5,6 @@ const {
   DEFAULT_MAX_FILE_BYTES,
   requireString,
   readPositiveInteger,
-  normalizeCommandName,
   resolveWithinRoot,
   toWorkspacePath,
 } = require('./utils');
@@ -13,7 +12,7 @@ const {
 function createShellTool(policy) {
   return {
     name: 'shell.run',
-    description: 'Run an allowlisted local command without shell interpolation.',
+    description: 'Run a local command without shell interpolation. Risky commands require user approval unless yolo mode is enabled.',
     inputSchema: {
       type: 'object',
       required: ['command'],
@@ -38,8 +37,6 @@ function createShellTool(policy) {
         throw new ToolExecutionError('INVALID_SHELL_ARGS', 'Shell args must be an array of strings.');
       }
 
-      assertCommandAllowed(command, policy);
-
       return runCommand({
         command,
         args: commandArgs,
@@ -54,21 +51,12 @@ function createShellTool(policy) {
 }
 
 function normalizeShellPolicy(policy = {}) {
-  const allowedCommands = Array.isArray(policy.allowedCommands) ? policy.allowedCommands : [];
-
   return {
     enabled: policy.enabled === true,
-    allowedCommands: new Set(allowedCommands.map(normalizeCommandName)),
     timeoutMs: readPositiveInteger(policy.timeoutMs, 10_000, 'timeoutMs'),
     maxBuffer: readPositiveInteger(policy.maxBuffer, DEFAULT_MAX_FILE_BYTES, 'maxBuffer'),
     env: policy.env && typeof policy.env === 'object' ? { ...process.env, ...policy.env } : process.env,
   };
-}
-
-function assertCommandAllowed(command, policy) {
-  if (!policy.allowedCommands.has(normalizeCommandName(command))) {
-    throw new ToolExecutionError('COMMAND_NOT_ALLOWED', `Command is not allowed by policy: ${command}`);
-  }
 }
 
 const _winCommandCache = new Map();
@@ -86,7 +74,7 @@ function resolveWindowsCommand(command) {
     let stdout = '';
     child.stdout.on('data', (d) => { stdout += d; });
     child.on('close', (code) => {
-      const resolved = code === 0 ? stdout.trim().split(/\r?\n/)[0].trim() : command;
+      const resolved = code === 0 ? selectWindowsExecutable(stdout, command) : command;
       _winCommandCache.set(command, resolved);
       resolve(resolved);
     });
@@ -97,19 +85,37 @@ function resolveWindowsCommand(command) {
   });
 }
 
+function selectWindowsExecutable(whereOutput, fallback) {
+  const candidates = String(whereOutput || '')
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  if (candidates.length === 0) return fallback;
+
+  const executable = candidates.find((candidate) => {
+    const ext = path.extname(candidate).toLowerCase();
+    return ext === '.exe' || ext === '.cmd' || ext === '.bat' || ext === '.com';
+  });
+
+  return executable || candidates[0];
+}
+
 async function runCommand(options) {
   const resolvedCommand = await resolveWindowsCommand(options.command);
+  const spawnSpec = createSpawnSpec(resolvedCommand, options.args);
 
   return new Promise((resolve, reject) => {
     let stdout = '';
     let stderr = '';
     let timedOut = false;
     let outputExceeded = false;
-    const child = spawn(resolvedCommand, options.args, {
+    const child = spawn(spawnSpec.command, spawnSpec.args, {
       cwd: options.cwd,
       env: options.env,
       shell: false,
       windowsHide: true,
+      windowsVerbatimArguments: spawnSpec.windowsVerbatimArguments,
     });
 
     const timeout = setTimeout(() => {
@@ -158,9 +164,40 @@ async function runCommand(options) {
   });
 }
 
+function createSpawnSpec(command, args = []) {
+  if (process.platform !== 'win32') {
+    return { command, args, windowsVerbatimArguments: false };
+  }
+
+  const ext = path.extname(command).toLowerCase();
+  if (ext !== '.cmd' && ext !== '.bat') {
+    return { command, args, windowsVerbatimArguments: false };
+  }
+
+  const comspec = process.env.ComSpec || 'cmd.exe';
+  const commandLine = ['call', command, ...args].map(quoteCmdArg).join(' ');
+  return {
+    command: comspec,
+    args: ['/d', '/c', commandLine],
+    windowsVerbatimArguments: true,
+  };
+}
+
+function quoteCmdArg(value) {
+  const text = String(value);
+  if (text.toLowerCase() === 'call') return 'call';
+  if (text.length === 0) return '""';
+
+  const escaped = text
+    .replace(/"/g, '""')
+    .replace(/%/g, '%%');
+
+  return `"${escaped}"`;
+}
+
 function appendOutput(current, chunk, maxBuffer) {
   const next = current + chunk.toString('utf8');
   return next.length > maxBuffer ? next.slice(0, maxBuffer) : next;
 }
 
-module.exports = { createShellTool, normalizeShellPolicy };
+module.exports = { createShellTool, normalizeShellPolicy, selectWindowsExecutable, createSpawnSpec };

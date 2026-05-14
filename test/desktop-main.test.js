@@ -110,6 +110,37 @@ test('desktop sendMessage retargets an existing session to the selected workspac
   assert.ok(sentEvents.some(({ payload }) => payload?.type === 'turn.completed'));
 });
 
+test('desktop sendMessage maps full permission mode to backend yolo mode', async () => {
+  const projectRoot = createTempProject();
+  const ipc = createFakeIpc();
+  const event = {
+    sender: {
+      send() {},
+    },
+  };
+
+  fs.mkdirSync(path.join(projectRoot, '.hax-agent'), { recursive: true });
+  fs.writeFileSync(path.join(projectRoot, '.hax-agent', 'settings.json'), JSON.stringify({
+    agent: { provider: 'mock' },
+    permissions: { mode: 'normal' },
+  }));
+
+  registerIpcHandlers(ipc);
+  const created = await ipc.handlers.get('agent:createSession')(null, {
+    projectRoot,
+    permissionMode: 'normal',
+  });
+
+  const result = await ipc.handlers.get('agent:sendMessage')(event, {
+    sessionId: created.id,
+    content: 'Use full access for this turn',
+    permissionMode: 'full',
+  });
+
+  assert.equal(created.permission.mode, 'normal');
+  assert.equal(result.permission.mode, 'yolo');
+});
+
 test('desktop approval prompt sends a request and resolves from renderer response', async () => {
   const sentEvents = [];
   const sender = {

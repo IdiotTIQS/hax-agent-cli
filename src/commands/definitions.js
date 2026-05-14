@@ -17,6 +17,7 @@ const SLASH_COMMANDS = [
   { name: 'api-key', descriptionKey: 'cmd.apiKey', description: 'Show or set the API key', aliases: [], argHint: '<key>' },
   { name: 'language', descriptionKey: 'cmd.language', description: 'Show or switch the CLI language', aliases: ['lang', 'locale'], argHint: '<en|zh-CN|zh-TW|ru>' },
   { name: 'cost', descriptionKey: 'cmd.cost', description: 'Show token usage and cost for this session', aliases: [] },
+  { name: 'context', descriptionKey: 'cmd.context', description: 'View or set context window/cache budget', aliases: ['cache'], argHint: '[status|window|reserve|chars-per-token|auto|on|off] [value]' },
   { name: 'sessions', descriptionKey: 'cmd.sessions', description: 'List previous sessions', aliases: ['s'] },
   { name: 'resume', descriptionKey: 'cmd.resume', description: 'Resume a previous session', aliases: ['r'], argHint: '<session-id>' },
   { name: 'config', descriptionKey: 'cmd.config', description: 'Show current configuration', aliases: [] },
@@ -34,6 +35,7 @@ const SLASH_COMMANDS = [
 const SKILLS_SUBCOMMANDS = ['list', 'usage'];
 const PERMISSIONS_SUBCOMMANDS = ['status', 'mode', 'reset'];
 const MEMORY_SUBCOMMANDS = ['list', 'read', 'write', 'delete', 'search'];
+const CONTEXT_SUBCOMMANDS = ['status', 'window', 'reserve', 'chars-per-token', 'auto', 'on', 'off'];
 const TEAM_SUBCOMMANDS = [
   'help', 'agents', 'list', 'new', 'create', 'spawn', 'add-agent',
   'task', 'add-task', 'run', 'status', 'show', 'send', 'inbox',
@@ -53,6 +55,7 @@ module.exports = {
   SKILLS_SUBCOMMANDS,
   PERMISSIONS_SUBCOMMANDS,
   MEMORY_SUBCOMMANDS,
+  CONTEXT_SUBCOMMANDS,
   TEAM_SUBCOMMANDS,
   isThemeEnabled,
   isVimMode,

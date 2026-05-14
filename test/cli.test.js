@@ -5,6 +5,7 @@ const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 const { getSlashCommandSuggestion, getSubcommandSuggestion } = require('../src/slash-commands');
+const { ResponseRenderer, MarkdownRenderer } = require('../src/renderer');
 
 const cliPath = path.join(__dirname, '..', 'src', 'cli.js');
 
@@ -227,6 +228,56 @@ test('renders structured tool activity in the interactive shell', () => {
   assert.equal(result.stderr, '');
 });
 
+test('shell tool running status renders once without spinner flood', () => {
+  const writes = [];
+  const stream = {
+    isTTY: true,
+    rows: 24,
+    columns: 100,
+    write(data) {
+      writes.push(data);
+    },
+    on() {},
+    off() {},
+  };
+  const screen = {
+    stream,
+    columns: 100,
+    isTTY() { return true; },
+    write(data) { stream.write(data); },
+  };
+  const renderer = new ResponseRenderer(screen, new MarkdownRenderer(100));
+
+  renderer.startTool({
+    name: 'shell.run',
+    input: {
+      command: 'node',
+      args: ['C:\\Program Files\\nodejs\\node_modules\\npm\\bin\\npm-cli.js', 'install'],
+    },
+  });
+
+  const plain = stripAnsi(writes.join(''));
+  assert.equal((plain.match(/Running Shell Run/g) || []).length, 1);
+  assert.equal(plain.includes('\r'), false);
+});
+
+test('shows status for each prompt without treating it as user input', () => {
+  const result = runCli([], {
+    input: 'first message\nsecond message\n/exit\n',
+  });
+  const plain = stripAnsi(result.stdout);
+  const statusLines = plain.match(/mock · claude-sonnet-4-20250514 · \$\d+\.\d{4} · \d+ turns · \d+s · YOLO/g) || [];
+
+  assert.equal(result.status, 0);
+  assert.ok(statusLines.length >= 3);
+  assert.match(plain, /You said: first message/);
+  assert.match(plain, /You said: second message/);
+  for (const line of plain.split(/\r?\n/).filter((entry) => entry.includes('You said:'))) {
+    assert.doesNotMatch(line, /mock · claude-sonnet-4-20250514/);
+  }
+  assert.equal(result.stderr, '');
+});
+
 test('clear resets the active chat context', () => {
   const result = runCli([], {
     input: 'first message\n/clear\nsecond message\n/exit\n',
@@ -281,6 +332,8 @@ test('suggests close slash commands in the interactive shell', () => {
 test('suggests close slash commands across the command set', () => {
   const cases = [
     ['modle', 'model'],
+    ['contxt', 'context'],
+    ['cahce', 'context'],
     ['provder', 'provider'],
     ['langauge', 'language'],
     ['permissons', 'permissions'],
@@ -306,6 +359,11 @@ test('suggests close slash subcommands', () => {
     ['permissions', 'stats', '/permissions status'],
     ['permissions', 'rest', '/permissions reset'],
     ['permissions', 'mdoe', '/permissions mode'],
+    ['context', 'stats', '/context status'],
+    ['context', 'widnow', '/context window'],
+    ['context', 'resreve', '/context reserve'],
+    ['context', 'chrars-per-token', '/context chars-per-token'],
+    ['cache', 'atuo', '/cache auto'],
     ['memory', 'lsit', '/memory list'],
     ['memory', 'raed', '/memory read'],
     ['memory', 'delte', '/memory delete'],
@@ -319,6 +377,22 @@ test('suggests close slash subcommands', () => {
   for (const [command, input, expected] of cases) {
     assert.equal(getSubcommandSuggestion(command, input), expected);
   }
+});
+
+test('context command updates cache budget settings', () => {
+  const env = createSharedCliEnv();
+  const result = runCliWithEnv([], env, {
+    input: '/context window 1m\n/context reserve 32k\n/cache status\n/exit\n',
+  });
+  const plain = stripAnsi(result.stdout);
+  const saved = JSON.parse(fs.readFileSync(env.HAX_AGENT_USER_SETTINGS, 'utf8'));
+
+  assert.equal(result.status, 0);
+  assert.match(plain, /Context window set to 1m/);
+  assert.match(plain, /Reserved output tokens set to 32k/);
+  assert.match(plain, /Input budget:\s+968k/);
+  assert.equal(saved.context.windowTokens, 1_000_000);
+  assert.equal(saved.context.reserveOutputTokens, 32_000);
 });
 
 test('rejects missing team name with usage guidance', () => {

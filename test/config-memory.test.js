@@ -9,7 +9,7 @@ const {
   context,
   memory,
 } = require('../src');
-const { CostTracker } = require('../src/session');
+const { CostTracker, Session } = require('../src/session');
 
 function createTempProject() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'hax-agent-'));
@@ -151,6 +151,22 @@ test('cost tracker accepts camelCase usage and model family pricing fallbacks', 
   assert.equal(tracker.inputTokens, 1000);
   assert.equal(tracker.outputTokens, 500);
   assert.ok(tracker.getCost('claude-sonnet-4-6') > 0);
+});
+
+test('status line shows sub-percent context usage with token counts', () => {
+  const session = new Session({
+    provider: { name: 'mock', model: 'claude-sonnet-4-20250514' },
+    settings: { projectRoot: 'E:\\HaxAgent' },
+    permissionManager: { mode: 'yolo' },
+  });
+  session.contextStats = {
+    inputTokens: 700,
+    budgetTokens: 191808,
+  };
+
+  const plain = session.getStatusLine().replace(/\x1B\[[0-?]*[ -/]*[@-~]/g, '');
+
+  assert.match(plain, /\[░░░░░░░░\] <1% 700\/191\.8k ·/);
 });
 
 test('assembles prompt context from settings, memory, transcript, and user prompt', () => {

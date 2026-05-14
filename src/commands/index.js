@@ -55,6 +55,7 @@ async function handleSlashCommand(line, context) {
     case 'api-key': await handlerExports.switchApiKey(args, context); break;
     case 'language': await handlerExports.switchLanguage(args, context); break;
     case 'cost': handlerExports.showCost(context); break;
+    case 'context': handlerExports.handleContextCommand(args, context); break;
     case 'sessions': await handlerExports.showSessions(context); break;
     case 'resume': await handlerExports.resumeSession(args, context); break;
     case 'config': handlerExports.showConfig(context); break;

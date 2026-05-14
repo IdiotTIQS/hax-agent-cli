@@ -5,7 +5,7 @@ const path = require('node:path');
 const { spawn } = require('node:child_process');
 const { createProvider } = require('./providers');
 const { loadSettings } = require('./config');
-const { loadRecentTranscript, handleChatMessage, renderBanner, renderStatusLine, handleSlashCommand } = require('./slash-commands');
+const { loadRecentTranscript, handleChatMessage, renderBanner, handleSlashCommand } = require('./slash-commands');
 const { autoCompleteSlashCommand } = require('./commands/autocomplete');
 const { suggestCommand } = require('./command-suggestions');
 const { createLocalToolRegistry } = require('./tools');
@@ -370,7 +370,91 @@ async function runShell(args, explicitSession) {
     terminal: true,
   });
 
-  rl.setPrompt(`${styled(THEME.promptPrefix, '>')} `);
+  const inputAreaRows = 2;
+  let inputAreaActive = false;
+  let activePromptKind = 'main';
+  const moveCursorUp = (rows) => (rows > 0 ? `\x1B[${rows}A` : '');
+  const moveCursorDown = (rows) => (rows > 0 ? `\x1B[${rows}B` : '');
+
+  const mainPrompt = () => {
+    const width = screen.columns || 80;
+    const status = session.getStatusLine();
+    const statusText = stripAnsi(status);
+    const padding = Math.max(0, width - statusText.length - 2);
+    return `${THEME.statusLine} ${status} ${' '.repeat(padding)}${ANSI.reset || ''}\n${styled(THEME.promptPrefix, '>')} `;
+  };
+  const inputLinePrompt = () => `${styled(THEME.promptPrefix, '>')} `;
+  const drawFixedStatusLine = () => {
+    if (!screen.isTTY()) return;
+    const width = screen.columns || 80;
+    const status = session.getStatusLine();
+    const statusText = stripAnsi(status);
+    const padding = Math.max(0, width - statusText.length - 2);
+    screen.cursorTo(Math.max(1, screen.rows - 1), 1);
+    screen.write(`${ANSI.clearLine}${THEME.statusLine} ${status} ${' '.repeat(padding)}${ANSI.reset || ''}`);
+  };
+  const activateInputArea = () => {
+    if (!screen.isTTY()) return false;
+    screen.setScrollRegion(1, Math.max(1, screen.rows - inputAreaRows));
+    inputAreaActive = true;
+    return true;
+  };
+  const withInputAreaHidden = (writeFn) => {
+    if (!inputAreaActive || !screen.isTTY()) {
+      writeFn();
+      return;
+    }
+
+    screen.resetScrollRegion();
+    screen.cursorTo(Math.max(1, screen.rows - 1), 1);
+    screen.write(ANSI.clearLine);
+    screen.cursorTo(screen.rows, 1);
+    screen.write(ANSI.clearLine);
+    screen.setScrollRegion(1, Math.max(1, screen.rows - inputAreaRows));
+    screen.cursorTo(Math.max(1, screen.rows - inputAreaRows), 1);
+    writeFn();
+  };
+  const prompt = (preserveCursor = false) => {
+    activePromptKind = 'main';
+    if (screen.isTTY()) {
+      drawFixedStatusLine();
+      screen.cursorTo(screen.rows, 1);
+      screen.write(ANSI.clearLine);
+      rl.setPrompt(inputLinePrompt());
+    } else {
+      rl.setPrompt(mainPrompt());
+    }
+    rl.prompt(preserveCursor);
+  };
+  const setContinuationPrompt = () => {
+    activePromptKind = 'continuation';
+    rl.setPrompt(styled(THEME.dim, '│ ') + ' ');
+  };
+  const clearActivePrompt = (line = '') => {
+    if (!screen.isTTY()) return;
+
+    if (inputAreaActive && activePromptKind === 'main') {
+      screen.cursorTo(screen.rows, 1);
+      screen.write(ANSI.clearLine);
+      screen.cursorTo(Math.max(1, screen.rows - inputAreaRows), 1);
+      return;
+    }
+
+    const columns = Math.max(1, screen.columns || 80);
+    const promptPrefixLength = 2;
+    const inputRows = Math.max(1, Math.ceil((promptPrefixLength + stripAnsi(String(line)).length) / columns));
+    const rowsToClear = inputRows + (activePromptKind === 'main' ? 1 : 0);
+    process.stdout.write(moveCursorUp(rowsToClear));
+    for (let i = 0; i < rowsToClear; i++) {
+      process.stdout.write(`\r${ANSI.clearLine}`);
+      if (i < rowsToClear - 1) {
+        process.stdout.write(moveCursorDown(1));
+      }
+    }
+    process.stdout.write(`${moveCursorDown(1)}\r`);
+  };
+
+  rl.setPrompt(screen.isTTY() ? inputLinePrompt() : mainPrompt());
 
   screen.activate();
 
@@ -425,7 +509,7 @@ async function runShell(args, explicitSession) {
         rl._refreshLine();
         if (display.length) {
           process.stdout.write('\n' + display.join('\n') + '\n');
-          rl.prompt(true);
+          prompt(true);
         }
       } else {
         // Not a slash command — restore the tab (readline default indent)
@@ -679,35 +763,45 @@ async function runShell(args, explicitSession) {
     for (const tip of tips) screen.write(tip + '\n');
   }
 
-  renderStatusLine(screen, session);
-  rl.prompt();
+  activateInputArea();
+  prompt();
 
   if (!wasRestarted()) {
     checkForUpdate(VERSION).then(async (result) => {
       if (!result.hasUpdate) return;
 
-      screen.write(
-        `\n${styled(THEME.warning, `⬆ New version available: v${result.currentVersion} → v${result.latestVersion}`)}\n`
-      );
+      withInputAreaHidden(() => {
+        screen.write(
+          `\n${styled(THEME.warning, `⬆ New version available: v${result.currentVersion} → v${result.latestVersion}`)}\n`
+        );
+      });
 
       if (!settings.updates?.autoInstall) {
-        screen.write(`${styled(THEME.dim, '  Run /update install to update now.')}\n\n`);
-        rl.prompt();
+        withInputAreaHidden(() => {
+          screen.write(`${styled(THEME.dim, '  Run /update install to update now.')}\n\n`);
+        });
+        prompt();
         return;
       }
 
-      screen.write(`${styled(THEME.dim, '  Auto-install is enabled. Updating...')}\n`);
+      withInputAreaHidden(() => {
+        screen.write(`${styled(THEME.dim, '  Auto-install is enabled. Updating...')}\n`);
+      });
 
       try {
         await performUpdate();
-        screen.write(`${styled(THEME.success, '  OK Update complete. Restarting...')}\n\n`);
+        withInputAreaHidden(() => {
+          screen.write(`${styled(THEME.success, '  OK Update complete. Restarting...')}\n\n`);
+        });
         setTimeout(() => restartProcess(), 500);
       } catch (err) {
-        screen.write(
-          `${styled(THEME.error, `  ✖ Auto-update failed: ${err.message}`)}\n` +
-          `${styled(THEME.dim, '  Run manually: npm install -g hax-agent-cli')}\n\n`
-        );
-        rl.prompt();
+        withInputAreaHidden(() => {
+          screen.write(
+            `${styled(THEME.error, `  ✖ Auto-update failed: ${err.message}`)}\n` +
+            `${styled(THEME.dim, '  Run manually: npm install -g hax-agent-cli')}\n\n`
+          );
+        });
+        prompt();
       }
     }).catch((err) => {
       debug('updater', `Update check failed: ${err.message}`);
@@ -728,22 +822,25 @@ async function runShell(args, explicitSession) {
    */
   function performCleanExit(session, screen, t) {
     session.shouldExit = true;
-    // Show file change summary if any files were modified
-    if (session.modifiedFiles && session.modifiedFiles.size > 0) {
-      const files = [...session.modifiedFiles].sort();
-      screen.write(`\n${styled(THEME.heading, t('shell.filesModified', { count: files.length }))}\n`);
-      for (const f of files) {
-        screen.write(`  ${styled(THEME.accent, f)}\n`);
+    withInputAreaHidden(() => {
+      // Show file change summary if any files were modified
+      if (session.modifiedFiles && session.modifiedFiles.size > 0) {
+        const files = [...session.modifiedFiles].sort();
+        screen.write(`\n${styled(THEME.heading, t('shell.filesModified', { count: files.length }))}\n`);
+        for (const f of files) {
+          screen.write(`  ${styled(THEME.accent, f)}\n`);
+        }
       }
-    }
-    const cost = session.costTracker.getCost(session.provider?.model);
-    screen.write(`\n${styled(THEME.success, t('shell.sessionEnded'))} ${styled(THEME.dim, t('shell.sessionStats', { cost: cost.toFixed(4), turns: session.costTracker.turnCount }))}\n`);
+      const cost = session.costTracker.getCost(session.provider?.model);
+      screen.write(`\n${styled(THEME.success, t('shell.sessionEnded'))} ${styled(THEME.dim, t('shell.sessionStats', { cost: cost.toFixed(4), turns: session.costTracker.turnCount }))}\n`);
+    });
     screen.deactivate();
     process.exit(0);
   }
 
   rl.on('line', (line) => {
     const now = Date.now();
+    clearActivePrompt(line);
 
     // Paste detection: if lines arrive rapidly, buffer and join them
     if (pasteTimer) {
@@ -753,7 +850,7 @@ async function runShell(args, explicitSession) {
         const joined = pasteBuffer.join('\n');
         pasteBuffer = [];
         pasteTimer = null;
-        rl.setPrompt(`${styled(THEME.promptPrefix, '>')} `);
+        rl.setPrompt(mainPrompt());
         lineQueue = lineQueue.then(() => processLine(joined));
       }, PASTE_THRESHOLD_MS);
       return;
@@ -775,7 +872,7 @@ async function runShell(args, explicitSession) {
     // Multi-line continuation: trailing backslash (bash-style)
     if (line.endsWith('\\')) {
       multilineBuffer.push(line.slice(0, -1));
-      rl.setPrompt(styled(THEME.dim, '│ ') + ' ');
+      setContinuationPrompt();
       rl.prompt();
       return;
     }
@@ -785,7 +882,7 @@ async function runShell(args, explicitSession) {
       multilineBuffer.push(line);
       finalLine = multilineBuffer.join('\n');
       multilineBuffer = [];
-      rl.setPrompt(`${styled(THEME.promptPrefix, '>')} `);
+      rl.setPrompt(mainPrompt());
     }
 
     lineQueue = lineQueue.then(() => processLine(finalLine));
@@ -807,8 +904,10 @@ async function runShell(args, explicitSession) {
 
     if (trimmed.startsWith('/')) {
       if (trimmed === '/exit' || trimmed === '/quit' || trimmed === '/q') {
-        screen.clearLine();
-        screen.write(trimmed + '\n');
+        withInputAreaHidden(() => {
+          screen.clearLine();
+          screen.write(trimmed + '\n');
+        });
         performCleanExit(session, screen, t);
         return;
       }
@@ -816,10 +915,12 @@ async function runShell(args, explicitSession) {
       if (trimmed === '/vim') {
         vimMode = !vimMode;
         vimInsertMode = true;
-        screen.clearLine();
-        screen.write(trimmed + '\n');
-        screen.write(styled(THEME.success, t('shell.vimMode', { state: vimMode ? t('common.enabled') : t('common.disabled') })) + '\n');
-        rl.prompt();
+        withInputAreaHidden(() => {
+          screen.clearLine();
+          screen.write(trimmed + '\n');
+          screen.write(styled(THEME.success, t('shell.vimMode', { state: vimMode ? t('common.enabled') : t('common.disabled') })) + '\n');
+        });
+        prompt();
         return;
       }
 
@@ -835,34 +936,37 @@ async function runShell(args, explicitSession) {
         renderBanner(screen, session);
         screen.write(styled(THEME.success, t('shell.contextCleared', { count: clearedCount })) + '\n');
         screen.write(styled(THEME.dim, t('shell.clearHint')) + '\n\n');
-        rl.prompt();
+        prompt();
         return;
       }
 
-      screen.clearLine();
-      screen.write(trimmed + '\n');
+      withInputAreaHidden(() => {
+        screen.clearLine();
+        screen.write(trimmed + '\n');
+      });
 
       await handleSlashCommand(trimmed, { screen, session, markdown, rl, input: process.stdin, output: process.stdout });
-      renderStatusLine(screen, session);
-      rl.prompt();
+      prompt();
       return;
     }
 
     if (session.isStreaming) {
-      screen.write(styled(THEME.warning, t('shell.cannotSend')) + '\n');
-      rl.prompt();
+      withInputAreaHidden(() => {
+        screen.write(styled(THEME.warning, t('shell.cannotSend')) + '\n');
+      });
+      prompt();
       return;
     }
 
     if (!trimmed) {
-      rl.prompt();
+      prompt();
       return;
     }
 
     if (trimmed.startsWith('!')) {
       const shellLine = trimmed.slice(1).trim();
       if (!shellLine) {
-        rl.prompt();
+        prompt();
         return;
       }
 
@@ -873,13 +977,17 @@ async function runShell(args, explicitSession) {
         session.approvalCallback || null,
       );
       if (!bangPermission.approved) {
-        screen.write(styled(THEME.warning, `! Command denied: ${bangPermission.reason}`) + '\n');
-        rl.prompt();
+        withInputAreaHidden(() => {
+          screen.write(styled(THEME.warning, `! Command denied: ${bangPermission.reason}`) + '\n');
+        });
+        prompt();
         return;
       }
 
-      screen.clearLine();
-      screen.write(styled(THEME.shellIndicator, `!${shellLine}`) + '\n');
+      withInputAreaHidden(() => {
+        screen.clearLine();
+        screen.write(styled(THEME.shellIndicator, `!${shellLine}`) + '\n');
+      });
 
       const isWindows = process.platform === 'win32';
       const shell = isWindows ? 'powershell.exe' : '/bin/bash';
@@ -893,24 +1001,24 @@ async function runShell(args, explicitSession) {
       await new Promise((resolve) => {
         child.on('close', (code) => {
           if (code !== 0) {
-            screen.write(styled(THEME.warning, `Exit code: ${code}`) + '\n');
+            withInputAreaHidden(() => {
+              screen.write(styled(THEME.warning, `Exit code: ${code}`) + '\n');
+            });
           }
-          renderStatusLine(screen, session);
-          rl.prompt();
+          prompt();
           resolve();
         });
         child.on('error', (err) => {
-          screen.write(styled(THEME.error, `Command error: ${err.message}`) + '\n');
-          renderStatusLine(screen, session);
-          rl.prompt();
+          withInputAreaHidden(() => {
+            screen.write(styled(THEME.error, `Command error: ${err.message}`) + '\n');
+          });
+          prompt();
           resolve();
         });
       });
       return;
     }
 
-    screen.clearLine();
-    screen.write('\n');
     const time = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
     // Highlight slash commands in user echo: /cmd args → colored /cmd + dim args
     let echoLine = trimmed;
@@ -922,14 +1030,20 @@ async function runShell(args, explicitSession) {
         echoLine = styled(THEME.accent, trimmed.slice(0, spaceIdx)) + ' ' + styled(THEME.dim, trimmed.slice(spaceIdx + 1));
       }
     }
-    screen.write(`${styled(THEME.userIndicator, `You ${time}`)}  ${echoLine}\n`);
+    withInputAreaHidden(() => {
+      screen.clearLine();
+      screen.write('\n');
+      screen.write(`${styled(THEME.userIndicator, `You ${time}`)}  ${echoLine}\n`);
+    });
 
     await handleChatMessage(trimmed, { screen, session, markdown });
-    renderStatusLine(screen, session);
-    rl.prompt();
+    prompt();
   }
 
   rl.on('close', () => {
+    if (inputAreaActive && screen.isTTY()) {
+      screen.resetScrollRegion();
+    }
     screen.cursorTo(screen.rows, 1);
     screen.write('\n');
     if (session.shouldExit) {
@@ -950,28 +1064,36 @@ async function runShell(args, explicitSession) {
         if (session.responseAbortController) {
           session.responseAbortController.abort();
         }
-        screen.write('\n' + styled(THEME.warning, '^C') + '\n');
+        withInputAreaHidden(() => {
+          screen.write('\n' + styled(THEME.warning, '^C') + '\n');
+        });
         return;
       }
 
       pendingExitCount += 1;
       if (pendingExitCount === 1) {
-        screen.write('\n' + styled(THEME.warning, t('shell.ctrlCExit')) + '\n');
-        renderStatusLine(screen, session);
-        rl.prompt();
+        withInputAreaHidden(() => {
+          screen.write('\n' + styled(THEME.warning, t('shell.ctrlCExit')) + '\n');
+        });
+        prompt();
         setTimeout(() => { pendingExitCount = 0; }, 2000);
       } else {
-        screen.write('\n');
+        withInputAreaHidden(() => {
+          screen.write('\n');
+        });
         performCleanExit(session, screen, t);
       }
       return;
     }
 
     if (key.name === 'l' && key.ctrl) {
+      if (inputAreaActive && screen.isTTY()) {
+        screen.resetScrollRegion();
+      }
       screen.clear();
       renderBanner(screen, session);
-      renderStatusLine(screen, session);
-      rl.prompt();
+      activateInputArea();
+      prompt();
       return;
     }
 
@@ -984,14 +1106,15 @@ async function runShell(args, explicitSession) {
       const modeLabel = newMode === 'yolo' ? 'YOLO' : t('common.mode.standard');
       const modeColor = newMode === 'yolo' ? THEME.warning : THEME.success;
 
-      screen.write(`\n${modeColor}╭────────────────────────────────────╮${ANSI.reset}\n`);
-      screen.write(`${modeColor}│${ANSI.reset}  ${t('shell.permissionSwitched', { mode: styled(modeColor + THEME.bold, modeLabel) })}\n`);
-      screen.write(`${modeColor}│${ANSI.reset}\n`);
-      screen.write(`${modeColor}│${ANSI.reset}  ${styled(THEME.dim, t('shell.permissionShortcut'))}\n`);
-      screen.write(`${modeColor}╰────────────────────────────────────╯${ANSI.reset}\n\n`);
+      withInputAreaHidden(() => {
+        screen.write(`\n${modeColor}╭────────────────────────────────────╮${ANSI.reset}\n`);
+        screen.write(`${modeColor}│${ANSI.reset}  ${t('shell.permissionSwitched', { mode: styled(modeColor + THEME.bold, modeLabel) })}\n`);
+        screen.write(`${modeColor}│${ANSI.reset}\n`);
+        screen.write(`${modeColor}│${ANSI.reset}  ${styled(THEME.dim, t('shell.permissionShortcut'))}\n`);
+        screen.write(`${modeColor}╰────────────────────────────────────╯${ANSI.reset}\n\n`);
+      });
 
-      renderStatusLine(screen, session);
-      rl.prompt();
+      prompt();
     }
   });
 }

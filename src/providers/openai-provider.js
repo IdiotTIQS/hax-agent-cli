@@ -20,6 +20,7 @@ const {
   parseDsmlToolCalls,
   splitPotentialDsmlPrefix,
   shouldContinueAfterToolPreamble,
+  shouldHoldPotentialToolPreamble,
   isToolPreambleText,
   createToolPreambleContinuationPrompt,
   createToolPreambleLimitText,
@@ -128,6 +129,13 @@ class OpenAIProvider extends ChatProvider {
             if (suppressContentStreaming || containsDsmlToolMarkup(fullContent)) {
               suppressContentStreaming = true;
               pendingText = "";
+            } else if (
+              !forceTextResponse &&
+              toolRegistry &&
+              sortedPreviewToolCalls(toolCalls).length === 0 &&
+              shouldHoldPotentialToolPreamble(fullContent, toolRegistry)
+            ) {
+              pendingText = "";
             } else {
               const safeText = pendingText + delta.content;
               const split = splitPotentialDsmlPrefix(safeText);
@@ -187,13 +195,17 @@ class OpenAIProvider extends ChatProvider {
         sortedToolCalls = dsmlToolCalls;
       }
       const displayContent = hasDsmlToolCalls ? stripToolCallMarkup(fullContent) : fullContent;
+      const shouldSuppressPreambleText = !forceTextResponse &&
+        toolRegistry &&
+        sortedToolCalls.length === 0 &&
+        isToolPreambleText(displayContent);
 
-      if (displayContent && (!streamedContent || suppressContentStreaming)) {
+      if (!shouldSuppressPreambleText && displayContent && (!streamedContent || suppressContentStreaming)) {
         const remainingContent = suppressContentStreaming ? displayContent.slice(streamedTextLength) : displayContent;
         if (remainingContent) {
           yield createTextChunk(remainingContent);
         }
-      } else if (pendingText && !containsDsmlToolMarkup(fullContent)) {
+      } else if (!shouldSuppressPreambleText && pendingText && !containsDsmlToolMarkup(fullContent)) {
         yield createTextChunk(pendingText);
       }
 
@@ -589,6 +601,13 @@ function createDsmlToolCalls(text, turn) {
 
 function containsDsmlToolMarkup(text) {
   return /<\uFF5C\uFF5CDSML\uFF5C\uFF5C/.test(String(text || ""));
+}
+
+function sortedPreviewToolCalls(toolCalls) {
+  return [...toolCalls.entries()]
+    .sort(([a], [b]) => a - b)
+    .map(([, tc]) => tc)
+    .filter((tc) => tc?.function?.name);
 }
 
 function createToolResultBlock(toolCallId, isError, content) {

@@ -20,7 +20,7 @@ const DEFAULT_SYSTEM_PROMPT = [
   "- Use tools carefully and only with valid, non-empty arguments.",
   "- Never call file.read with an empty path.",
   "- If a tool call fails, adapt your approach instead of repeating the same failing input.",
-  "- Use shell.run only for allowlisted commands, with arguments passed in args rather than shell strings.",
+  "- Use shell.run with the executable in command and separate arguments in args rather than shell strings.",
   "- Before writing a file, read the existing file when it exists, then write complete updated content.",
   "- After making changes, verify correctness by reading back the modified file or running tests.",
   "- When a tool returns data (like web.fetch or web.search), use that data to answer the user. Do NOT call the same tool again.",
@@ -295,6 +295,24 @@ function shouldContinueAfterToolPreamble(text, toolRegistry, count = 0) {
   return isToolPreambleText(text);
 }
 
+function shouldHoldPotentialToolPreamble(text, toolRegistry) {
+  if (!toolRegistry) {
+    return false;
+  }
+
+  const value = String(text || "").trim();
+  if (!value || value.length > 220) {
+    return false;
+  }
+
+  return isToolPreambleText(value) || [
+    /^(?:let me|i'?ll|i will|i am going to|i'm going to)\b/i,
+    /^(?:to|in order to)\b/i,
+    /^(?:好|好的|好嘞|行|行的|OK|ok)[，,。\s]*/i,
+    /^(?:我|让我|我来|我将|我会|先|继续|进一步|直接|马上|这就|立刻|立即)/,
+  ].some((pattern) => pattern.test(value));
+}
+
 function isToolPreambleText(text) {
   const value = String(text || "").trim();
   if (!value || value.length > 220) {
@@ -309,6 +327,7 @@ function isToolPreambleText(text) {
     /(?:让我|我来|我将|我会|先|继续|进一步).{0,16}(?:检查|查看|读取|了解|分析|探索|浏览|确认|获取|写|创建|生成|建|搭建)/,
     /(?:检查|查看|读取|了解|分析|探索|浏览|写|创建|生成).{0,16}(?:项目|文件|代码|结构|信息|详细)/,
     /(?:直接|马上|这就|立刻|立即).{0,12}(?:写|创建|生成|建|搭建|来)/,
+    /(?:先|开始|分[两三四五六七八九十\d]+步).{0,18}(?:写|创建|生成|建|搭建|目录|文件|项目|示例)/,
     /(?:好[的嘞吧啊哦]|行[的了吧]|OK|ok).{0,16}(?:写|来|创建|生成|动手)/,
     /(?:废话|当然).{0,8}(?:写|做|来)/,
     /(?:抱歉|对不起).{0,16}(?:直接|马上|这就)(?:写|来|做)/,
@@ -384,6 +403,7 @@ module.exports = {
   parseDsmlToolCalls,
   splitPotentialDsmlPrefix,
   shouldContinueAfterToolPreamble,
+  shouldHoldPotentialToolPreamble,
   isToolPreambleText,
   createToolPreambleContinuationPrompt,
   createToolPreambleLimitText,

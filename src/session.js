@@ -227,12 +227,20 @@ class Session {
       const filled = Math.round(ratio * totalSegs);
       const empty = totalSegs - filled;
       const pct = Math.round(ratio * 100);
+      const pctLabel = ratio > 0 && pct === 0 ? '<1%' : `${pct}%`;
       const barColor = ratio >= 0.9 ? '\x1B[91m' : ratio >= 0.7 ? '\x1B[93m' : dim;
-      ctxMeter = `[${barColor}${'█'.repeat(filled)}${dim}${'░'.repeat(empty)}${reset}] ${pct}% · `;
+      ctxMeter = `[${barColor}${'█'.repeat(filled)}${dim}${'░'.repeat(empty)}${reset}] ${pctLabel} ${formatTokenCount(stats.inputTokens)}/${formatTokenCount(stats.budgetTokens)} · `;
     }
 
     return `${ctxMeter}${dim}${cwdShort}${reset} · ${dim}${provider}${reset} · ${dim}${model}${reset} · ${costColor}$${cost.toFixed(4)}${reset} · ${dim}${turns} turns${reset} · ${dim}${elapsed}${reset}${permMode}`;
   }
+}
+
+function formatTokenCount(value) {
+  const tokens = Number(value) || 0;
+  if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(1)}m`;
+  if (tokens >= 1_000) return `${(tokens / 1_000).toFixed(1)}k`;
+  return String(Math.max(0, Math.round(tokens)));
 }
 
 module.exports = {

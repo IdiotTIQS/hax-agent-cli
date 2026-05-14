@@ -123,7 +123,7 @@ function createDesktopSession(options = {}) {
   });
   const provider = createProvider(settings.agent, process.env);
   const permissionManager = new PermissionManager({
-    mode: options.permissionMode || settings.permissions?.mode || "normal",
+    mode: normalizePermissionMode(options.permissionMode, settings.permissions?.mode || "normal"),
     locale: settings.ui?.locale,
     persistPath: path.join(projectRoot, ".hax-agent", "permissions.json"),
   });
@@ -220,6 +220,12 @@ function sanitizeApprovalArgs(value) {
 
 function mergePlainObjects(...objects) {
   return Object.assign({}, ...objects.filter((item) => item && typeof item === "object"));
+}
+
+function normalizePermissionMode(mode, fallback = "normal") {
+  if (mode === "full" || mode === "yolo") return "yolo";
+  if (mode === "normal" || mode === "ask" || mode === "auto") return mode;
+  return fallback;
 }
 
 function getSessionRecord(sessionId) {
@@ -330,6 +336,13 @@ function registerIpcHandlers(ipc = ipcMain) {
 
     if (String(requestedProjectRoot || "").trim()) {
       record = retargetSessionRecord(record, requestedProjectRoot);
+    }
+
+    if (payload.permissionMode !== undefined) {
+      record.session.permissionManager.mode = normalizePermissionMode(
+        payload.permissionMode,
+        record.session.permissionManager.mode,
+      );
     }
 
     record.session.toolRegistry.approvalCallback = createDesktopApprovalPrompt(event.sender, record.session);

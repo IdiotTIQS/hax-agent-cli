@@ -498,11 +498,18 @@ function handleTogglePermission() {
   permissionMode.value = permissionMode.value === 'full' ? 'normal' : 'full';
 }
 
+function backendPermissionMode() {
+  return permissionMode.value === 'full' ? 'yolo' : 'normal';
+}
+
 async function createSession() {
   errorText.value = '';
   appendLog(t('desktop.app.creatingSession'), 'start');
   try {
-    const result = await ensureApi('createSession')({ projectRoot: settings.workspace || undefined });
+    const result = await ensureApi('createSession')({
+      projectRoot: settings.workspace || undefined,
+      permissionMode: backendPermissionMode(),
+    });
     sessionId.value = serializeSession(result) || crypto.randomUUID();
     resetConversationView();
     updateSessionWorkspace(result);
@@ -581,6 +588,7 @@ async function submitAgentMessage(content, options = {}) {
       sessionId: sessionId.value,
       content: normalizedContent,
       projectRoot: settings.workspace || undefined,
+      permissionMode: backendPermissionMode(),
     });
 
     updateStats(result);

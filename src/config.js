@@ -58,19 +58,6 @@ const DEFAULT_SETTINGS = Object.freeze({
   tools: {
     shell: {
       enabled: true,
-      allowedCommands: [
-        'node', 'npm', 'npx', 'yarn', 'pnpm', 'bun',
-        'git', 'gh',
-        'ls', 'dir', 'cat', 'type', 'echo', 'head', 'tail', 'wc', 'pwd', 'whoami', 'hostname',
-        'which', 'where', 'file', 'stat',
-        'mkdir', 'rm', 'cp', 'mv', 'touch', 'rmdir',
-        'find', 'grep', 'rg', 'ag',
-        'curl', 'wget',
-        'python', 'python3', 'pip', 'pip3',
-        'tsc', 'eslint', 'prettier', 'jest', 'vitest', 'mocha',
-        'docker', 'docker-compose',
-        'code', 'open', 'start',
-      ],
       timeoutMs: 10_000,
       maxBuffer: 200_000,
     },
@@ -208,7 +195,6 @@ function readEnvOverrides(env = process.env) {
   setIfDefined(overrides, ['desktop', 'workspace'], env.HAX_AGENT_DESKTOP_WORKSPACE);
   setIfDefined(overrides, ['ui', 'locale'], env.HAX_AGENT_LOCALE || env.HAX_AGENT_LANGUAGE);
   setIfDefined(overrides, ['tools', 'shell', 'enabled'], parseBooleanEnv(env, 'HAX_AGENT_SHELL_ENABLED'));
-  setIfDefined(overrides, ['tools', 'shell', 'allowedCommands'], parseListEnv(env, 'HAX_AGENT_SHELL_COMMANDS'));
   setIfDefined(overrides, ['tools', 'shell', 'timeoutMs'], parseNumberEnv(env, 'HAX_AGENT_SHELL_TIMEOUT_MS'));
   setIfDefined(overrides, ['tools', 'shell', 'maxBuffer'], parseNumberEnv(env, 'HAX_AGENT_SHELL_MAX_BUFFER'));
 

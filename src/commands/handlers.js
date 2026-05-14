@@ -16,10 +16,11 @@ const { checkForUpdate, performUpdate, restartProcess } = require("../updater");
 const { PROVIDERS, chooseOptionWithArrows } = require("../init-wizard");
 const { createTranslator, getLocaleLabel, listLocales, normalizeLocale } = require("../i18n");
 const { suggestCommand } = require("../command-suggestions");
+const { resolveContextWindowTokens, inferModelContextWindowTokens } = require("../context-window");
 
 const {
   SLASH_COMMANDS, SKILLS_SUBCOMMANDS, PERMISSIONS_SUBCOMMANDS,
-  MEMORY_SUBCOMMANDS, TEAM_SUBCOMMANDS,
+  MEMORY_SUBCOMMANDS, CONTEXT_SUBCOMMANDS, TEAM_SUBCOMMANDS,
   isThemeEnabled, setThemeEnabled, isVimMode, setVimMode,
 } = require("./definitions");
 
@@ -40,6 +41,8 @@ function getSubcommandSuggestion(commandName, subCommand) {
     skills: SKILLS_SUBCOMMANDS,
     permissions: PERMISSIONS_SUBCOMMANDS,
     memory: MEMORY_SUBCOMMANDS,
+    context: CONTEXT_SUBCOMMANDS,
+    cache: CONTEXT_SUBCOMMANDS,
     team: TEAM_SUBCOMMANDS,
   };
   return suggestCommand(subCommand, candidatesByCommand[commandName] || []);
@@ -378,6 +381,127 @@ function showCost({ screen, session }) {
   screen.write(`\n${session.costTracker.formatSummary(session.provider?.model)}\n\n`);
 }
 
+function handleContextCommand(args, { screen, session }) {
+  const [subCommand = 'status', value] = args;
+  const context = session.settings.context || {};
+
+  if (subCommand === 'status') {
+    showContextSettings(screen, session);
+    return;
+  }
+
+  if (subCommand === 'on' || subCommand === 'enable') {
+    session.settings.context = { ...context, enabled: true };
+    updateUserSettings({ context: { enabled: true } });
+    screen.write(`${THEME.success}Context window management enabled.${ANSI.reset || ''}\n`);
+    showContextSettings(screen, session);
+    return;
+  }
+
+  if (subCommand === 'off' || subCommand === 'disable') {
+    session.settings.context = { ...context, enabled: false };
+    updateUserSettings({ context: { enabled: false } });
+    screen.write(`${THEME.success}Context window management disabled.${ANSI.reset || ''}\n`);
+    showContextSettings(screen, session);
+    return;
+  }
+
+  if (subCommand === 'auto' || subCommand === 'reset') {
+    session.settings.context = { ...context, enabled: true, windowTokens: undefined };
+    updateUserSettings({ context: { enabled: true, windowTokens: undefined } });
+    screen.write(`${THEME.success}Context window reset to auto model detection.${ANSI.reset || ''}\n`);
+    showContextSettings(screen, session);
+    return;
+  }
+
+  if (subCommand === 'window') {
+    const tokens = parseTokenSetting(value);
+    if (!tokens) {
+      screen.write(`${THEME.dim}Usage: /context window <tokens|auto>  e.g. /context window 1m${ANSI.reset || ''}\n`);
+      return;
+    }
+    const update = { enabled: true, windowTokens: tokens === 'auto' ? undefined : tokens };
+    session.settings.context = { ...context, ...update };
+    updateUserSettings({ context: update });
+    screen.write(`${THEME.success}Context window ${tokens === 'auto' ? 'set to auto' : `set to ${formatContextTokens(tokens)}`}.${ANSI.reset || ''}\n`);
+    showContextSettings(screen, session);
+    return;
+  }
+
+  if (subCommand === 'reserve') {
+    const tokens = parseTokenSetting(value);
+    if (!tokens || tokens === 'auto') {
+      screen.write(`${THEME.dim}Usage: /context reserve <tokens>  e.g. /context reserve 32k${ANSI.reset || ''}\n`);
+      return;
+    }
+    session.settings.context = { ...context, reserveOutputTokens: tokens };
+    updateUserSettings({ context: { reserveOutputTokens: tokens } });
+    screen.write(`${THEME.success}Reserved output tokens set to ${formatContextTokens(tokens)}.${ANSI.reset || ''}\n`);
+    showContextSettings(screen, session);
+    return;
+  }
+
+  if (subCommand === 'chars-per-token' || subCommand === 'cpt') {
+    const charsPerToken = Number(value);
+    if (!Number.isFinite(charsPerToken) || charsPerToken <= 0) {
+      screen.write(`${THEME.dim}Usage: /context chars-per-token <number>  e.g. /context chars-per-token 3.5${ANSI.reset || ''}\n`);
+      return;
+    }
+    session.settings.context = { ...context, charsPerToken };
+    updateUserSettings({ context: { charsPerToken } });
+    screen.write(`${THEME.success}Context token estimator set to ${charsPerToken} chars/token.${ANSI.reset || ''}\n`);
+    showContextSettings(screen, session);
+    return;
+  }
+
+  const t = getTranslator(session);
+  screen.write(`${THEME.error}Unknown context command: ${subCommand}${ANSI.reset || ''}\n`);
+  writeCommandSuggestion(screen, t, getSubcommandSuggestion('context', subCommand));
+  screen.write(`${THEME.dim}Usage: /context [status|window <tokens|auto>|reserve <tokens>|chars-per-token <number>|auto|on|off]${ANSI.reset || ''}\n`);
+}
+
+function showContextSettings(screen, session) {
+  const context = session.settings.context || {};
+  const model = session.provider?.model || session.settings.agent?.model;
+  const inferred = inferModelContextWindowTokens(model);
+  const windowTokens = resolveContextWindowTokens(session.settings, model);
+  const reserve = Number(context.reserveOutputTokens) > 0 ? Number(context.reserveOutputTokens) : 8192;
+  const budget = Math.max(1, windowTokens - reserve);
+  const mode = context.windowTokens ? 'manual' : 'auto';
+
+  screen.write(`\n${THEME.heading}Context Cache${ANSI.reset || ''}\n`);
+  screen.write(`${THEME.border}──────────────────────────────────${ANSI.reset || ''}\n`);
+  screen.write(`  Enabled:        ${context.enabled === false ? 'no' : 'yes'}\n`);
+  screen.write(`  Model:          ${model || 'unknown'}\n`);
+  screen.write(`  Window:         ${formatContextTokens(windowTokens)} (${mode}${mode === 'auto' ? `, inferred ${formatContextTokens(inferred)}` : ''})\n`);
+  screen.write(`  Output reserve: ${formatContextTokens(reserve)}\n`);
+  screen.write(`  Input budget:   ${formatContextTokens(budget)}\n`);
+  screen.write(`  Estimator:      ${context.charsPerToken || 4} chars/token\n`);
+  screen.write(`\n${THEME.dim}  /context window 1m  ·  /context reserve 32k  ·  /context auto${ANSI.reset || ''}\n\n`);
+}
+
+function parseTokenSetting(value) {
+  const text = String(value || '').trim().toLowerCase();
+  if (!text) return null;
+  if (text === 'auto') return 'auto';
+
+  const match = text.match(/^(\d+(?:\.\d+)?)([km])?$/);
+  if (!match) return null;
+
+  const amount = Number(match[1]);
+  const suffix = match[2] || '';
+  const multiplier = suffix === 'm' ? 1_000_000 : suffix === 'k' ? 1_000 : 1;
+  const tokens = Math.round(amount * multiplier);
+  return tokens > 0 ? tokens : null;
+}
+
+function formatContextTokens(value) {
+  const tokens = Number(value) || 0;
+  if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(tokens % 1_000_000 === 0 ? 0 : 1)}m`;
+  if (tokens >= 1_000) return `${(tokens / 1_000).toFixed(tokens % 1_000 === 0 ? 0 : 1)}k`;
+  return String(Math.max(0, Math.round(tokens)));
+}
+
 async function showSessions({ screen, session }) {
   const t = getTranslator(session);
   const sessions = listSessions(session.settings);
@@ -419,6 +543,9 @@ function showConfig({ screen, session }) {
   screen.write(`  ${THEME.dim}${t('config.temperature')}${ANSI.reset || ''}  ${session.settings.agent?.temperature || 0.2}\n`);
   screen.write(`  ${THEME.dim}${t('config.projectRoot')}${ANSI.reset || ''} ${session.settings.projectRoot || process.cwd()}\n`);
   screen.write(`  ${THEME.dim}${t('config.shell')}${ANSI.reset || ''}        ${session.settings.tools?.shell?.enabled ? t('common.enabled') : t('common.disabled')}\n`);
+  const contextWindow = resolveContextWindowTokens(session.settings, session.provider?.model);
+  const reserve = Number(session.settings.context?.reserveOutputTokens) > 0 ? Number(session.settings.context.reserveOutputTokens) : 8192;
+  screen.write(`  ${THEME.dim}Context:${ANSI.reset || ''}      ${session.settings.context?.enabled === false ? t('common.disabled') : `${formatContextTokens(contextWindow)} window · ${formatContextTokens(Math.max(1, contextWindow - reserve))} input budget`}\n`);
   screen.write('\n');
 }
 
@@ -430,7 +557,7 @@ function buildDoctorReport(session, options = {}) {
     provider: { name: session.provider?.name || 'unknown', model: session.provider?.model || '', apiKeySet: Boolean(session.provider?.apiKey), apiUrl: session.provider?.apiUrl || null },
     ui: { locale, language: getLocaleLabel(locale), tty: Boolean(options.isTTY ?? new TerminalScreen().isTTY()), terminal: { columns: options.columns ?? null, rows: options.rows ?? null } },
     project: { root: session.settings.projectRoot || process.cwd() },
-    shell: { enabled: Boolean(session.settings.tools?.shell?.enabled), allowedCommands: session.settings.tools?.shell?.allowedCommands || [], timeoutMs: session.settings.tools?.shell?.timeoutMs, maxBuffer: session.settings.tools?.shell?.maxBuffer },
+    shell: { enabled: Boolean(session.settings.tools?.shell?.enabled), timeoutMs: session.settings.tools?.shell?.timeoutMs, maxBuffer: session.settings.tools?.shell?.maxBuffer },
     permissions: session.permissionManager?.getSummary?.() || null,
     memory: { enabled: Boolean(session.settings.memory?.enabled), directory: session.settings.memory?.directory || null, maxItems: session.settings.memory?.maxItems },
     sessions: { directory: session.settings.sessions?.directory || null, transcriptLimit: session.settings.sessions?.transcriptLimit, activeSessionId: session.id },
@@ -623,7 +750,7 @@ module.exports = {
   showTools, showSkills, showAgents,
   handlePermissionsCommand, handleSkillifyCommand,
   showModels, switchProvider, switchModel, switchApiUrl, switchApiKey,
-  switchLanguage, showCost, showSessions, resumeSession,
+  switchLanguage, showCost, handleContextCommand, showSessions, resumeSession,
   showConfig, buildDoctorReport, runDoctor,
   toggleTheme, toggleVim,
   handleMemoryCommand,

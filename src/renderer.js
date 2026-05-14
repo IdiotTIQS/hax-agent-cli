@@ -533,6 +533,15 @@ class ResponseRenderer {
       this.screen.write(`  ${toolLine}\n`);
       return;
     }
+    if (chunk.name === 'shell.run') {
+      this.spinner.stop();
+      if (this.lineOpen) {
+        this.screen.write('\n');
+        this.lineOpen = false;
+      }
+      this.screen.write(`  ${THEME.spinner}Running${ANSI.reset} ${toolLine}\n`);
+      return;
+    }
     this.spinner.start(toolLine, 'Running');
   }
 
