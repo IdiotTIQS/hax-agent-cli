@@ -50,6 +50,19 @@ class InputHistory {
     const lower = query.toLowerCase();
     return this.entries.filter(e => e.toLowerCase().includes(lower)).slice(0, 10);
   }
+
+  /**
+   * Interactive reverse-i-search. Returns { match, query } or null.
+   * Call repeatedly as user types; caller handles the display.
+   */
+  rsearch(query) {
+    if (!query) return null;
+    const lower = query.toLowerCase();
+    for (const e of this.entries) {
+      if (e.toLowerCase().includes(lower)) return { match: e, query };
+    }
+    return null;
+  }
 }
 
 class CostTracker {

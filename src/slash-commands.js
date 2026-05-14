@@ -51,6 +51,7 @@ function getSubcommandSuggestion(commandName, subCommand) {
 function writeCommandSuggestion(screen, t, suggestion) {
   if (!suggestion) return;
   screen.write(`${THEME.dim}${t('errors.didYouMean', { command: suggestion })}${ANSI.reset || ''}\n`);
+  screen.write(`${THEME.dim}💡 ${t('errors.tabHint')}${ANSI.reset || ''}\n`);
 }
 
 async function promptForOption({ screen, session, name, options, defaultValue, t }) {
@@ -213,6 +214,7 @@ async function handleSlashCommand(line, context) {
       context.screen.write(`${THEME.dim}${t('errors.didYouMean', { command: `/${suggestion}` })}${ANSI.reset || ''}\n`);
     }
     context.screen.write(`${THEME.dim}${t('errors.typeHelp')}${ANSI.reset || ''}\n`);
+    context.screen.write(`${THEME.dim}💡 ${t('errors.tabHint')}${ANSI.reset || ''}\n`);
     return;
   }
 

@@ -385,6 +385,9 @@ async function runShell(args, explicitSession) {
       rl.line = history.down(rl.line);
       rl.cursor = rl.line.length;
       rl._refreshLine();
+    } else if (key.ctrl && key.name === 'r') {
+      enterReverseSearch(rl, history, screen);
+      return;
     } else if (key.name === 'tab') {
       // readline already inserted \t into the line; strip it so autocomplete
       // sees the actual user input, then re-insert if not a slash command
@@ -441,6 +444,95 @@ async function runShell(args, explicitSession) {
       rl.cursor = prevSpace === -1 ? 0 : prevSpace + 1;
       rl._refreshLine();
     }
+  }
+
+  /**
+   * Interactive reverse-i-search (Ctrl+R). Like bash's reverse search:
+   * - Type to narrow search; match appears inline
+   * - Ctrl+R again to cycle to previous match
+   * - Enter to accept, Escape/Ctrl+C to cancel
+   */
+  function enterReverseSearch(rl, history, screen) {
+    if (history.entries.length === 0) return;
+
+    const origLine = rl.line;
+    let query = '';
+    let matchIndex = 0;
+    let active = true;
+
+    // Save current stdin handler and install search handler
+    const origKeypress = process.stdin.listeners('keypress').pop();
+    process.stdin.removeListener('keypress', origKeypress);
+
+    function render() {
+      const results = history.search(query);
+      const match = results[matchIndex % Math.max(1, results.length)] || '';
+      const highlight = match && query
+        ? match.replace(new RegExp(query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), m => `\x1b[1m\x1b[33m${m}\x1b[0m`)
+        : match;
+
+      process.stdout.write('\r\x1b[K'); // clear line
+      if (query) {
+        process.stdout.write(`\x1b[2m(reverse-i-search)\x1b[0m \`${query}': ${highlight}`);
+      } else {
+        process.stdout.write(`\x1b[2m(reverse-i-search)\x1b[0m \`': `);
+      }
+    }
+
+    function accept() {
+      active = false;
+      const results = history.search(query);
+      if (results.length > 0) {
+        rl.line = results[matchIndex % results.length];
+        rl.cursor = rl.line.length;
+      }
+      cleanup();
+      process.stdout.write('\r\x1b[K');
+      rl._refreshLine();
+    }
+
+    function cancel() {
+      active = false;
+      rl.line = origLine;
+      rl.cursor = rl.line.length;
+      cleanup();
+      process.stdout.write('\r\x1b[K');
+      rl._refreshLine();
+    }
+
+    function cleanup() {
+      process.stdin.removeListener('keypress', onKey);
+      process.stdin.on('keypress', origKeypress);
+    }
+
+    function onKey(_char, key) {
+      if (!active) return;
+      if (!key) return;
+
+      if (key.name === 'return' || key.name === 'enter') {
+        accept();
+      } else if (key.name === 'escape' || (key.ctrl && key.name === 'c')) {
+        cancel();
+      } else if (key.ctrl && key.name === 'r') {
+        matchIndex++;
+        render();
+      } else if (key.name === 'backspace') {
+        query = query.slice(0, -1);
+        matchIndex = 0;
+        render();
+      } else if (_char && _char.length === 1 && !key.ctrl && !key.meta) {
+        query += _char;
+        matchIndex = 0;
+        render();
+      }
+    }
+
+    process.stdin.on('keypress', onKey);
+    render();
+
+    // Pause readline so it doesn't eat our keystrokes
+    rl.pause();
+    process.stdin.once('keypress', () => {}); // dummy to keep events flowing
   }
 
   function createApprovalPrompt() {
@@ -682,7 +774,17 @@ async function runShell(args, explicitSession) {
     screen.clearLine();
     screen.write('\n');
     const time = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-    screen.write(`${styled(THEME.userIndicator, `You ${time}`)}  ${trimmed}\n`);
+    // Highlight slash commands in user echo: /cmd args → colored /cmd + dim args
+    let echoLine = trimmed;
+    if (trimmed.startsWith('/')) {
+      const spaceIdx = trimmed.indexOf(' ');
+      if (spaceIdx === -1) {
+        echoLine = styled(THEME.accent, trimmed);
+      } else {
+        echoLine = styled(THEME.accent, trimmed.slice(0, spaceIdx)) + ' ' + styled(THEME.dim, trimmed.slice(spaceIdx + 1));
+      }
+    }
+    screen.write(`${styled(THEME.userIndicator, `You ${time}`)}  ${echoLine}\n`);
 
     await handleChatMessage(trimmed, { screen, session, markdown });
     renderStatusLine(screen, session);
