@@ -38,7 +38,9 @@ for (const cmd of SLASH_COMMANDS) {
  * to be rendered by the caller, or null if no action needed.
  */
 function autoCompleteSlashCommand(rl, session) {
-  const line = rl.line;
+  // readline inserts \t into rl.line BEFORE the keypress event fires;
+  // strip it so we see the actual user input
+  const line = rl.line.replace(/\t/g, '');
   if (!line.startsWith("/")) return null;
 
   const trimmed = line.slice(1);

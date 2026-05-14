@@ -386,22 +386,22 @@ async function runShell(args, explicitSession) {
       rl.cursor = rl.line.length;
       rl._refreshLine();
     } else if (key.name === 'tab') {
+      // readline already inserted \t into the line; strip it so autocomplete
+      // sees the actual user input, then re-insert if not a slash command
+      rl.line = rl.line.replace(/\t/g, '');
+      rl.cursor = rl.line.length;
       const display = autoCompleteSlashCommand(rl, session);
-      // Only intercept Tab when autocomplete did something useful;
-      // otherwise let readline handle it normally (literal tab / indentation)
       if (display) {
-        // readline inserted a literal tab; undo it, then render the match list
-        setImmediate(() => {
-          if (rl.line.includes('\t')) {
-            rl.line = rl.line.replace(/\t/g, '');
-            rl.cursor = rl.line.length;
-            rl._refreshLine();
-          }
-          if (display.length) {
-            process.stdout.write('\n' + display.join('\n') + '\n');
-            rl.prompt(true);
-          }
-        });
+        rl._refreshLine();
+        if (display.length) {
+          process.stdout.write('\n' + display.join('\n') + '\n');
+          rl.prompt(true);
+        }
+      } else {
+        // Not a slash command — restore the tab (readline default indent)
+        rl.line = rl.line + '\t';
+        rl.cursor = rl.line.length;
+        rl._refreshLine();
       }
     }
   });
