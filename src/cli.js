@@ -62,6 +62,7 @@ function main(argv = process.argv) {
       console.log('  hax-agent sessions             List previous sessions');
       console.log('  hax-agent resume [session-id]  Resume a previous session');
       console.log('  hax-agent config [edit]        Show or edit configuration');
+      console.log('  hax-agent config --json        Output configuration as JSON');
       console.log('  hax-agent -v, --version        Print version number');
       console.log('  hax-agent --no-color           Disable ANSI color output');
       console.log('  hax-agent --debug              Enable verbose debug logging');
@@ -170,6 +171,13 @@ function runConfigCommand(args) {
     child.on('exit', (code) => {
       if (code !== 0) console.error(`Editor exited with code ${code}`);
     });
+    return;
+  }
+
+  if (args[0] === '--json') {
+    const clone = JSON.parse(JSON.stringify(settings));
+    if (clone.agent?.apiKey) clone.agent.apiKey = '***';
+    console.log(JSON.stringify(clone, null, 2));
     return;
   }
 
@@ -687,6 +695,9 @@ async function runShell(args, explicitSession) {
   let lineQueue = Promise.resolve();
   session.interactivePromptActive = false;
   let multilineBuffer = [];
+  let pasteBuffer = [];
+  let pasteTimer = null;
+  const PASTE_THRESHOLD_MS = 80;
 
   /**
    * Perform a clean exit: show file changes, session stats, save transcript, then quit.
@@ -709,6 +720,35 @@ async function runShell(args, explicitSession) {
   }
 
   rl.on('line', (line) => {
+    const now = Date.now();
+
+    // Paste detection: if lines arrive rapidly, buffer and join them
+    if (pasteTimer) {
+      clearTimeout(pasteTimer);
+      pasteBuffer.push(line);
+      pasteTimer = setTimeout(() => {
+        const joined = pasteBuffer.join('\n');
+        pasteBuffer = [];
+        pasteTimer = null;
+        rl.setPrompt(`${styled(THEME.promptPrefix, '>')} `);
+        lineQueue = lineQueue.then(() => processLine(joined));
+      }, PASTE_THRESHOLD_MS);
+      return;
+    }
+
+    // Start paste detection window — if next line arrives within threshold, we're pasting
+    pasteBuffer = [line];
+    pasteTimer = setTimeout(() => {
+      // No rapid follow-up — single line, process normally
+      const singleLine = pasteBuffer[0];
+      pasteBuffer = [];
+      pasteTimer = null;
+      processLineNormal(singleLine);
+    }, PASTE_THRESHOLD_MS);
+    return;
+  });
+
+  function processLineNormal(line) {
     // Multi-line continuation: trailing backslash (bash-style)
     if (line.endsWith('\\')) {
       multilineBuffer.push(line.slice(0, -1));
@@ -726,7 +766,7 @@ async function runShell(args, explicitSession) {
     }
 
     lineQueue = lineQueue.then(() => processLine(finalLine));
-  });
+  }
 
   async function processLine(line) {
     history.add(line);

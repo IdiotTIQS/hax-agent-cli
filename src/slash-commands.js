@@ -875,7 +875,7 @@ function toggleVim({ screen }) {
 }
 
 function handleMemoryCommand(args, { screen, session }) {
-  const { listMemories, readMemory, writeMemory, deleteMemory } = require('./memory');
+  const { listMemories, readMemory, writeMemory, deleteMemory, searchMemories } = require('./memory');
   const t = getTranslator(session);
   const [subCommand, ...subArgs] = args;
 
@@ -926,6 +926,24 @@ function handleMemoryCommand(args, { screen, session }) {
       }
       const deleted = deleteMemory(name, session.settings);
       screen.write(deleted ? `${THEME.success}Memory deleted: ${name}${ANSI.reset || ''}\n` : `${THEME.warning}Memory not found: ${name}${ANSI.reset || ''}\n`);
+      break;
+    }
+    case 'search': {
+      const query = subArgs.join(' ');
+      if (!query.trim()) {
+        screen.write(`${THEME.dim}Usage: /memory search <keyword>${ANSI.reset || ''}\n`);
+        return;
+      }
+      const results = searchMemories(query, session.settings);
+      if (results.length === 0) {
+        screen.write(`${THEME.dim}No memories match "${query}".${ANSI.reset || ''}\n`);
+        return;
+      }
+      screen.write(`\n${THEME.heading}Search results for "${query}" (${results.length})${ANSI.reset || ''}\n`);
+      for (const mem of results) {
+        screen.write(`  ${THEME.accent}${mem.name}${ANSI.reset || ''} ${THEME.dim}${(mem.content || '').slice(0, 80)}${(mem.content || '').length > 80 ? '…' : ''}${ANSI.reset || ''}\n`);
+      }
+      screen.write(`${THEME.dim}  Run /memory read <name> to see full content.${ANSI.reset || ''}\n\n`);
       break;
     }
     default:

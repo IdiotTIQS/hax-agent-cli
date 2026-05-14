@@ -103,6 +103,17 @@ async function runInitWizard(options = {}) {
     } else if (!quickMode) {
       apiUrl = (await question(t('init.apiUrlPromptDefault'))).trim();
     }
+
+    // Connectivity check
+    if (apiKey) {
+      output.write(`\n${t('init.testingConnection')}`);
+      const ok = await testProviderConnection(provider, apiKey, apiUrl || undefined);
+      if (ok) {
+        output.write(` ${t('init.connectionOk')}\n`);
+      } else {
+        output.write(`\n${t('init.connectionFailed')}\n`);
+      }
+    }
   }
 
     if (quickMode) {
@@ -436,6 +447,53 @@ function readBooleanEnv(value) {
   if (['1', 'true', 'yes', 'on'].includes(normalized)) return true;
   if (['0', 'false', 'no', 'off'].includes(normalized)) return false;
   return undefined;
+}
+
+async function testProviderConnection(provider, apiKey, apiUrl) {
+  // Lightweight connectivity check: try listing models (1 token)
+  const urls = {
+    anthropic: apiUrl || 'https://api.anthropic.com',
+    openai: apiUrl || 'https://api.openai.com',
+    google: apiUrl || 'https://generativelanguage.googleapis.com',
+  };
+  const baseUrl = urls[provider];
+  if (!baseUrl) return false;
+
+  const endpoints = {
+    anthropic: `${baseUrl}/v1/messages`,
+    openai: `${baseUrl}/v1/models`,
+    google: `${baseUrl}/v1beta/models?key=${encodeURIComponent(apiKey)}`,
+  };
+
+  const headers = provider === 'google'
+    ? { 'Accept': 'application/json' }
+    : { 'Authorization': `Bearer ${apiKey}`, 'Accept': 'application/json' };
+
+  try {
+    const { request } = provider === 'google'
+      ? await import('https')
+      : { request: require('https').request };
+
+    return await new Promise((resolve) => {
+      const url = new URL(endpoints[provider]);
+      const req = require('https').request({
+        hostname: url.hostname,
+        port: 443,
+        path: url.pathname + url.search,
+        method: 'GET',
+        headers,
+        timeout: 8000,
+      }, (res) => {
+        resolve(res.statusCode >= 200 && res.statusCode < 500);
+        res.resume();
+      });
+      req.on('error', () => resolve(false));
+      req.on('timeout', () => { req.destroy(); resolve(false); });
+      req.end();
+    });
+  } catch {
+    return false;
+  }
 }
 
 module.exports = {

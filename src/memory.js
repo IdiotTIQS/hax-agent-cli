@@ -143,6 +143,16 @@ function deleteMemory(name, options = {}) {
   return true;
 }
 
+function searchMemories(query, options = {}) {
+  if (!query || typeof query !== 'string' || !query.trim()) return [];
+  const q = query.trim().toLowerCase();
+  const all = listMemories(options);
+  return all.filter((mem) =>
+    (mem.name && mem.name.toLowerCase().includes(q)) ||
+    (mem.content && mem.content.toLowerCase().includes(q))
+  );
+}
+
 function clearSessions(options = {}) {
   const storage = createStorage(options);
 
@@ -293,6 +303,7 @@ module.exports = {
   readTranscript,
   readTranscriptMetadata,
   resolveStoragePath,
+  searchMemories,
   toFileSafeName,
   writeMemory,
   writeTranscript,

@@ -32,7 +32,7 @@ const SLASH_COMMANDS = [
 
 const SKILLS_SUBCOMMANDS = ['list', 'usage'];
 const PERMISSIONS_SUBCOMMANDS = ['status', 'mode', 'reset'];
-const MEMORY_SUBCOMMANDS = ['list', 'read', 'write', 'delete'];
+const MEMORY_SUBCOMMANDS = ['list', 'read', 'write', 'delete', 'search'];
 const TEAM_SUBCOMMANDS = [
   'help', 'agents', 'list', 'new', 'create', 'spawn', 'add-agent',
   'task', 'add-task', 'run', 'status', 'show', 'send', 'inbox',
