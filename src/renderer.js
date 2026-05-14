@@ -898,12 +898,37 @@ function isDisplayableInput(key, value) {
 
 function formatProviderError(error, provider) {
   const message = error?.message || String(error);
+  const msg = message.toLowerCase();
+
   if (error?.code === 'EMPTY_TOOL_PREAMBLE') {
     return `${message}\nThe selected model/provider endpoint produced planning text instead of a tool call. Try again, or switch to a model endpoint with reliable tool calling.`;
   }
-  if (provider?.name === 'anthropic' && /\b(401|403|forbidden|unauthorized)\b/i.test(message)) {
-    return `${message}\nCheck /api-key and /api-url, then try again.`;
+
+  // Authentication errors
+  if (/\b(401|403|forbidden|unauthorized|invalid.*key|incorrect.*key|auth.*fail)\b/i.test(msg)) {
+    return `${message}\n→ API key may be invalid or expired. Run /api-key to update it, or hax-agent config edit.`;
   }
+
+  // Rate limiting
+  if (/\b(429|rate.?limit|too many requests|quota)\b/i.test(msg)) {
+    return `${message}\n→ Rate limited. Wait a moment and try again, or switch provider with /provider.`;
+  }
+
+  // Billing / quota
+  if (/\b(billing|quota.*exceeded|insufficient.*(funds|quota|balance)|payment)\b/i.test(msg)) {
+    return `${message}\n→ Check your billing/ quota on the provider dashboard, or switch to another provider with /provider.`;
+  }
+
+  // Network / timeout
+  if (/\b(ETIMEDOUT|ECONNREFUSED|ENOTFOUND|network|timeout|fetch failed)\b/i.test(msg)) {
+    return `${message}\n→ Network error. Check your connection, API URL (/api-url), or proxy settings.`;
+  }
+
+  // Anthropic-specific
+  if (provider?.name === 'anthropic' && /\b(401|403)\b/i.test(msg)) {
+    return `${message}\n→ Check /api-key and /api-url, then try again.`;
+  }
+
   return message;
 }
 

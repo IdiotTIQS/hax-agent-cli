@@ -70,7 +70,7 @@ async function runInitWizard(options = {}) {
     }
 
     // Quick mode: ask if they want defaults for everything except provider+key
-    const quickAnswer = await question(t('init.quickMode'));
+    const quickAnswer = options.quickMode ? 'y' : await question(t('init.quickMode'));
     const quickMode = readYesNo(quickAnswer, true);
 
     const provider = await chooseOption(question, output, {

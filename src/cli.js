@@ -95,6 +95,7 @@ function runInitCommand(args) {
     input: process.stdin,
     output: process.stdout,
     promptToStart: args.includes('--confirm'),
+    quickMode: args.includes('--quick'),
   }).catch((err) => {
     console.error(`Failed to initialize: ${err.message}`);
     process.exit(1);
