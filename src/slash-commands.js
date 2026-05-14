@@ -268,6 +268,9 @@ function showShellHelp({ screen, session }) {
   screen.write(`${borderLine}\n`);
   screen.write(`  ${THEME.promptPrefix}Ctrl+C${ANSI.reset || ''}       ${THEME.dim}${t('help.ctrlC')}${ANSI.reset || ''}\n`);
   screen.write(`  ${THEME.promptPrefix}Ctrl+L${ANSI.reset || ''}       ${THEME.dim}${t('help.ctrlL')}${ANSI.reset || ''}\n`);
+  screen.write(`  ${THEME.promptPrefix}Ctrl+R${ANSI.reset || ''}       ${THEME.dim}${t('help.ctrlR')}${ANSI.reset || ''}\n`);
+  screen.write(`  ${THEME.promptPrefix}Tab${ANSI.reset || ''}          ${THEME.dim}${t('help.tab')}${ANSI.reset || ''}\n`);
+  screen.write(`  ${THEME.promptPrefix}Ctrl+\u2190/\u2192${ANSI.reset || ''}   ${THEME.dim}${t('help.ctrlArrow')}${ANSI.reset || ''}\n`);
   screen.write(`  ${THEME.promptPrefix}\u2191/\u2193${ANSI.reset || ''}         ${THEME.dim}${t('help.history')}${ANSI.reset || ''}\n`);
   screen.write(`  ${THEME.promptPrefix}Shift+Tab${ANSI.reset || ''}     ${THEME.dim}${t('help.shiftTab')}${ANSI.reset || ''}\n`);
   screen.write(`  ${THEME.promptPrefix}!command${ANSI.reset || ''}      ${THEME.dim}${t('help.bang')}${ANSI.reset || ''}\n`);

@@ -214,7 +214,9 @@ class Session {
     const dim = '\x1B[2m';
     const reset = '\x1B[0m';
     const costColor = '\x1B[93m';
-    return `${dim}${provider}${reset} · ${dim}${model}${reset} · ${costColor}$${cost.toFixed(4)}${reset} · ${dim}${turns} turns${reset} · ${dim}${elapsed}${reset}${permMode}`;
+    const cwd = this.settings?.projectRoot || process.cwd();
+    const cwdShort = cwd.length > 30 ? '...' + cwd.slice(-27) : cwd;
+    return `${dim}${cwdShort}${reset} · ${dim}${provider}${reset} · ${dim}${model}${reset} · ${costColor}$${cost.toFixed(4)}${reset} · ${dim}${turns} turns${reset} · ${dim}${elapsed}${reset}${permMode}`;
   }
 }
 

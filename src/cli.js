@@ -385,6 +385,22 @@ async function runShell(args, explicitSession) {
       rl.line = history.down(rl.line);
       rl.cursor = rl.line.length;
       rl._refreshLine();
+    } else if (key.ctrl && key.name === 'left') {
+      // Ctrl+Left: jump to previous word boundary
+      const line = rl.line;
+      let pos = rl.cursor - 1;
+      while (pos > 0 && line[pos - 1] === ' ') pos--;
+      while (pos > 0 && line[pos - 1] !== ' ') pos--;
+      rl.cursor = pos;
+      rl._refreshLine();
+    } else if (key.ctrl && key.name === 'right') {
+      // Ctrl+Right: jump to next word boundary
+      const line = rl.line;
+      let pos = rl.cursor;
+      while (pos < line.length && line[pos] !== ' ') pos++;
+      while (pos < line.length && line[pos] === ' ') pos++;
+      rl.cursor = pos;
+      rl._refreshLine();
     } else if (key.ctrl && key.name === 'r') {
       enterReverseSearch(rl, history, screen);
       return;
