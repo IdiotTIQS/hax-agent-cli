@@ -83,9 +83,9 @@ function completeCommand(rl, partial) {
     if (cmd.hasSubcommands) {
       const entry = commandMap.get(cmd.name);
       const hint = entry.argHint || (entry.subcommands ? "[" + entry.subcommands.join("|") + "]" : "");
-      return hint ? [A.dim + "  " + hint + A.reset] : null;
+      return hint ? [A.dim + "  " + hint + A.reset] : [];
     }
-    return null;
+    return [];
   }
 
   const cp = commonPrefixStr(matches.map(m => m.name));
@@ -109,7 +109,7 @@ function completeSubArg(rl, originalLine, cmdPart, partial, cmdEntry) {
   if (matches.length === 1) {
     rl.line = originalLine.slice(0, lastIdx) + matches[0] + " ";
     rl.cursor = rl.line.length;
-    return null;
+    return [];
   }
 
   const cp = commonPrefixStr(matches);

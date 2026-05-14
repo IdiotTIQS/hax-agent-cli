@@ -387,18 +387,22 @@ async function runShell(args, explicitSession) {
       rl._refreshLine();
     } else if (key.name === 'tab') {
       const display = autoCompleteSlashCommand(rl, session);
-      // readline inserts a literal tab after this handler; undo it, then render the list
-      setImmediate(() => {
-        if (rl.line.includes('\t')) {
-          rl.line = rl.line.replace(/\t/g, '');
-          rl.cursor = rl.line.length;
-          rl._refreshLine();
-        }
-        if (display && display.length) {
-          process.stdout.write('\n' + display.join('\n') + '\n');
-          rl.prompt(true);
-        }
-      });
+      // Only intercept Tab when autocomplete did something useful;
+      // otherwise let readline handle it normally (literal tab / indentation)
+      if (display) {
+        // readline inserted a literal tab; undo it, then render the match list
+        setImmediate(() => {
+          if (rl.line.includes('\t')) {
+            rl.line = rl.line.replace(/\t/g, '');
+            rl.cursor = rl.line.length;
+            rl._refreshLine();
+          }
+          if (display.length) {
+            process.stdout.write('\n' + display.join('\n') + '\n');
+            rl.prompt(true);
+          }
+        });
+      }
     }
   });
 
