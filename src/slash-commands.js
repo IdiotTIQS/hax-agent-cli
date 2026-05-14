@@ -153,9 +153,13 @@ function renderAgentEvent(event, { screen, session, renderer }) {
     case AgentEventType.toolStart:
       renderer.startTool(toProviderChunk('tool_start', event));
       break;
-    case AgentEventType.toolResult:
-      renderer.finishTool(toProviderChunk('tool_result', event));
+    case AgentEventType.toolResult: {
+      const chunk = toProviderChunk('tool_result', event);
+      renderer.finishTool(chunk);
+      // Track modified files for session change summary
+      trackFileModification(session, chunk);
       break;
+    }
     case AgentEventType.toolLimit:
       if (event.reason !== 'empty_tool_preamble') {
         renderer.notice(`Tool turn limit reached after ${event.maxToolTurns} turns. Type /continue if you need more.`);
@@ -280,8 +284,16 @@ function showShellHelp({ screen, session }) {
 function exitShell({ screen, session }) {
   const t = getTranslator(session);
   session.shouldExit = true;
+  // Show file change summary if any files were modified
+  if (session.modifiedFiles && session.modifiedFiles.size > 0) {
+    const files = [...session.modifiedFiles].sort();
+    screen.write(`\n${THEME.heading}${t('shell.filesModified', { count: files.length })}${ANSI.reset || ''}\n`);
+    for (const f of files) {
+      screen.write(`  ${THEME.accent}${f}${ANSI.reset || ''}\n`);
+    }
+  }
   const cost = session.costTracker.getCost(session.provider?.model);
-  screen.write(`${THEME.success}${t('shell.sessionEnded')}${ANSI.reset || ''} ${THEME.dim}${t('shell.sessionStats', { cost: cost.toFixed(4), turns: session.costTracker.turnCount })}${ANSI.reset || ''}\n`);
+  screen.write(`\n${THEME.success}${t('shell.sessionEnded')}${ANSI.reset || ''} ${THEME.dim}${t('shell.sessionStats', { cost: cost.toFixed(4), turns: session.costTracker.turnCount })}${ANSI.reset || ''}\n`);
 }
 
 function clearShell({ screen, session }) {
@@ -1129,6 +1141,19 @@ async function handleUpdateCheck(args, { screen }) {
       `${styled(THEME.error, `  ✖ Update failed: ${err.message}`)}\n` +
       `${styled(THEME.dim, '  Run manually: npm install -g hax-agent-cli')}\n\n`
     );
+  }
+}
+
+function trackFileModification(session, chunk) {
+  if (!session || !chunk) return;
+  const data = chunk.data || {};
+  const path = data.path;
+  if (!path) return;
+
+  if (chunk.name === 'file.write' && !chunk.isError) {
+    session.modifiedFiles.add(path);
+  } else if (chunk.name === 'file.edit' && !chunk.isError && data.changed) {
+    session.modifiedFiles.add(path);
   }
 }
 

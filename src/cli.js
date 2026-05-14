@@ -716,8 +716,16 @@ async function runShell(args, explicitSession) {
         screen.clearLine();
         screen.write(trimmed + '\n');
         session.shouldExit = true;
+        // Show file change summary if any files were modified
+        if (session.modifiedFiles && session.modifiedFiles.size > 0) {
+          const files = [...session.modifiedFiles].sort();
+          screen.write(`\n${styled(THEME.heading, t('shell.filesModified', { count: files.length }))}\n`);
+          for (const f of files) {
+            screen.write(`  ${styled(THEME.accent, f)}\n`);
+          }
+        }
         const cost = session.costTracker.getCost(session.provider?.model);
-          screen.write(`${styled(THEME.success, t('shell.sessionEnded'))} ${styled(THEME.dim, t('shell.sessionStats', { cost: cost.toFixed(4), turns: session.costTracker.turnCount }))}\n`);
+          screen.write(`\n${styled(THEME.success, t('shell.sessionEnded'))} ${styled(THEME.dim, t('shell.sessionStats', { cost: cost.toFixed(4), turns: session.costTracker.turnCount }))}\n`);
         screen.deactivate();
         process.exit(0);
       }

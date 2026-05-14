@@ -186,6 +186,7 @@ class Session {
     this.responseInterrupted = false;
     this.availableModels = undefined;
     this.startTime = Date.now();
+    this.modifiedFiles = new Set();
   }
 
   getElapsedTime() {
