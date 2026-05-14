@@ -122,18 +122,26 @@ class CostTracker {
   getPricing(model) {
     const key = String(model || '').toLowerCase();
     if (this.pricing[key]) return this.pricing[key];
-    if (/claude.*opus/.test(key)) return this.pricing['claude-opus-4-7'];
-    if (/claude.*haiku/.test(key)) return this.pricing['claude-haiku-3-5-20241022'];
-    if (/claude.*sonnet/.test(key)) return this.pricing['claude-sonnet-4-20250514'];
-    if (/gpt-4\.1.*mini/.test(key)) return this.pricing['gpt-4.1-mini'];
-    if (/gpt-4\.1/.test(key)) return this.pricing['gpt-4.1'];
-    if (/gpt-4o.*mini/.test(key)) return this.pricing['gpt-4o-mini'];
-    if (/gpt-4o/.test(key)) return this.pricing['gpt-4o'];
-    if (/o3.*mini/.test(key)) return this.pricing['o3-mini'];
-    if (/gemini-2\.5.*pro/.test(key)) return this.pricing['gemini-2.5-pro-preview-06-05'];
-    if (/gemini-2\.5.*flash/.test(key)) return this.pricing['gemini-2.5-flash-preview-05-20'];
-    if (/gemini-2\.0.*flash.*lite/.test(key)) return this.pricing['gemini-2.0-flash-lite'];
-    if (/gemini-2\.0.*flash/.test(key)) return this.pricing['gemini-2.0-flash'];
+
+    // Priority-ordered fallback patterns
+    const FALLBACKS = [
+      [/claude.*opus/,        'claude-opus-4-7'],
+      [/claude.*haiku/,       'claude-haiku-3-5-20241022'],
+      [/claude.*sonnet/,      'claude-sonnet-4-20250514'],
+      [/gpt-4\.1.*mini/,      'gpt-4.1-mini'],
+      [/gpt-4\.1/,            'gpt-4.1'],
+      [/gpt-4o.*mini/,        'gpt-4o-mini'],
+      [/gpt-4o/,              'gpt-4o'],
+      [/o3.*mini/,            'o3-mini'],
+      [/gemini-2\.5.*pro/,    'gemini-2.5-pro-preview-06-05'],
+      [/gemini-2\.5.*flash/,  'gemini-2.5-flash-preview-05-20'],
+      [/gemini-2\.0.*flash.*lite/, 'gemini-2.0-flash-lite'],
+      [/gemini-2\.0.*flash/,  'gemini-2.0-flash'],
+    ];
+
+    for (const [pattern, pricingKey] of FALLBACKS) {
+      if (pattern.test(key)) return this.pricing[pricingKey];
+    }
     return null;
   }
 

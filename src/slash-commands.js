@@ -1327,7 +1327,22 @@ function copyLastResponse({ screen, session }) {
   } else if (platform === 'darwin') {
     child = spawn('pbcopy', [], { stdio: ['pipe', 'ignore', 'ignore'] });
   } else {
+    // Linux: try xclip (X11) first, wl-copy (Wayland) as fallback
     child = spawn('xclip', ['-selection', 'clipboard'], { stdio: ['pipe', 'ignore', 'ignore'] });
+    child.on('error', () => {
+      // xclip not found, try wl-copy
+      const wlChild = spawn('wl-copy', [], { stdio: ['pipe', 'ignore', 'ignore'] });
+      wlChild.on('error', (wlErr) => {
+        screen.write(`${THEME.error}${t('shell.copyFailed', { error: 'xclip or wl-copy not found. Install: sudo apt install xclip' })}${ANSI.reset || ''}\n`);
+      });
+      wlChild.on('close', (wlCode) => {
+        if (wlCode === 0) {
+          screen.write(`${THEME.success}${t('shell.copySuccess', { chars: text.length })}${ANSI.reset || ''}\n`);
+        }
+      });
+      wlChild.stdin.write(text);
+      wlChild.stdin.end();
+    });
   }
 
   child.on('error', (err) => {

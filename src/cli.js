@@ -47,7 +47,8 @@ function main(argv = process.argv) {
     case '--version':
     case '-v':
     case '-V':
-      console.log(VERSION);
+      console.log(`hax-agent-cli v${VERSION}`);
+      console.log(`Node.js ${process.version} · ${process.platform} ${process.arch}`);
       break;
     case 'help':
     case '--help':
@@ -1120,7 +1121,40 @@ async function runShell(args, explicitSession) {
 }
 
 if (require.main === module) {
+  setupErrorHandlers();
   main();
+}
+
+function setupErrorHandlers() {
+  const isDebug = process.env.HAX_AGENT_DEBUG === '1';
+
+  process.on('uncaughtException', (error) => {
+    // Try to reset terminal state
+    if (process.stdout.isTTY) {
+      process.stdout.write('\x1B[?25h'); // show cursor
+      process.stdout.write('\x1B[0m');  // reset colors
+    }
+    process.stderr.write(`\n\x1B[91mFatal error:\x1B[0m ${error.message}\n`);
+    if (isDebug) {
+      process.stderr.write(`\n${error.stack}\n`);
+    }
+    process.stderr.write('\nRun with --debug for full stack trace.\n');
+    process.exit(1);
+  });
+
+  process.on('unhandledRejection', (reason) => {
+    if (process.stdout.isTTY) {
+      process.stdout.write('\x1B[?25h');
+      process.stdout.write('\x1B[0m');
+    }
+    const message = reason instanceof Error ? reason.message : String(reason);
+    process.stderr.write(`\n\x1B[91mUnhandled rejection:\x1B[0m ${message}\n`);
+    if (isDebug && reason instanceof Error) {
+      process.stderr.write(`\n${reason.stack}\n`);
+    }
+    process.stderr.write('\nRun with --debug for full stack trace.\n');
+    process.exit(1);
+  });
 }
 
 module.exports = { main };
