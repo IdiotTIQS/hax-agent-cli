@@ -119,10 +119,18 @@ class AnthropicProvider extends ChatProvider {
       let streamedTextLength = 0;
       let suppressTextStreaming = false;
       let pendingText = "";
+      const contentBlocks = [];
 
       for await (const event of stream) {
-        if (event.type === "content_block_delta" && event.delta?.type === "text_delta") {
+        if (event.type === "content_block_start") {
+          contentBlocks.push(event.content_block || { type: "text", text: "" });
+        } else if (event.type === "content_block_delta" && event.delta?.type === "text_delta") {
           bufferedText += event.delta.text;
+          // Also accumulate into the last content block if it's a text block
+          const lastBlock = contentBlocks[contentBlocks.length - 1];
+          if (lastBlock && lastBlock.type === "text") {
+            lastBlock.text = (lastBlock.text || "") + event.delta.text;
+          }
           if (suppressTextStreaming || containsDsmlToolMarkup(bufferedText)) {
             suppressTextStreaming = true;
             pendingText = "";
@@ -138,23 +146,56 @@ class AnthropicProvider extends ChatProvider {
           }
         } else if (event.type === "content_block_delta" && (event.delta?.type === "thinking_delta" || event.delta?.type === "signature_delta")) {
           yield createThinkingChunk();
+        } else if (event.type === "content_block_delta" && event.delta?.type === "input_json_delta") {
+          // Accumulate tool-use input JSON from stream deltas
+          const lastBlock = contentBlocks[contentBlocks.length - 1];
+          if (lastBlock && lastBlock.type === "tool_use") {
+            lastBlock._partialJson = (lastBlock._partialJson || "") + (event.delta.partial_json || "");
+          }
         }
       }
 
-      const response = typeof stream.finalMessage === "function" ? await stream.finalMessage() : null;
-      if (!response) {
+      const response = typeof stream.finalMessage === 'function' ? await stream.finalMessage() : null;
+
+      // Fallback: when finalMessage returns null (common with non-Anthropic
+      // endpoints like DeepSeek), construct a synthetic response from accumulated
+      // content blocks so tool-call extraction still works.
+      let effectiveResponse;
+      if (response) {
+        effectiveResponse = response;
+      } else if (contentBlocks.length > 0) {
+        // Reconstruct from stream events: parse tool_use partial JSON
+        const content = contentBlocks.map((block) => {
+          if (block.type === 'tool_use' && block._partialJson) {
+            try {
+              return { ...block, input: JSON.parse(block._partialJson) };
+            } catch (_) {
+              return block;
+            }
+          }
+          if (block.type === 'tool_use') {
+            return { ...block, input: block.input || {} };
+          }
+          return block;
+        });
+        effectiveResponse = { content };
+      } else if (bufferedText) {
+        effectiveResponse = { content: [{ type: 'text', text: bufferedText }] };
+      } else {
+        effectiveResponse = null;
+      }
+
+      if (!effectiveResponse) {
         if (pendingText) {
           yield createTextChunk(pendingText);
-        } else if (bufferedText && !streamedText) {
-          yield createTextChunk(bufferedText);
         }
         return;
       }
-      if (response.usage) {
+      if (response?.usage) {
         yield createUsageChunk(response.usage);
       }
 
-      const toolUses = extractToolUses(response.content);
+      const toolUses = extractToolUses(effectiveResponse.content);
       const isDsm = toolUses.some((u) => String(u.id).startsWith("dsml_"));
 
       if (isDsm || suppressTextStreaming) {
