@@ -2,6 +2,26 @@
 
 All notable changes to Hax Agent CLI will be documented in this file.
 
+## [1.4.0] - 2026-05-15
+
+### Added
+- `/context` command and `/cache` alias to view and tune context cache budgets.
+- Tab completion for context cache subcommands (`status`, `window`, `reserve`, `chars-per-token`, `auto`, `on`, `off`).
+- Broader model context-window inference for GPT-5, Claude 4.x, Gemini, DeepSeek, Qwen, Kimi, GLM, Doubao, Hunyuan, MiniMax, Yi, and Baichuan model IDs.
+- Token-count context meter now shows sub-percent usage and input-budget counts.
+
+### Changed
+- YOLO/full permission mode now maps consistently across CLI and desktop flows.
+- Shell execution no longer uses a hard allowlist gate; normal mode asks for permission and YOLO mode auto-approves.
+- CLI status line is rendered outside chat history so workspace/model/context metadata stays visible without becoming user input.
+- Windows shell command resolution now prefers executable shims and wraps `.cmd`/`.bat` launchers correctly.
+
+### Fixed
+- Repeated empty tool preamble loops from OpenAI-compatible providers.
+- `shell.run` spinner flooding the terminal while commands are running.
+- Windows `npm` execution failures caused by spawning extensionless npm shims.
+- Desktop permission mode and approval flow edge cases.
+
 ## [1.3.13] - 2026-05-14
 
 ### Added
