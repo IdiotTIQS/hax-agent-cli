@@ -121,7 +121,7 @@ function sectionArrow(key) {
         @click="toggleSection('project')"
       >
         <span>{{ t('desktop.sidebar.projectFiles') }}</span>
-        <span class="arrow">\u25BC</span>
+        <span class="arrow">&#x25BC;</span>
       </div>
       <div v-if="!collapsedSections.project" class="file-tree">
         <FileTreeNode
@@ -137,7 +137,7 @@ function sectionArrow(key) {
     <!-- Footer -->
     <div class="sidebar-footer">
       <button class="sidebar-footer-btn" @click="emit('open-settings')">
-        <span style="margin-right:6px">\u2699</span> {{ t('desktop.sidebar.settings') }}
+        <span style="margin-right:6px">&#x2699;</span> {{ t('desktop.sidebar.settings') }}
       </button>
     </div>
   </aside>

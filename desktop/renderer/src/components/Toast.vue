@@ -39,7 +39,7 @@ defineExpose({ add, dismiss, success, error, warning, info });
       :class="[t.type, { dismissing: t.leaving }]"
     >
       <span>{{ t.message }}</span>
-      <button class="toast-btn" @click="dismiss(t.id)">\u2715</button>
+      <button class="toast-btn" @click="dismiss(t.id)">&#x2715;</button>
     </div>
   </div>
 </template>

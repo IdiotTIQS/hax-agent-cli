@@ -47,7 +47,7 @@ async function chooseWorkspace() {
             <div class="subtitle">{{ t('desktop.settings.subtitle') }}</div>
             <h2>{{ t('desktop.settings.title') }}</h2>
           </div>
-          <button class="settings-close" @click="emit('close')" :aria-label="t('desktop.settings.close')">\u00D7</button>
+          <button class="settings-close" @click="emit('close')" :aria-label="t('desktop.settings.close')">&#x00D7;</button>
         </div>
         <div class="settings-panel-body">
           <div class="settings-field">

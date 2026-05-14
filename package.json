@@ -9,7 +9,7 @@
   "scripts": {
     "start": "node src/cli.js",
     "desktop:dev": "node desktop/scripts/dev.js",
-    "desktop:start": "electron desktop/main/index.js",
+    "desktop:start": "node desktop/scripts/start.js",
     "desktop:build": "vite build --config desktop/renderer/vite.config.js",
     "auth:team": "node src/cli.js team auth-refactor",
     "lint": "node scripts/lint.js",

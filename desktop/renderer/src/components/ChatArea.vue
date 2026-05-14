@@ -100,7 +100,7 @@ function isDiffMessage(msg) {
     <div class="chat-inner">
       <!-- Empty -->
       <div v-if="messages.length === 0 && !isThinking" class="empty-state">
-        <div class="empty-state-icon">\u25C8</div>
+        <div class="empty-state-icon">&#x25C8;</div>
         <h2>{{ t('desktop.chat.startChat') }}</h2>
         <p>{{ t('desktop.chat.startSubtitle') }}</p>
       </div>
@@ -121,7 +121,7 @@ function isDiffMessage(msg) {
           <div v-for="fc in msg.fileChanges" :key="fc.file" class="file-change-indicator">
             <span class="file-name">{{ fc.file }}</span>
             <span class="added">+{{ fc.added }}</span>
-            <span class="removed">\u2212{{ fc.removed }}</span>
+            <span class="removed">&#x2212;{{ fc.removed }}</span>
           </div>
         </div>
 
@@ -131,7 +131,7 @@ function isDiffMessage(msg) {
             <span class="diff-file">{{ msg.diff.file }}</span>
             <span class="diff-stats">
               <span class="diff-added-count">+{{ msg.diff.added }}</span>
-              <span class="diff-removed-count">\u2212{{ msg.diff.removed }}</span>
+              <span class="diff-removed-count">&#x2212;{{ msg.diff.removed }}</span>
             </span>
           </div>
           <div class="diff-lines">
@@ -181,7 +181,7 @@ function isDiffMessage(msg) {
             <span class="tool-call-status" :class="tc.status">
               {{ toolStatusLabel(tc) }}
             </span>
-            <span class="tool-call-chevron">\u25BC</span>
+            <span class="tool-call-chevron">&#x25BC;</span>
           </div>
           <div class="tool-call-detail">
             <div v-if="tc.input" class="tool-call-section">

@@ -51,7 +51,7 @@ function selectModel(m) { emit('select-model', m); modelOpen.value = false; }
       <div class="model-selector">
         <button class="model-select-trigger" :class="{ open: modelOpen }" @click="toggleDropdown">
           <span>{{ model || t('desktop.topbar.defaultModel') }}</span>
-          <span class="arrow">\u25BC</span>
+          <span class="arrow">&#x25BC;</span>
         </button>
         <div v-if="modelOpen" class="model-select-dropdown">
           <button
@@ -61,7 +61,7 @@ function selectModel(m) { emit('select-model', m); modelOpen.value = false; }
             @click="selectModel(m.value)"
           >
             <span>{{ m.label }}</span>
-            <span v-if="m.value === model" class="check">\u2713</span>
+            <span v-if="m.value === model" class="check">&#x2713;</span>
           </button>
         </div>
       </div>
