@@ -20,7 +20,7 @@ const { createTranslator } = require('./i18n');
 
 const VERSION = require('../package.json').version;
 
-const KNOWN_COMMANDS = ['chat', 'init', 'models', 'agents', 'team', 'resume', 'sessions', 'config', 'doctor', 'help', '--help', '-h', '--version', '-V', '--no-color', '--debug'];
+const KNOWN_COMMANDS = ['chat', 'init', 'models', 'agents', 'team', 'resume', 'sessions', 'config', 'doctor', 'help', '--help', '-h', '--version', '-v', '-V', '--no-color', '--debug'];
 const TOP_LEVEL_COMMAND_SUGGESTIONS = KNOWN_COMMANDS
   .filter((command) => !command.startsWith('-'))
   .map((command) => ({ match: command, suggest: command }));
@@ -44,6 +44,7 @@ function main(argv = process.argv) {
 
   switch (primary) {
     case '--version':
+    case '-v':
     case '-V':
       console.log(VERSION);
       break;
@@ -61,7 +62,7 @@ function main(argv = process.argv) {
       console.log('  hax-agent sessions             List previous sessions');
       console.log('  hax-agent resume [session-id]  Resume a previous session');
       console.log('  hax-agent config [edit]        Show or edit configuration');
-      console.log('  hax-agent --version            Print version number');
+      console.log('  hax-agent -v, --version        Print version number');
       console.log('  hax-agent --no-color           Disable ANSI color output');
       console.log('  hax-agent --debug              Enable verbose debug logging');
       break;
