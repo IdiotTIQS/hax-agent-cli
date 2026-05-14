@@ -19,7 +19,7 @@ const { createTranslator } = require('./i18n');
 
 const VERSION = require('../package.json').version;
 
-const KNOWN_COMMANDS = ['chat', 'init', 'models', 'agents', 'team', 'resume', 'sessions', 'config', 'help', '--help', '-h'];
+const KNOWN_COMMANDS = ['chat', 'init', 'models', 'agents', 'team', 'resume', 'sessions', 'config', 'doctor', 'help', '--help', '-h', '--version', '-V', '--no-color', '--debug'];
 const TOP_LEVEL_COMMAND_SUGGESTIONS = KNOWN_COMMANDS
   .filter((command) => !command.startsWith('-'))
   .map((command) => ({ match: command, suggest: command }));
@@ -28,7 +28,24 @@ function main(argv = process.argv) {
   const args = argv.slice(2);
   const [primary] = args;
 
+  // Handle --no-color early, before any output
+  if (args.includes('--no-color')) {
+    process.env.NO_COLOR = '1';
+    process.env.FORCE_COLOR = '0';
+    args.splice(args.indexOf('--no-color'), 1);
+  }
+
+  // Handle --debug early
+  if (args.includes('--debug')) {
+    process.env.HAX_AGENT_DEBUG = '1';
+    args.splice(args.indexOf('--debug'), 1);
+  }
+
   switch (primary) {
+    case '--version':
+    case '-V':
+      console.log(VERSION);
+      break;
     case 'help':
     case '--help':
     case '-h':
@@ -38,10 +55,14 @@ function main(argv = process.argv) {
       console.log('  hax-agent models               List available models');
       console.log('  hax-agent agents               List agent definitions');
       console.log('  hax-agent team auth-refactor   Print an auth-refactor team plan');
+      console.log('  hax-agent doctor               Run diagnostics');
       console.log('  hax-agent help                 Show this help');
       console.log('  hax-agent sessions             List previous sessions');
       console.log('  hax-agent resume [session-id]  Resume a previous session');
       console.log('  hax-agent config [edit]        Show or edit configuration');
+      console.log('  hax-agent --version            Print version number');
+      console.log('  hax-agent --no-color           Disable ANSI color output');
+      console.log('  hax-agent --debug              Enable verbose debug logging');
       break;
     case 'init': runInitCommand(args.slice(1)); break;
     case 'models': runModelsCommand(args.slice(1)); break;
@@ -50,6 +71,7 @@ function main(argv = process.argv) {
     case 'resume': runResumeCommand(args.slice(1)); break;
     case 'sessions': runSessionsCommand(args.slice(1)); break;
     case 'config': runConfigCommand(args.slice(1)); break;
+    case 'doctor': runDoctorCommand(args.slice(1)); break;
     default:
       if (primary && !KNOWN_COMMANDS.includes(primary)) {
         const suggestion = suggestCommand(primary, TOP_LEVEL_COMMAND_SUGGESTIONS);
@@ -216,8 +238,16 @@ function resolveTranscriptMessageLimit(settings = {}) {
   return Number.isFinite(limit) && limit > 0 ? limit : Infinity;
 }
 
-function runSessionsCommand() {
+function runSessionsCommand(args) {
   const settings = loadSettings();
+
+  if (args[0] === 'clear') {
+    const { clearSessions } = require('./memory');
+    const count = clearSessions(settings);
+    console.log(`Cleared ${count} session(s).`);
+    return;
+  }
+
   const { listSessions } = require('./memory');
   const sessions = listSessions(settings);
 
@@ -233,6 +263,32 @@ function runSessionsCommand() {
     const preview = firstMsg.length > 80 ? firstMsg.slice(0, 77) + '...' : firstMsg;
     const date = new Date(s.updatedAt).toLocaleDateString();
     console.log(`${s.id.slice(0, 20)}  ${date}  ${preview}`);
+  }
+  console.log('\nRun "hax-agent sessions clear" to delete all sessions.');
+}
+
+async function runDoctorCommand() {
+  const settings = loadSettings();
+  const provider = createProvider(settings.agent, process.env);
+  const locale = require('./i18n').normalizeLocale(settings.ui?.locale);
+
+  const checks = [
+    { name: 'Node.js', value: process.version },
+    { name: 'Provider', value: provider.name },
+    { name: 'Model', value: provider.model },
+    { name: 'API Key', value: provider.apiKey ? 'set' : 'not set' },
+    { name: 'API URL', value: provider.apiUrl || 'default' },
+    { name: 'Language', value: `${require('./i18n').getLocaleLabel(locale)} (${locale})` },
+    { name: 'Shell tool', value: settings.tools?.shell?.enabled !== false ? 'enabled' : 'disabled' },
+    { name: 'Memory', value: settings.memory?.enabled !== false ? 'enabled' : 'disabled' },
+    { name: 'Permissions', value: settings.permissions?.mode || 'normal' },
+    { name: 'Config file', value: require('./config').resolveSettings().sources.find(s => s.type === 'user')?.path || 'not found' },
+  ];
+
+  console.log(`Hax Agent CLI v${VERSION} - Diagnostics\n`);
+  for (const { name, value } of checks) {
+    const label = (name + ':').padEnd(16);
+    console.log(`  ${label} ${value}`);
   }
 }
 

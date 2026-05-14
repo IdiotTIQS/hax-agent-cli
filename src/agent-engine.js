@@ -3,6 +3,7 @@
 const { appendTranscriptEntry } = require("./memory");
 const { prepareContextWindow } = require("./context-window");
 const { buildFileContext } = require("./file-context");
+const { debug } = require("./debug");
 const {
   buildSkillSystemPrompt,
   getSkillsForSession,

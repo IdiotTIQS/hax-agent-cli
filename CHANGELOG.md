@@ -2,6 +2,22 @@
 
 All notable changes to Hax Agent CLI will be documented in this file.
 
+## [1.3.12] - 2026-05-14
+
+### Added
+- Quick setup mode in init wizard: skip optional questions with recommended defaults
+- `hax-agent config` command to view current configuration
+- `hax-agent config edit` to open config file in default editor
+- Smart API key detection during init (auto-detects env vars to skip input)
+- `hax-agent --version` / `-V` flag to print version number
+- `hax-agent doctor` command for one-line diagnostics
+- `--no-color` flag to disable ANSI terminal output
+
+### Changed
+- Init wizard flow: quick mode asks only Provider + Key, full mode keeps all 9 questions
+- CLI better supports piping and non-TTY environments for config viewing
+- Improved i18n for Chinese (zh-CN) translations
+
 ## [1.3.11] - 2026-05-07
 
 ### Added

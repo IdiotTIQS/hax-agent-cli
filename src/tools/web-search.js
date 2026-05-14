@@ -6,6 +6,10 @@ const { fetchUrl, htmlToPlainText } = require("./web-fetch");
 
 const DEFAULT_MAX_RESULTS = 10;
 const DEFAULT_TIMEOUT_MS = 15_000;
+const MAX_RETRIES = 2;
+const RETRY_DELAY_MS = 500;
+
+function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
 
 function createWebSearchTool() {
   return {
@@ -25,13 +29,34 @@ function createWebSearchTool() {
       const timeoutMs = readPositiveInteger(args.timeoutMs, DEFAULT_TIMEOUT_MS, "timeoutMs");
 
       let results = [];
-      try { results = await searchDuckDuckGo(query, maxResults, timeoutMs); } catch (_) {}
-      if (results.length === 0) {
-        try { results = await searchBingFallback(query, maxResults, timeoutMs); } catch (_) {}
+      let errors = [];
+
+      // Try DuckDuckGo with retries
+      for (let attempt = 0; attempt < MAX_RETRIES && results.length === 0; attempt++) {
+        try {
+          if (attempt > 0) await sleep(RETRY_DELAY_MS * attempt);
+          results = await searchDuckDuckGo(query, maxResults, timeoutMs);
+        } catch (err) {
+          errors.push(`DDG attempt ${attempt + 1}: ${err.message}`);
+        }
       }
+
+      // Fall back to Bing RSS with retries
+      if (results.length === 0) {
+        for (let attempt = 0; attempt < MAX_RETRIES && results.length === 0; attempt++) {
+          try {
+            if (attempt > 0) await sleep(RETRY_DELAY_MS * attempt);
+            results = await searchBingFallback(query, maxResults, timeoutMs);
+          } catch (err) {
+            errors.push(`Bing attempt ${attempt + 1}: ${err.message}`);
+          }
+        }
+      }
+
       return {
         query, results, resultCount: results.length,
         note: "SEARCH COMPLETE. STOP calling tools. Write your response now.",
+        ...(errors.length > 0 && results.length === 0 ? { errors: errors.slice(0, 3) } : {}),
       };
     },
   };

@@ -143,6 +143,23 @@ function deleteMemory(name, options = {}) {
   return true;
 }
 
+function clearSessions(options = {}) {
+  const storage = createStorage(options);
+
+  if (!fs.existsSync(storage.sessionDirectory)) {
+    return 0;
+  }
+
+  const files = fs.readdirSync(storage.sessionDirectory)
+    .filter((fileName) => fileName.endsWith('.jsonl'));
+
+  for (const fileName of files) {
+    fs.unlinkSync(path.join(storage.sessionDirectory, fileName));
+  }
+
+  return files.length;
+}
+
 function getSessionTranscriptPath(sessionId, options = {}) {
   const storage = createStorage(options);
   const transcriptId = String(sessionId || '').trim();
@@ -262,6 +279,7 @@ function isGeneratedTranscriptId(value) {
 
 module.exports = {
   appendTranscriptEntry,
+  clearSessions,
   createTranscriptMetadata,
   createSessionId,
   createStorage,

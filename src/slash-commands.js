@@ -1,5 +1,5 @@
 const { loadSettings, updateUserSettings } = require('./config');
-const { appendTranscriptEntry, createSessionId, listSessions, readTranscript } = require('./memory');
+const { createSessionId, listSessions, readTranscript } = require('./memory');
 const { createProvider } = require('./providers');
 const { loadAllSkills, createSkillifySkill, recordSkillUsage } = require('./skills');
 const { buildSkillSystemPrompt, matchSkillByIntent, getSkillsForSession } = require('./skills/intent-matcher');
@@ -19,57 +19,11 @@ const { PROVIDERS, chooseOptionWithArrows } = require('./init-wizard');
 const { createTranslator, getLocaleLabel, listLocales, normalizeLocale } = require('./i18n');
 const { suggestCommand } = require('./command-suggestions');
 const { AgentEngine, AgentEventType } = require('./agent-engine');
-
-const SLASH_COMMANDS = [
-  { name: 'help', descriptionKey: 'cmd.help', description: 'Show available commands and shortcuts', aliases: ['h', '?'] },
-  { name: 'exit', descriptionKey: 'cmd.exit', description: 'Exit the session', aliases: ['q', 'quit'] },
-  { name: 'clear', descriptionKey: 'cmd.clear', description: 'Clear conversation and start fresh', aliases: ['c'] },
-  { name: 'compact', descriptionKey: 'cmd.compact', description: 'Compact conversation to reduce context', aliases: [] },
-  { name: 'tools', descriptionKey: 'cmd.tools', description: 'List available tools', aliases: ['t'] },
-  { name: 'skills', descriptionKey: 'cmd.skills', description: 'List or manage skills', aliases: ['skill'], argHint: '[list|usage]' },
-  { name: 'skillify', descriptionKey: 'cmd.skillify', description: 'Capture this session as a reusable skill', aliases: [], argHint: '[description]' },
-  { name: 'agents', descriptionKey: 'cmd.agents', description: 'List available agents', aliases: ['a'] },
-  { name: 'team', descriptionKey: 'cmd.team', description: 'Manage agent teams and teammates', aliases: ['teams'], argHint: '[new|spawn|task|run|status|send|inbox|agents]' },
-  { name: 'models', descriptionKey: 'cmd.models', description: 'List available models', aliases: ['m'] },
-  { name: 'model', descriptionKey: 'cmd.model', description: 'Switch the active model', aliases: [], argHint: '<model-id-or-number>' },
-  { name: 'provider', descriptionKey: 'cmd.provider', description: 'Show or switch the AI provider', aliases: ['p'], argHint: '<anthropic|openai|google>' },
-  { name: 'api-url', descriptionKey: 'cmd.apiUrl', description: 'Show or set the API base URL', aliases: [], argHint: '<base-url>' },
-  { name: 'api-key', descriptionKey: 'cmd.apiKey', description: 'Show or set the API key', aliases: [], argHint: '<key>' },
-  { name: 'language', descriptionKey: 'cmd.language', description: 'Show or switch the CLI language', aliases: ['lang', 'locale'], argHint: '<en|zh-CN|zh-TW|ru>' },
-  { name: 'cost', descriptionKey: 'cmd.cost', description: 'Show token usage and cost for this session', aliases: [] },
-  { name: 'sessions', descriptionKey: 'cmd.sessions', description: 'List previous sessions', aliases: ['s'] },
-  { name: 'resume', descriptionKey: 'cmd.resume', description: 'Resume a previous session', aliases: ['r'], argHint: '<session-id>' },
-  { name: 'config', descriptionKey: 'cmd.config', description: 'Show current configuration', aliases: [] },
-  { name: 'doctor', descriptionKey: 'cmd.doctor', description: 'Run diagnostics and check setup', aliases: [] },
-  { name: 'theme', descriptionKey: 'cmd.theme', description: 'Toggle color theme', aliases: [] },
-  { name: 'vim', descriptionKey: 'cmd.vim', description: 'Toggle vim keybindings mode', aliases: [] },
-  { name: 'memory', descriptionKey: 'cmd.memory', description: 'Manage agent memory', aliases: [], argHint: '[list|read|write|delete] [name]' },
-  { name: 'permissions', descriptionKey: 'cmd.permissions', description: 'View or manage tool permission levels', aliases: ['perm'], argHint: '[status|mode <auto|ask|yolo>|reset]' },
-  { name: 'update', descriptionKey: 'cmd.update', description: 'Check for CLI updates', aliases: [], argHint: '[install]' },
-];
-
-const SKILLS_SUBCOMMANDS = ['list', 'usage'];
-const PERMISSIONS_SUBCOMMANDS = ['status', 'mode', 'reset'];
-const MEMORY_SUBCOMMANDS = ['list', 'read', 'write', 'delete'];
-const TEAM_SUBCOMMANDS = [
-  'help',
-  'agents',
-  'list',
-  'new',
-  'create',
-  'spawn',
-  'add-agent',
-  'task',
-  'add-task',
-  'run',
-  'status',
-  'show',
-  'send',
-  'inbox',
-];
-
-let themeEnabled = true;
-let vimMode = false;
+const {
+  SLASH_COMMANDS, SKILLS_SUBCOMMANDS, PERMISSIONS_SUBCOMMANDS,
+  MEMORY_SUBCOMMANDS, TEAM_SUBCOMMANDS,
+  isThemeEnabled, setThemeEnabled, isVimMode, setVimMode,
+} = require('./commands/definitions');
 
 function getTranslator(session) {
   return createTranslator(session?.settings?.ui?.locale);
@@ -279,7 +233,7 @@ async function handleSlashCommand(line, context) {
     case 'api-key': await switchApiKey(args, context); break;
     case 'language': await switchLanguage(args, context); break;
     case 'cost': showCost(context); break;
-    case 'sessions': await showSessions(context); break;
+    case 'sessions': await handleSessionsCommand(args, context); break;
     case 'resume': await resumeSession(args, context); break;
     case 'config': showConfig(context); break;
     case 'doctor': runDoctor(context); break;
@@ -524,7 +478,7 @@ async function handlePermissionsCommand(args, { screen, session }) {
   screen.write(`${THEME.dim}${t('permissions.usage')}${ANSI.reset || ''}\n`);
 }
 
-async function handleSkillifyCommand(args, { screen, session }) {
+async function handleSkillifyCommand(args, { screen, session, markdown }) {
   const description = args.join(' ');
   const skillify = createSkillifySkill(session.messages);
 
@@ -535,58 +489,11 @@ async function handleSkillifyCommand(args, { screen, session }) {
   const promptBlocks = await skillify.getPromptForCommand(description ? [description] : []);
   const skillContent = promptBlocks.map((b) => b.text).join('\n');
 
-  const userMessage = { role: 'user', content: skillContent };
-  session.messages.push(userMessage);
-
-  const abortController = new AbortController();
-  const markdown = new MarkdownRenderer(screen.columns);
   const renderer = new ResponseRenderer(screen, markdown);
-  let assistantText = '';
+  const engine = new AgentEngine({ session, projectRoot: session.settings.projectRoot });
 
-  session.isStreaming = true;
-  session.responseInterrupted = false;
-  session.responseAbortController = abortController;
-  session.responseRenderer = renderer;
-  renderer.startWaiting();
-
-  try {
-    for await (const chunk of session.provider.stream({
-      messages: session.messages,
-      toolRegistry: session.toolRegistry,
-      signal: abortController.signal,
-    })) {
-      if (session.responseInterrupted) break;
-
-      if (chunk.type === 'text') {
-        assistantText += chunk.delta;
-        renderer.writeText(chunk.delta);
-      } else if (chunk.type === 'thinking') {
-        renderer.thinking(chunk);
-      } else if (chunk.type === 'tool_start') {
-        session.costTracker.addToolCall();
-        renderer.startTool(chunk);
-      } else if (chunk.type === 'tool_result') {
-        renderer.finishTool(chunk);
-      } else if (chunk.type === 'usage') {
-        session.costTracker.addUsage(chunk, session.provider.model);
-      }
-    }
-
-    if (!session.responseInterrupted) {
-      renderer.complete({ inputTokens: 0, outputTokens: 0 });
-      session.messages.push({ role: 'assistant', content: assistantText });
-      appendTranscriptEntry(session.id, userMessage, session.settings);
-      appendTranscriptEntry(session.id, { role: 'assistant', content: assistantText }, session.settings);
-    } else {
-      session.messages.pop();
-    }
-  } catch (error) {
-    renderer.fail(`Skillify failed: ${error.message}`);
-    session.messages.pop();
-  } finally {
-    session.isStreaming = false;
-    session.responseAbortController = null;
-    session.responseRenderer = null;
+  for await (const event of engine.sendMessage(skillContent, { disableIntentMatching: true })) {
+    renderAgentEvent(event, { screen, session, renderer });
   }
 }
 
@@ -798,7 +705,21 @@ function showCost({ screen, session }) {
 }
 
 async function showSessions({ screen, session }) {
+  // kept for backwards compat - same as list
+  await handleSessionsCommand([], { screen, session });
+}
+
+async function handleSessionsCommand(args, { screen, session }) {
   const t = getTranslator(session);
+  const [subCommand] = args;
+
+  if (subCommand === 'clear') {
+    const { clearSessions } = require('./memory');
+    const count = clearSessions(session.settings);
+    screen.write(`${THEME.success}Cleared ${count} session(s).${ANSI.reset || ''}\n`);
+    return;
+  }
+
   const sessions = listSessions(session.settings);
   if (sessions.length === 0) {
     screen.write(`${THEME.dim}${t('sessions.none')}${ANSI.reset || ''}\n`);
@@ -816,7 +737,7 @@ async function showSessions({ screen, session }) {
     const date = new Date(s.updatedAt).toLocaleDateString();
     screen.write(`  ${THEME.dim}${s.id.slice(0, 20)}${ANSI.reset || ''}  ${THEME.dim}${date}${ANSI.reset || ''}  ${preview}\n`);
   }
-  screen.write('\n');
+  screen.write(`\n${THEME.dim}/sessions clear to delete all${ANSI.reset || ''}\n\n`);
 }
 
 async function resumeSession(args, { screen, session }) {
@@ -923,13 +844,13 @@ function runDoctor({ screen, session }) {
 }
 
 function toggleTheme({ screen }) {
-  themeEnabled = !themeEnabled;
-  screen.write(`${THEME.success}Theme ${themeEnabled ? 'enabled' : 'disabled'}.${ANSI.reset || ''}\n`);
+  setThemeEnabled(!isThemeEnabled());
+  screen.write(`${THEME.success}Theme ${isThemeEnabled() ? 'enabled' : 'disabled'}.${ANSI.reset || ''}\n`);
 }
 
 function toggleVim({ screen }) {
-  vimMode = !vimMode;
-  screen.write(`${THEME.success}Vim mode ${vimMode ? 'enabled' : 'disabled'}.${ANSI.reset || ''}\n`);
+  setVimMode(!isVimMode());
+  screen.write(`${THEME.success}Vim mode ${isVimMode() ? 'enabled' : 'disabled'}.${ANSI.reset || ''}\n`);
 }
 
 function handleMemoryCommand(args, { screen, session }) {
