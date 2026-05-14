@@ -250,6 +250,7 @@ async function handleSlashCommand(line, context) {
     case 'update': await handleUpdateCheck(args, context); break;
     case 'copy': copyLastResponse(context); break;
     case 'rename': renameSession(args, context); break;
+    case 'status': showStatus(context); break;
     default:
       context.screen.write(`${THEME.error}Command not implemented: /${command.name}${ANSI.reset || ''}\n`);
   }
@@ -1226,6 +1227,31 @@ function renameSession(args, { screen, session }) {
   }
   session.customName = name;
   screen.write(`${THEME.success}${t('shell.renameSuccess', { name })}${ANSI.reset || ''}\n`);
+}
+
+function showStatus({ screen, session }) {
+  const t = getTranslator(session);
+  const cost = session.costTracker.getCost(session.provider?.model);
+  const provider = session.provider?.name || '?';
+  const model = session.provider?.model || '?';
+  const permMode = session.permissionManager?.mode || '?';
+  const msgCount = session.messages?.length || 0;
+  const turnCount = session.costTracker.turnCount || 0;
+  const tokenUsed = session.costTracker.totalTokens || 0;
+  const sessionId = session.id?.slice(0, 12) || '?';
+  const { listSessions } = require('./memory');
+  const sessions = listSessions(session.settings);
+
+  screen.write(`\n${THEME.heading}Session Status${ANSI.reset || ''}\n`);
+  screen.write(`  Session:     ${sessionId}\n`);
+  screen.write(`  Provider:    ${provider} / ${model}\n`);
+  screen.write(`  Messages:    ${msgCount}\n`);
+  screen.write(`  Turns:       ${turnCount}\n`);
+  screen.write(`  Tokens:      ${tokenUsed.toLocaleString()}\n`);
+  screen.write(`  Cost:        $${cost.toFixed(4)}\n`);
+  screen.write(`  Permissions: ${permMode}\n`);
+  screen.write(`  Sessions:    ${sessions.length} saved\n`);
+  screen.write(`\n${THEME.dim}  /help for commands  ·  /sessions to browse history${ANSI.reset || ''}\n\n`);
 }
 
 module.exports = {

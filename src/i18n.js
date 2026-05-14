@@ -107,6 +107,7 @@ const TRANSLATIONS = {
     'cmd.update': 'Check for CLI updates',
     'cmd.copy': 'Copy last AI response to clipboard',
     'cmd.rename': 'Name the current session',
+    'cmd.status': 'Show session summary (model, cost, tokens, git)',
     'help.commands': 'Commands',
     'help.shortcuts': 'Keyboard Shortcuts',
     'help.ctrlC': 'Interrupt the AI or quit (double-press)',

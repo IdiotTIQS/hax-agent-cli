@@ -40,6 +40,7 @@ const sidebarWidth = ref(260);
 const inspectorWidth = ref(290);
 const resizing = ref(null);
 const locale = ref(DEFAULT_LOCALE);
+const darkMode = ref(false);
 
 const messages = ref([{
   id: crypto.randomUUID(),
@@ -220,6 +221,11 @@ function stopElapsedTimer() {
 
 function getWelcomeMessage() {
   return t('desktop.app.welcomeMessage');
+}
+
+function toggleTheme() {
+  darkMode.value = !darkMode.value;
+  document.documentElement.setAttribute('data-theme', darkMode.value ? 'dark' : '');
 }
 
 function appendLog(label, type = 'info') {
@@ -978,8 +984,10 @@ watch([activeNav, panelQuery], () => {
           :is-busy="isBusy"
           :model="settings.model"
           :models="modelOptions"
+          :dark-mode="darkMode"
           @interrupt="interruptAgent"
           @select-model="(m) => settings.model = m"
+          @toggle-theme="toggleTheme"
         />
         <div class="workspace-rail">
           <div class="workspace-rail-item workspace-rail-wide">

@@ -11,9 +11,10 @@ const props = defineProps({
   models: { type: Array, default: () => [] },
   scopeLabel: { type: String, default: '' },
   scopeTitle: { type: String, default: '' },
+  darkMode: { type: Boolean, default: false },
 });
 
-const emit = defineEmits(['interrupt', 'select-model']);
+const emit = defineEmits(['interrupt', 'select-model', 'toggle-theme']);
 
 const modelOpen = ref(false);
 
@@ -39,6 +40,10 @@ function selectModel(m) { emit('select-model', m); modelOpen.value = false; }
       <div v-if="scopeLabel" class="topbar-scope" :title="scopeTitle">{{ scopeLabel }}</div>
     </div>
     <div class="topbar-actions">
+      <button class="btn btn-ghost" :title="darkMode ? 'Light mode' : 'Dark mode'" @click="emit('toggle-theme')" style="font-size:16px;padding:0 8px;">
+        {{ darkMode ? '\u2600' : '\u263D' }}
+      </button>
+
       <span class="status-badge" :class="status">
         <span class="status-dot"></span> {{ displayStatus }}
       </span>

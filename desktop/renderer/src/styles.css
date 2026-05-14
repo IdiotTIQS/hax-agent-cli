@@ -101,6 +101,36 @@
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
+   DARK THEME OVERRIDES
+   ═══════════════════════════════════════════════════════════════════════ */
+[data-theme="dark"] {
+  --bg-root:       #1a1b1e;
+  --bg-surface:    #212226;
+  --bg-elevated:   #28292d;
+  --bg-card:       #2e2f34;
+  --bg-hover:      #35363b;
+  --bg-active:     #3d3428;
+  --bg-code:       #25262a;
+  --bg-terminal:   #0d0d10;
+
+  --border-subtle: #2e2f34;
+  --border-default:#3a3b40;
+  --border-strong: #4e4f55;
+  --border-accent: #b8854a;
+
+  --text-primary:  #e4e3dd;
+  --text-secondary:#b5b4ac;
+  --text-disabled: #5e5f63;
+  --text-accent:   #d49b5f;
+  --text-link:     #7eb8da;
+  --text-danger:   #e06c6c;
+  --text-success:  #7dbf7d;
+
+  --sb-thumb:      #4a4b50;
+  --sb-thumb-hover:#5e5f64;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
    RESET & BASE
    ═══════════════════════════════════════════════════════════════════════ */
 

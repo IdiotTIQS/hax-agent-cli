@@ -28,6 +28,7 @@ const SLASH_COMMANDS = [
   { name: 'update', descriptionKey: 'cmd.update', description: 'Check for CLI updates', aliases: [], argHint: '[install]' },
   { name: 'copy', descriptionKey: 'cmd.copy', description: 'Copy last AI response to clipboard', aliases: [] },
   { name: 'rename', descriptionKey: 'cmd.rename', description: 'Name the current session', aliases: ['name'], argHint: '<name>' },
+  { name: 'status', descriptionKey: 'cmd.status', description: 'Show session summary (model, cost, tokens, git)', aliases: [] },
 ];
 
 const SKILLS_SUBCOMMANDS = ['list', 'usage'];
