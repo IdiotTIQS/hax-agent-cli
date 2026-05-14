@@ -6,6 +6,7 @@ const { spawn } = require('node:child_process');
 const { createProvider } = require('./providers');
 const { loadSettings } = require('./config');
 const { loadRecentTranscript, handleChatMessage, renderBanner, renderStatusLine, handleSlashCommand } = require('./slash-commands');
+const { autoCompleteSlashCommand } = require('./commands/autocomplete');
 const { suggestCommand } = require('./command-suggestions');
 const { createLocalToolRegistry } = require('./tools');
 const { registerAgentTeamTools } = require('./teams/tools');
@@ -426,32 +427,6 @@ async function runShell(args, explicitSession) {
     }
   }
 
-  function autoCompleteSlashCommand(rl, session) {
-    const line = rl.line;
-    const { SLASH_COMMANDS } = require('./slash-commands');
-
-    if (line.startsWith('/')) {
-      const partial = line.slice(1).split(' ')[0];
-      const matches = SLASH_COMMANDS.filter((c) => c.name.startsWith(partial));
-      if (matches.length === 1) {
-        rl.line = '/' + matches[0].name + ' ';
-        rl.cursor = rl.line.length;
-        rl._refreshLine();
-      } else if (matches.length > 1) {
-        const commonPrefix = matches.reduce((acc, c) => {
-          let i = 0;
-          while (i < acc.length && i < c.name.length && acc[i] === c.name[i]) i++;
-          return c.name.slice(0, i);
-        }, matches[0].name);
-        if (commonPrefix.length > partial.length) {
-          rl.line = '/' + commonPrefix;
-          rl.cursor = rl.line.length;
-          rl._refreshLine();
-        }
-      }
-    }
-  }
-
   function createApprovalPrompt() {
     if (!screen.isTTY()) {
       toolRegistry.permissionManager.mode = 'yolo';
@@ -530,6 +505,24 @@ async function runShell(args, explicitSession) {
   } else {
     const permLabel = session.permissionManager.mode === 'normal' ? t('common.mode.standard') : session.permissionManager.mode;
     screen.write(styled(THEME.dim, t('shell.permissionMode', { mode: permLabel })) + '\n\n');
+  }
+
+  // First-run tips — show if no sessions exist (fresh install)
+  const { listSessions } = require('./memory');
+  const sessions = listSessions(session.settings);
+  if (sessions.length === 0) {
+    const tips = [
+      `  ${styled(THEME.bold, '🚀 Quick Start')}`,
+      `  ${styled(THEME.dim, 'Just type a question to begin — the AI will help with code, files, and more.')}`,
+      ``,
+      `  ${styled(THEME.bold, '💡 Tips')}`,
+      `  ${styled(THEME.dim, 'Type')} / ${styled(THEME.dim, 'to see all commands   →   Tab to autocomplete')}`,
+      `  ${styled(THEME.dim, 'Tab auto-completes commands and subcommands (e.g. /team Tab)')}`,
+      `  ${styled(THEME.dim, 'Shift+Tab toggles permission mode (normal ↔ yolo)')}`,
+      `  ${styled(THEME.dim, 'Ctrl+L clears screen   ·   /exit to quit')}`,
+      ``,
+    ];
+    for (const tip of tips) screen.write(tip + '\n');
   }
 
   renderStatusLine(screen, session);
