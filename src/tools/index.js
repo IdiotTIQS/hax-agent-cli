@@ -11,6 +11,7 @@ const { createWebSearchTool } = require('./web-search');
 const { createFileEditTool } = require('./file-edit');
 const { createReadDirectoryTool } = require('./file-readdir');
 const { createDeleteFileTool } = require('./file-delete');
+const { createStockQuoteTool } = require('./stock-quote');
 
 module.exports = {
   ToolExecutionError,
@@ -26,6 +27,7 @@ module.exports = {
   createFileEditTool,
   createReadDirectoryTool,
   createDeleteFileTool,
+  createStockQuoteTool,
   serializeToolResult,
   stringifyToolResult,
 };

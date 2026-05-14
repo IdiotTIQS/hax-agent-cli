@@ -12,6 +12,7 @@ const { createWebSearchTool } = require('./web-search');
 const { createFileEditTool } = require('./file-edit');
 const { createReadDirectoryTool } = require('./file-readdir');
 const { createDeleteFileTool } = require('./file-delete');
+const { createStockQuoteTool } = require('./stock-quote');
 
 const SINGLE_CALL_TOOLS = new Set(['web.fetch', 'web.search', 'file.readDirectory']);
 const SINGLE_CALL_CACHE_MS = 300_000;
@@ -157,7 +158,8 @@ function createLocalToolRegistry(options = {}) {
     .register(createWebSearchTool())
     .register(createFileEditTool())
     .register(createReadDirectoryTool())
-    .register(createDeleteFileTool());
+    .register(createDeleteFileTool())
+    .register(createStockQuoteTool());
 
   return registry;
 }
