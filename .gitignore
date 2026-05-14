@@ -2,5 +2,13 @@ node_modules/
 .hax-agent/
 *.log
 .env
+.env.local
+.env.*.local
 claude-code-main/
 desktop/renderer/dist/
+coverage/
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+dist/

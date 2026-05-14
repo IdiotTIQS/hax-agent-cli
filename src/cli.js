@@ -493,9 +493,28 @@ async function runShell(args, explicitSession) {
     function render() {
       const results = history.search(query);
       const match = results[matchIndex % Math.max(1, results.length)] || '';
-      const highlight = match && query
-        ? match.replace(new RegExp(query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), m => `\x1b[1m\x1b[33m${m}\x1b[0m`)
-        : match;
+      let highlight = match;
+      if (match && query) {
+        try {
+          const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          // Guard against ReDoS: limit regex complexity
+          if (escaped.length <= 200) {
+            highlight = match.replace(new RegExp(escaped, 'gi'), m => `\x1b[1m\x1b[33m${m}\x1b[0m`);
+          } else {
+            // Fallback: plain highlight without regex
+            const idx = match.toLowerCase().indexOf(query.toLowerCase());
+            if (idx >= 0) {
+              highlight = match.slice(0, idx) + `\x1b[1m\x1b[33m${match.slice(idx, idx + query.length)}\x1b[0m` + match.slice(idx + query.length);
+            }
+          }
+        } catch {
+          // Regex failed — use plain match fallback
+          const idx = match.toLowerCase().indexOf(query.toLowerCase());
+          if (idx >= 0) {
+            highlight = match.slice(0, idx) + `\x1b[1m\x1b[33m${match.slice(idx, idx + query.length)}\x1b[0m` + match.slice(idx + query.length);
+          }
+        }
+      }
 
       process.stdout.write('\r\x1b[K'); // clear line
       if (query) {

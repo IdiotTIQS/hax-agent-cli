@@ -133,6 +133,14 @@ function createLineMatcher(query, options) {
   let expression;
 
   try {
+    // Guard against ReDoS: limit regex length and complexity
+    if (query.length > 500) {
+      throw new ToolExecutionError('INVALID_REGEX', 'Query too long (max 500 characters)');
+    }
+    // Reject patterns with nested quantifiers (common ReDoS vector)
+    if (/\(.*[\*\+]\{.*\}.*\)|\(.*\)[\*\+]\{/.test(query)) {
+      throw new ToolExecutionError('INVALID_REGEX', 'Pattern contains potentially unsafe nested quantifiers');
+    }
     expression = new RegExp(query, options.caseSensitive ? '' : 'i');
   } catch (error) {
     throw new ToolExecutionError('INVALID_REGEX', error.message);
