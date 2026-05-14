@@ -638,22 +638,22 @@ function createGoogleClient(apiKey, apiUrl) {
   let GoogleGenAIModule;
 
   try {
-    GoogleGenAIModule = require("@google/genai");
+    GoogleGenAIModule = require("@google/generative-ai");
   } catch (error) {
     if (error.code === "MODULE_NOT_FOUND") {
-      throw new Error("Install @google/genai before using the Google provider");
+      throw new Error("Install @google/generative-ai before using the Google provider");
     }
     throw error;
   }
 
-  const { GoogleGenAI } = GoogleGenAIModule;
+  const { GoogleGenerativeAI } = GoogleGenAIModule;
   const resolvedApiKey = apiKey || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
 
   if (!resolvedApiKey) {
     throw new Error("No API key provided. Set GEMINI_API_KEY or GOOGLE_API_KEY environment variable, or use config set google.apiKey");
   }
 
-  return new GoogleGenAI({ apiKey: resolvedApiKey });
+  return new GoogleGenerativeAI({ apiKey: resolvedApiKey });
 }
 
 module.exports = {

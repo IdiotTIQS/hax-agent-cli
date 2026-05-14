@@ -2,6 +2,36 @@
 
 All notable changes to Hax Agent CLI will be documented in this file.
 
+## [1.3.13] - 2026-05-14
+
+### Added
+- `stock.quote` tool for real-time stock/index quotes (A-shares, HK stocks, US stocks)
+- `file.read` auto-truncation + `offset`/`limit` line pagination for large files
+- Inline diff view for `file.edit` tool
+- Context window usage meter in status line
+- Multi-line input support (`\` line continuation)
+- Ctrl+←/→ word jump navigation, status bar cwd, `/help` shortcut cheatsheet
+- Ctrl+R reverse history search
+- Command syntax highlighting and improved error messages
+- Session file change summary on `/exit`
+- `/copy` command to copy last AI response to clipboard
+- `/rename` command to name the current session
+- Tool execution timing displayed in file modification notices
+- `-v` shorthand for `--version` flag
+
+### Changed
+- Local tools modularized into separate files (`file-edit`, `file-readdir`, `file-delete`, `web-fetch`, `web-search`, `stock-quote`)
+- Enhanced tab autocomplete with first-run onboarding
+- Enhanced `/clear` with cleared message count and user guidance
+- `file.read`/`file.search`/`file.write` tool descriptions discourage AI from passing tiny `maxBytes`
+- Increased empty tool preamble retry tolerance (1→3) with stronger continuation prompts
+
+### Fixed
+- Google provider dependency: `require("@google/genai")` → `@google/generative-ai`
+- Stream `finalMessage()` returning `null` on non-Anthropic endpoints
+- Chinese text falsely detected as tool preamble in `forceTextResponse` mode
+- Tab autocomplete not working due to readline inserting `\t` before keypress event
+
 ## [1.3.12] - 2026-05-14
 
 ### Added

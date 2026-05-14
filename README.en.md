@@ -123,8 +123,9 @@ npm run desktop:build
 hax-agent
 hax-agent chat
 
-# View help
+# View help and version
 hax-agent help
+hax-agent -v
 
 # Run setup wizard
 hax-agent init
@@ -132,15 +133,30 @@ hax-agent init
 # List available models for the current provider
 hax-agent models
 
+# List built-in agent roles
+hax-agent agents
+
 # Run diagnostics (script-friendly)
 hax-agent doctor --json
 
 # Output the auth-refactor team plan
 hax-agent team auth-refactor
 
+# List and resume sessions
+hax-agent sessions
+hax-agent resume <session-id>
+
+# View or edit configuration
+hax-agent config
+hax-agent config edit
+
+# Other options
+hax-agent --no-color    # Disable ANSI color output
+hax-agent --debug       # Enable verbose debug logging
+
 # Use globally after linking
 npm link
-hax-agent            # Available from any directory
+hax-agent               # Available from any directory
 ```
 
 ### Built-in npm Scripts
@@ -150,9 +166,11 @@ hax-agent            # Available from any directory
 | `npm start` | Start the CLI (`node src/cli.js`) |
 | `npm run desktop:dev` | Start the Electron + Vue desktop app in development mode |
 | `npm run desktop:build` | Build the desktop frontend assets |
+| `npm run desktop:start` | Start the Electron desktop app directly |
 | `npm run auth:team` | Output the auth-refactor team plan |
 | `npm run lint` | Run syntax checks for JS/MJS files |
 | `npm test` | Run the test suite |
+| `npm run test:desktop` | Build desktop and run desktop tests |
 
 ---
 
@@ -180,7 +198,9 @@ Type the following slash commands in the Shell:
 | `/cost` | View token usage and cost for this session |
 | `/sessions` | List previous sessions |
 | `/resume [session-id]` | Resume a previous session |
+| `/rename <name>` | Name the current session |
 | `/config` | Show current configuration |
+| `/copy` | Copy last AI response to clipboard |
 | `/doctor [--json]` | Run diagnostics; `--json` prints machine-readable output |
 | `/theme` | Toggle terminal color theme |
 | `/vim` | Toggle Vim keybindings mode |
@@ -298,9 +318,9 @@ The system automatically tracks each skill's usage frequency and last-used time,
 
 | Provider | Aliases | Default Model | Environment Variables |
 |----------|---------|---------------|----------------------|
-| **Anthropic** | `anthropic`, `claude` | `claude-opus-4-7` | `ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL` |
-| **OpenAI** | `openai`, `gpt` | `gpt-4o` | `OPENAI_API_KEY`, `OPENAI_BASE_URL` |
-| **Google** | `google`, `gemini` | `gemini-2.5-pro` | `GOOGLE_API_KEY`, `GOOGLE_BASE_URL` |
+| **Anthropic** | `anthropic`, `claude` | `claude-sonnet-4-20250514` | `ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL` |
+| **OpenAI** | `openai`, `gpt` | `gpt-4.1` | `OPENAI_API_KEY`, `OPENAI_BASE_URL` |
+| **Google** | `google`, `gemini` | `gemini-2.5-flash-preview-05-20` | `GOOGLE_API_KEY`, `GOOGLE_BASE_URL` |
 
 ### Complete Environment Variables
 
@@ -396,11 +416,17 @@ The Agent Shell includes a restricted tool registry, with all file operations co
 
 | Tool | Description | Security Restriction |
 |------|-------------|---------------------|
-| `file.read` | Read text files within the workspace | Path restricted to workspace root |
+| `file.read` | Read text files within the workspace, with pagination | Path restricted to workspace root |
 | `file.write` | Write text files within the workspace | Path restricted to workspace root |
+| `file.edit` | Precisely edit files with diff preview | Path restricted to workspace root |
+| `file.delete` | Delete files (moves to trash by default) | Path restricted to workspace root |
 | `file.glob` | List files matching a glob pattern | Path restricted to workspace root |
 | `file.search` | Search for content in text files | Supports regex / case sensitivity config |
+| `file.readDirectory` | List directory contents | Path restricted to workspace root |
 | `shell.run` | Execute local commands | Only allowlisted commands (default `node`, `npm`, `git`) |
+| `web.fetch` | Fetch web pages and convert to plain text | Blocks internal/private addresses |
+| `web.search` | Search the web for information | DuckDuckGo + Bing fallback |
+| `stock.quote` | Get real-time stock/index quotes | A-shares, HK stocks, US stocks |
 
 ---
 
@@ -412,8 +438,20 @@ src/
 ├── cli.js                        # CLI entry + interactive Shell
 ├── config.js                     # Layered configuration loading & environment variable overrides
 ├── context.js                    # Prompt context assembly
+├── context-window.js             # Token budget & context window management
+├── file-context.js               # Relevant file context recall
 ├── memory.js                     # Session memory & persistent storage
+├── session.js                    # Session lifecycle & cost tracking
+├── agent-engine.js               # Agent engine: tool calling loop
 ├── orchestration.js              # Agent orchestration logic
+├── slash-commands.js             # Startup flow, banner, slash command routing
+├── renderer.js                   # Terminal rendering, Markdown, ANSI themes
+├── i18n.js                       # Multi-language internationalization
+├── init-wizard.js                # First-run initialization wizard
+├── updater.js                    # CLI self-update
+├── command-suggestions.js        # Command typo suggestions
+├── permissions.js                # Tool permission management
+├── debug.js                      # Debug logging
 │
 ├── providers/                    # AI Provider abstraction layer
 │   ├── index.js                  #   Module exports
@@ -423,7 +461,8 @@ src/
 │   ├── openai-provider.js        #   OpenAI (GPT) implementation
 │   ├── google-provider.js        #   Google (Gemini) implementation
 │   ├── mock-provider.js          #   Local mock implementation
-│   └── messages.js               #   Message format normalization
+│   ├── messages.js               #   Message format normalization
+│   └── shared.js                 #   Provider shared utilities
 │
 ├── runtime/                      # Agent runtime
 │   ├── index.js                  #   Module exports
@@ -434,14 +473,50 @@ src/
 │   ├── sessions.js               #   Session lifecycle
 │   └── tasks.js                  #   Task definition & execution
 │
-├── teams/                        # Multi-agent team definitions
-│   └── auth-refactor.js          #   Auth refactoring team
+├── teams/                        # Multi-agent teams
+│   ├── agents.js                 #   Agent role definitions
+│   ├── auth-refactor.js          #   Auth refactoring team plan
+│   ├── runtime.js                #   Team runtime
+│   └── tools.js                  #   Agent team tools
 │
 ├── tools/                        # Local tool registry
-│   └── index.js                  #   Tool definitions & validation
+│   ├── index.js                  #   Tool registration entry
+│   ├── registry.js               #   Tool registry + sandbox execution
+│   ├── error.js                  #   Tool error types
+│   ├── utils.js                  #   Serialization & tool helpers
+│   ├── file-read.js              #   file.read — read files
+│   ├── file-write.js             #   file.write — write files
+│   ├── file-edit.js              #   file.edit — precise text editing
+│   ├── file-delete.js            #   file.delete — delete files
+│   ├── file-glob.js              #   file.glob — glob matching
+│   ├── file-search.js            #   file.search — content search
+│   ├── file-readdir.js           #   file.readDirectory — list directories
+│   ├── shell.js                  #   shell.run — command execution
+│   ├── web-fetch.js              #   web.fetch — web page fetching
+│   ├── web-search.js             #   web.search — internet search
+│   └── stock-quote.js            #   stock.quote — stock quotes
 │
-└── formatters/                   # Output formatting
-    └── team-plan.js              #   Team plan formatting
+├── commands/                     # Slash command system
+│   ├── index.js                  #   Module exports
+│   ├── definitions.js            #   Command definitions
+│   ├── handlers.js               #   Command handlers
+│   ├── autocomplete.js           #   Tab autocomplete
+│   └── shell-ui.js               #   Input history, syntax highlighting
+│
+├── skills/                       # Skills system
+│   ├── index.js                  #   Module exports
+│   ├── loader.js                 #   Skill loader
+│   ├── parser.js                 #   SKILL.md parser
+│   ├── intent-matcher.js         #   Intent matching
+│   ├── skillify.js               #   Session-to-skill capture
+│   └── usage.js                  #   Usage statistics tracking
+│
+├── formatters/                   # Output formatting
+│   ├── agent-teams.js            #   Agent team output
+│   └── team-plan.js              #   Team plan formatting
+│
+└── utils/                        # General utilities
+    └── serialization.js          #   Provider serialization helpers
 
 desktop/
 ├── main/                         # Electron main process
@@ -457,12 +532,25 @@ desktop/
 |--------|---------------|
 | `config.js` | Multi-source configuration merging, environment variable parsing, configuration persistence |
 | `context.js` | Assembles settings, memory, and conversation history into system prompts |
+| `context-window.js` | Token budget management and context window truncation |
+| `file-context.js` | Keyword-based relevant file recall injected into prompts |
 | `memory.js` | JSON/JSONL file storage, session transcript read/write, memory CRUD |
-| `providers/` | Provider abstraction with factory pattern, supports dynamic registration of new providers |
+| `agent-engine.js` | Agent main loop: send request → execute tools → collect results |
+| `session.js` | Session lifecycle, CostTracker token usage statistics |
+| `slash-commands.js` | Startup banner, slash command routing, first-run detection |
+| `renderer.js` | ANSI themes, Markdown rendering, terminal output formatting |
+| `i18n.js` | Multi-language support (EN, zh-CN, zh-TW, RU) |
+| `init-wizard.js` | Interactive setup wizard (provider, API key, permissions) |
+| `updater.js` | Version checking & self-update |
+| `command-suggestions.js` | Command typo suggestions |
+| `permissions.js` | Tool permission level management & policy enforcement |
+| `providers/` | Provider abstraction with factory pattern, dynamic registration of new providers |
 | `runtime/` | Session management, agent role orchestration, task scheduling, command parsing |
-| `teams/auth-refactor.js` | Multi-agent collaboration plan definition (architect, developer, reviewer, etc.) |
-| `tools/index.js` | Tool registry, path security validation, execution sandbox |
-| `desktop/` | Electron main process, preload script, and Vue desktop UI |
+| `teams/` | Multi-agent team plan definitions, runtime, and communication tools |
+| `tools/` | Modular tool registry, path security validation, execution sandbox |
+| `commands/` | Slash command definitions, handling, autocomplete, and input history |
+| `skills/` | Skill parsing, loading, intent matching, and usage tracking |
+| `desktop/` | Electron main process, preload script, Vue desktop UI |
 
 ---
 
@@ -531,16 +619,29 @@ hax-agent team auth-refactor
 npm test
 ```
 
-The project uses Node.js built-in test runner (`node --test`). Test files are located in the `test/` directory:
+The project uses the Node.js built-in test runner (`node --test`). Test files are in the `test/` directory:
 
 ```text
 test/
-├── auth-refactor.test.js
-├── cli.test.js
-├── config-memory.test.js
-├── orchestration.test.js
-├── providers.test.js
-└── team-plan.test.js
+├── agent-engine.test.js          # Agent engine behavior
+├── auth-refactor.test.js         # Auth refactoring team
+├── cli.test.js                   # CLI entry & commands
+├── config-memory.test.js         # Config, memory & context
+├── context-window.test.js        # Context window management
+├── desktop-git-assist.test.js    # Desktop Git assist
+├── desktop-main.test.js          # Desktop main process
+├── desktop-markdown.test.js      # Desktop Markdown rendering
+├── desktop-renderer.test.js      # Desktop renderer components
+├── desktop-smoke.smoke.js        # Desktop smoke test
+├── file-context.test.js          # File context recall
+├── init-wizard.test.js           # Setup wizard
+├── orchestration.test.js         # Orchestration logic
+├── permissions.test.js           # Permission management
+├── providers.test.js             # AI providers
+├── skills.test.js                # Skills system
+├── team-plan.test.js             # Team plan formatting
+├── team-tools.test.js            # Team tools
+└── updater.test.js               # CLI self-update
 ```
 
 ### Directory Conventions
