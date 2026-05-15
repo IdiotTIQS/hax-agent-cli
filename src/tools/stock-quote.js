@@ -3,7 +3,7 @@
 const https = require("node:https");
 const http = require("node:http");
 const { ToolExecutionError } = require("./error");
-const { requireString } = require("./utils");
+const { requireString, readPositiveInteger } = require("./utils");
 
 const DEFAULT_TIMEOUT_MS = 10_000;
 
@@ -33,7 +33,7 @@ function createStockQuoteTool() {
     },
     async execute(args) {
       const symbol = requireString(args.symbol, "symbol").trim();
-      const timeoutMs = typeof args.timeoutMs === "number" ? args.timeoutMs : DEFAULT_TIMEOUT_MS;
+      const timeoutMs = readPositiveInteger(args.timeoutMs, DEFAULT_TIMEOUT_MS, "timeoutMs");
 
       const resolvedSymbol = KNOWN_SYMBOLS[symbol] || symbol;
 
@@ -41,9 +41,13 @@ function createStockQuoteTool() {
         return await fetchSinaChinese(resolvedSymbol, timeoutMs);
       }
       if (/^\d{6}$/.test(resolvedSymbol)) {
-        const shResult = await fetchSinaChinese(`sh${resolvedSymbol}`, timeoutMs);
-        if (shResult && !shResult.error) return shResult;
-        return await fetchSinaChinese(`sz${resolvedSymbol}`, timeoutMs);
+        // Try Shanghai first, fall back to Shenzhen
+        try {
+          return await fetchSinaChinese(`sh${resolvedSymbol}`, timeoutMs);
+        } catch (shErr) {
+          // sh failed, try sz
+          return await fetchSinaChinese(`sz${resolvedSymbol}`, timeoutMs);
+        }
       }
       if (resolvedSymbol.startsWith("^") || /^[A-Z]{1,5}$/.test(resolvedSymbol)) {
         return await fetchYahooUS(resolvedSymbol, timeoutMs);
@@ -54,7 +58,7 @@ function createStockQuoteTool() {
 }
 
 async function fetchSinaChinese(code, timeoutMs) {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const url = `https://hq.sinajs.cn/list=${code}`;
     const req = https.get(url, {
       headers: { Referer: "https://finance.sina.com.cn" },
@@ -67,12 +71,12 @@ async function fetchSinaChinese(code, timeoutMs) {
         try {
           const match = data.match(/"([^"]+)"/);
           if (!match) {
-            resolve({ symbol: code, error: "Could not parse stock data", source: "Sina Finance" });
+            reject(new ToolExecutionError("STOCK_PARSE_ERROR", `Could not parse stock data for ${code}`));
             return;
           }
           const fields = match[1].split(",");
           if (fields.length < 6) {
-            resolve({ symbol: code, error: "Incomplete data from Sina", source: "Sina Finance" });
+            reject(new ToolExecutionError("STOCK_PARSE_ERROR", `Incomplete data from Sina for ${code}`));
             return;
           }
           const name = fields[0];
@@ -98,17 +102,17 @@ async function fetchSinaChinese(code, timeoutMs) {
             updatedAt: `${fields[30] || ""} ${fields[31] || ""}`.trim(),
           });
         } catch (err) {
-          resolve({ symbol: code, error: `Parse error: ${err.message}`, source: "Sina Finance" });
+          reject(new ToolExecutionError("STOCK_PARSE_ERROR", `Parse error for ${code}: ${err.message}`));
         }
       });
     });
-    req.on("timeout", () => { req.destroy(); resolve({ symbol: code, error: "Request timed out", source: "Sina Finance" }); });
-    req.on("error", (err) => { resolve({ symbol: code, error: `Request failed: ${err.message}`, source: "Sina Finance" }); });
+    req.on("timeout", () => { req.destroy(); reject(new ToolExecutionError("STOCK_TIMEOUT", `Request timed out for ${code}`)); });
+    req.on("error", (err) => { reject(new ToolExecutionError("STOCK_FETCH_ERROR", `Request failed for ${code}: ${err.message}`)); });
   });
 }
 
 async function fetchYahooUS(symbol, timeoutMs) {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const encodedSymbol = encodeURIComponent(symbol);
     const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodedSymbol}?interval=1d&range=1d`;
 
@@ -120,7 +124,7 @@ async function fetchYahooUS(symbol, timeoutMs) {
           const json = JSON.parse(data);
           const result = json?.chart?.result?.[0];
           if (!result) {
-            resolve({ symbol, error: "No data from Yahoo Finance", source: "Yahoo Finance" });
+            reject(new ToolExecutionError("STOCK_NO_DATA", `No data from Yahoo Finance for ${symbol}`));
             return;
           }
           const meta = result.meta || {};
@@ -145,12 +149,12 @@ async function fetchYahooUS(symbol, timeoutMs) {
             currency: meta.currency || "USD",
           });
         } catch (err) {
-          resolve({ symbol, error: `Parse error: ${err.message}`, source: "Yahoo Finance" });
+          reject(new ToolExecutionError("STOCK_PARSE_ERROR", `Parse error for ${symbol}: ${err.message}`));
         }
       });
     });
-    req.on("timeout", () => { req.destroy(); resolve({ symbol, error: "Request timed out", source: "Yahoo Finance" }); });
-    req.on("error", (err) => { resolve({ symbol, error: `Request failed: ${err.message}`, source: "Yahoo Finance" }); });
+    req.on("timeout", () => { req.destroy(); reject(new ToolExecutionError("STOCK_TIMEOUT", `Request timed out for ${symbol}`)); });
+    req.on("error", (err) => { reject(new ToolExecutionError("STOCK_FETCH_ERROR", `Request failed for ${symbol}: ${err.message}`)); });
   });
 }
 

@@ -138,7 +138,8 @@ function createLineMatcher(query, options) {
       throw new ToolExecutionError('INVALID_REGEX', 'Query too long (max 500 characters)');
     }
     // Reject patterns with nested quantifiers (common ReDoS vector)
-    if (/\(.*[\*\+]\{.*\}.*\)|\(.*\)[\*\+]\{/.test(query)) {
+    // Checks for patterns like (a+)+, (a*){n}, or consecutive quantifiers like a++b  
+    if (/\(.*[*+]\{.*\}.*\)|\(.*\)[*+]\{/.test(query) || /[*+]{2,}/.test(query)) {
       throw new ToolExecutionError('INVALID_REGEX', 'Pattern contains potentially unsafe nested quantifiers');
     }
     expression = new RegExp(query, options.caseSensitive ? '' : 'i');

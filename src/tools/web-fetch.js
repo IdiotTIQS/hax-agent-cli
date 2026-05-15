@@ -67,6 +67,8 @@ function createWebFetchTool() {
           lastError = error;
           if (error.code === "INVALID_URL" || error.code === "PRIVATE_REDIRECT_BLOCKED") throw error;
           if (error.code === "HTTP_ERROR" && error.status && error.status >= 400 && error.status < 500 && error.status !== 429) throw error;
+          // Don't retry on AbortError (timeout) — the timeout is per-attempt, not cumulative
+          if (error.name === "AbortError") throw new ToolExecutionError("FETCH_TIMEOUT", `Request to ${url} exceeded ${timeoutMs}ms`);
           if (attempt < maxRetries) await new Promise(r => setTimeout(r, Math.min(1000 * 2**attempt, 5000)));
         }
       }
@@ -99,6 +101,11 @@ async function fetchUrl({ parsedUrl, method, maxBodyBytes, timeoutMs }) {
     if (!response.ok) {
       const err = new ToolExecutionError("HTTP_ERROR", `HTTP ${response.status}: ${response.statusText || "Error"}`);
       err.status = response.status; throw err;
+    }
+
+    // Guard: some responses (HEAD, 204, 304) have no body
+    if (!response.body) {
+      return { body: "", truncated: false, status: response.status };
     }
 
     // Stream response with size limit to avoid buffering huge bodies in memory

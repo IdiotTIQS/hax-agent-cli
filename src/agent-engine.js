@@ -10,6 +10,13 @@ const {
   matchSkillByIntent,
 } = require("./skills/intent-matcher");
 const { loadAllSkills, createSkillifySkill, recordSkillUsage } = require("./skills");
+const {
+  serializeProvider,
+  serializeError,
+  serializeSkill,
+  serializeProviderIssue,
+  isTerminalToolLimitReason,
+} = require("./utils/serialization");
 
 const AgentEventType = Object.freeze({
   started: "turn.started",
@@ -353,19 +360,6 @@ async function buildTurnSystemPrompt(options = {}) {
   };
 }
 
-function createEmptyFileContext() {
-  return {
-    files: [],
-    stats: {
-      indexedFiles: 0,
-      matchedFiles: 0,
-      includedFiles: 0,
-      bytes: 0,
-    },
-    systemPrompt: "",
-  };
-}
-
 function withoutProviderType(chunk) {
   const { type, ...payload } = chunk;
   return payload;
@@ -404,55 +398,16 @@ function createEvent(type, payload, session) {
   };
 }
 
-function serializeProvider(provider) {
-  if (!provider) return null;
-
+function createEmptyFileContext() {
   return {
-    name: provider.name,
-    model: provider.model,
-    apiUrl: provider.apiUrl,
-  };
-}
-
-function serializeSkill(skill) {
-  if (!skill) return null;
-
-  return {
-    name: skill.name,
-    displayName: skill.displayName || skill.name,
-    description: skill.description || "",
-    source: skill.source || null,
-  };
-}
-
-function serializeError(error) {
-  return {
-    name: error?.name || "Error",
-    code: error?.code || null,
-    message: error?.message || String(error || "Unknown error"),
-    stack: error?.stack || null,
-  };
-}
-
-function isTerminalToolLimitReason(reason) {
-  return reason === "empty_tool_preamble";
-}
-
-function serializeProviderIssue(issue) {
-  if (issue?.reason === "empty_tool_preamble") {
-    return {
-      name: "ProviderToolUseError",
-      code: "EMPTY_TOOL_PREAMBLE",
-      message: "The model repeatedly said it would inspect or gather more context, but it did not call an available tool.",
-      stack: null,
-    };
-  }
-
-  return {
-    name: "ProviderToolUseError",
-    code: issue?.reason || "PROVIDER_TOOL_LIMIT",
-    message: "The provider stopped before completing the requested tool workflow.",
-    stack: null,
+    files: [],
+    stats: {
+      indexedFiles: 0,
+      matchedFiles: 0,
+      includedFiles: 0,
+      bytes: 0,
+    },
+    systemPrompt: "",
   };
 }
 

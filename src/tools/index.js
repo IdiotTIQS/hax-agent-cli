@@ -1,4 +1,5 @@
 const { ToolExecutionError } = require('./error');
+const { ErrorCodes } = require('./error-codes');
 const { serializeToolResult, stringifyToolResult } = require('./utils');
 const { ToolRegistry, createLocalToolRegistry } = require('./registry');
 const { createReadFileTool } = require('./file-read');
@@ -15,6 +16,7 @@ const { createStockQuoteTool } = require('./stock-quote');
 
 module.exports = {
   ToolExecutionError,
+  ErrorCodes,
   ToolRegistry,
   createLocalToolRegistry,
   createReadFileTool,

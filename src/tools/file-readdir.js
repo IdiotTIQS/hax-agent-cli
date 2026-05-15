@@ -5,7 +5,9 @@ const {
   IGNORED_DIRECTORY_NAMES,
   requireString,
   readPositiveInteger,
+  resolveWithinRoot,
   toWorkspacePath,
+  statPath,
 } = require('./utils');
 
 function createReadDirectoryTool() {
@@ -30,23 +32,8 @@ function createReadDirectoryTool() {
       const maxEntries = readPositiveInteger(args.maxEntries, DEFAULT_MAX_ENTRIES, 'maxEntries');
       const includeHidden = args.includeHidden === true;
 
-      const resolvedPath = path.resolve(context.root, dirPath);
-
-      if (resolvedPath === context.root || resolvedPath.startsWith(context.root + path.sep)) {
-        // Inside root
-      } else {
-        throw new ToolExecutionError('PATH_OUTSIDE_ROOT', `Directory path escapes workspace root: ${dirPath}`);
-      }
-
-      let stat;
-      try {
-        stat = await fs.stat(resolvedPath);
-      } catch (error) {
-        if (error.code === 'ENOENT') {
-          throw new ToolExecutionError('PATH_NOT_FOUND', `Directory does not exist: ${dirPath}`);
-        }
-        throw error;
-      }
+      const resolvedPath = resolveWithinRoot(context.root, dirPath);
+      const stat = await statPath(resolvedPath);
 
       if (!stat.isDirectory()) {
         throw new ToolExecutionError('NOT_A_DIRECTORY', `Path is not a directory: ${dirPath}`);

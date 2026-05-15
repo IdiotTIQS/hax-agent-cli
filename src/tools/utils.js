@@ -96,7 +96,7 @@ async function resolveWithinRootSafe(root, requestedPath) {
     if (err.code === 'ENOENT') {
       return direct;
     }
-    throw err;
+    throw new ToolExecutionError('PATH_RESOLVE_ERROR', `Failed to resolve path: ${err.message}`, { code: err.code });
   }
   const relativeReal = path.relative(root, realPath);
   if (relativeReal === '' || (!relativeReal.startsWith('..') && !path.isAbsolute(relativeReal))) {
@@ -123,7 +123,7 @@ async function statPath(filePath) {
     if (error && error.code === 'ENOENT') {
       throw new ToolExecutionError('PATH_NOT_FOUND', `Path does not exist: ${filePath}`);
     }
-    throw error;
+    throw new ToolExecutionError('FILE_STAT_ERROR', `Failed to stat ${filePath}: ${error.message}`, { syscall: error.syscall, errno: error.errno, code: error.code });
   }
 }
 
@@ -138,7 +138,7 @@ async function readExistingFileContent(filePath, encoding) {
     if (error && error.code === 'ENOENT') {
       return null;
     }
-    throw error;
+    throw new ToolExecutionError('FILE_READ_ERROR', `Failed to read ${filePath}: ${error.message}`, { syscall: error.syscall, errno: error.errno, code: error.code });
   }
 }
 

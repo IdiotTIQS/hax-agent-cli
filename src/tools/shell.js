@@ -143,7 +143,9 @@ async function runCommand(options) {
 
     child.on('error', (error) => {
       clearTimeout(timeout);
-      reject(error);
+      reject(new ToolExecutionError('SHELL_SPAWN_ERROR',
+        `Failed to spawn "${options.command}": ${error.message}`,
+        { syscall: error.syscall, errno: error.errno }));
     });
 
     child.on('close', (exitCode, signal) => {
@@ -190,7 +192,12 @@ function quoteCmdArg(value) {
 
   const escaped = text
     .replace(/"/g, '""')
-    .replace(/%/g, '%%');
+    .replace(/%/g, '%%')
+    .replace(/\^/g, '^^')
+    .replace(/&/g, '^&')
+    .replace(/\|/g, '^|')
+    .replace(/</g, '^<')
+    .replace(/>/g, '^>');
 
   return `"${escaped}"`;
 }

@@ -199,6 +199,8 @@ hax-agent               # 任意目录下可用
 | `/sessions` | 列出历史会话 |
 | `/resume [session-id]` | 恢复历史会话 |
 | `/rename <name>` | 为当前会话命名 |
+| `/status` | 查看会话摘要（模型、费用、tokens、git）|
+| `/context [subcommand]` | 查看或设置上下文窗口/缓存预算（别名 `/cache`）|
 | `/config` | 查看当前配置 |
 | `/copy` | 复制最后一条 AI 回复到剪贴板 |
 | `/doctor [--json]` | 运行环境诊断，`--json` 输出机器可读结果 |
@@ -365,7 +367,7 @@ AI 会分析会话内容，识别可复用的步骤，并引导你创建 SKILL.m
 | `HAX_AGENT_LOCALE` / `HAX_AGENT_LANGUAGE` | CLI 语言 | `en` |
 | `HAX_AGENT_SHELL_ENABLED` | 是否启用 shell 工具 | `true` |
 | `HAX_AGENT_SHELL_TIMEOUT_MS` | Shell 命令超时毫秒数 | `10000` |
-| `HAX_AGENT_SHELL_MAX_BUFFER` | Shell 命令最大输出字节数 | `200000` |
+| `HAX_AGENT_SHELL_MAX_BUFFER` | Shell 命令最大输出字节数 | `52428800` (50 MB) |
 | `HAX_AGENT_PROJECT_ROOT` | 项目根目录（覆盖 `process.cwd()`） | — |
 | `HAX_AGENT_USER_SETTINGS` | 用户配置路径 | `~/.hax-agent/settings.json` |
 | `HAX_AGENT_PROJECT_SETTINGS` | 项目配置路径 | `./.hax-agent/settings.json` |
@@ -402,7 +404,7 @@ AI 会分析会话内容，识别可复用的步骤，并引导你创建 SKILL.m
     "shell": {
       "enabled": true,
       "timeoutMs": 10000,
-      "maxBuffer": 200000
+      "maxBuffer": 52428800
     }
   }
 }
@@ -446,7 +448,12 @@ src/
 ├── orchestration.js              # Agent 协调逻辑
 ├── slash-commands.js             # 启动流程、Banner、斜杠命令路由
 ├── renderer.js                   # 终端渲染、Markdown、ANSI 主题
-├── i18n.js                       # 多语言国际化
+├── i18n/                         # 多语言国际化
+│   ├── index.js                  #   模块导出 + 翻译工厂
+│   ├── en.js                     #   英语
+│   ├── zh-CN.js                  #   简体中文
+│   ├── zh-TW.js                  #   繁体中文（继承 zh-CN）
+│   └── ru.js                     #   俄语（继承 en）
 ├── init-wizard.js                # 首次运行初始化向导
 ├── updater.js                    # CLI 自更新
 ├── command-suggestions.js        # 命令纠错建议
@@ -483,6 +490,7 @@ src/
 │   ├── index.js                  #   工具注册入口
 │   ├── registry.js               #   工具注册表 + 沙箱执行
 │   ├── error.js                  #   工具错误类型
+│   ├── error-codes.js            #   标准错误码常量 (35个)
 │   ├── utils.js                  #   序列化 & 工具函数
 │   ├── file-read.js              #   file.read — 读取文件
 │   ├── file-write.js             #   file.write — 写入文件
@@ -539,7 +547,7 @@ desktop/
 | `session.js` | 会话生命周期、CostTracker token 用量统计 |
 | `slash-commands.js` | 启动 Banner、斜杠命令路由、首次运行检测 |
 | `renderer.js` | ANSI 主题、Markdown 渲染、终端输出格式化 |
-| `i18n.js` | 中/英/繁/俄多语言支持 |
+| `i18n/` | 中/英/繁/俄多语言支持 |
 | `init-wizard.js` | 交互式初始化向导（Provider、API Key、权限） |
 | `updater.js` | 版本检查与自更新 |
 | `command-suggestions.js` | 命令纠错建议 |
@@ -628,6 +636,8 @@ test/
 ├── cli.test.js                   # CLI 入口与命令
 ├── config-memory.test.js         # 配置、记忆与上下文
 ├── context-window.test.js        # 上下文窗口管理
+├── error-handling.test.js        # 错误处理与序列化
+├── session-commands.test.js      # 会话、命令补全、InputHistory
 ├── desktop-git-assist.test.js    # 桌面端 Git 辅助
 ├── desktop-main.test.js          # 桌面端主进程
 ├── desktop-markdown.test.js      # 桌面端 Markdown 渲染

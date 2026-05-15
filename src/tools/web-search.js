@@ -53,10 +53,15 @@ function createWebSearchTool() {
         }
       }
 
+      // If all sources failed, throw an error
+      if (results.length === 0) {
+        const errMessages = errors.slice(0, 3).join("; ");
+        throw new ToolExecutionError("SEARCH_FAILED", `All search sources failed for "${query}": ${errMessages || "Unknown error"}`);
+      }
+
       return {
         query, results, resultCount: results.length,
         note: "SEARCH COMPLETE. STOP calling tools. Write your response now.",
-        ...(errors.length > 0 && results.length === 0 ? { errors: errors.slice(0, 3) } : {}),
       };
     },
   };

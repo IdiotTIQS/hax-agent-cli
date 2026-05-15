@@ -4,6 +4,7 @@ const PermissionLevel = Object.freeze({
   DANGEROUS: 'dangerous',
 });
 const { createTranslator } = require('./i18n');
+const nodePath = require('node:path');
 
 const TOOL_PERMISSIONS = {
   'file.read': PermissionLevel.AUTO,
@@ -12,6 +13,7 @@ const TOOL_PERMISSIONS = {
   'file.readDirectory': PermissionLevel.AUTO,
   'web.fetch': null,
   'web.search': PermissionLevel.AUTO,
+  'stock.quote': PermissionLevel.AUTO,
   'file.write': PermissionLevel.ASK,
   'file.edit': PermissionLevel.ASK,
   'file.delete': PermissionLevel.DANGEROUS,
@@ -62,8 +64,7 @@ function normalizeCommand(command) {
   const trimmed = command.trim();
   const hasPathSeparator = trimmed.includes('/') || trimmed.includes('\\');
   const base = hasPathSeparator ? trimmed : trimmed.split(/\s+/)[0];
-  const path = require('node:path');
-  return path.basename(base).replace(/\.exe$/i, '').toLocaleLowerCase();
+  return nodePath.basename(base).replace(/\.exe$/i, '').toLocaleLowerCase();
 }
 
 function getToolPermission(toolName, toolArgs) {

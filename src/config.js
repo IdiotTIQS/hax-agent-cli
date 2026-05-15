@@ -59,7 +59,7 @@ const DEFAULT_SETTINGS = Object.freeze({
     shell: {
       enabled: true,
       timeoutMs: 10_000,
-      maxBuffer: 200_000,
+      maxBuffer: 52_428_800,  // 50 MB
     },
   },
 });

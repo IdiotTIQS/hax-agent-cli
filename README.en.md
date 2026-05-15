@@ -199,6 +199,8 @@ Type the following slash commands in the Shell:
 | `/sessions` | List previous sessions |
 | `/resume [session-id]` | Resume a previous session |
 | `/rename <name>` | Name the current session |
+| `/status` | Show session summary (model, cost, tokens, git) |
+| `/context [subcommand]` | View or set context window / cache budget (alias `/cache`) |
 | `/config` | Show current configuration |
 | `/copy` | Copy last AI response to clipboard |
 | `/doctor [--json]` | Run diagnostics; `--json` prints machine-readable output |
@@ -365,7 +367,7 @@ The system automatically tracks each skill's usage frequency and last-used time,
 | `HAX_AGENT_LOCALE` / `HAX_AGENT_LANGUAGE` | CLI language | `en` |
 | `HAX_AGENT_SHELL_ENABLED` | Enable shell tool | `true` |
 | `HAX_AGENT_SHELL_TIMEOUT_MS` | Shell command timeout in milliseconds | `10000` |
-| `HAX_AGENT_SHELL_MAX_BUFFER` | Shell command max output bytes | `200000` |
+| `HAX_AGENT_SHELL_MAX_BUFFER` | Shell command max output bytes | `52428800` (50 MB) |
 | `HAX_AGENT_PROJECT_ROOT` | Project root directory (overrides `process.cwd()`) | — |
 | `HAX_AGENT_USER_SETTINGS` | User configuration path | `~/.hax-agent/settings.json` |
 | `HAX_AGENT_PROJECT_SETTINGS` | Project configuration path | `./.hax-agent/settings.json` |
@@ -402,7 +404,7 @@ The system automatically tracks each skill's usage frequency and last-used time,
     "shell": {
       "enabled": true,
       "timeoutMs": 10000,
-      "maxBuffer": 200000
+      "maxBuffer": 52428800
     }
   }
 }
@@ -446,7 +448,12 @@ src/
 ├── orchestration.js              # Agent orchestration logic
 ├── slash-commands.js             # Startup flow, banner, slash command routing
 ├── renderer.js                   # Terminal rendering, Markdown, ANSI themes
-├── i18n.js                       # Multi-language internationalization
+├── i18n/                         # Multi-language internationalization
+│   ├── index.js                  #   Module exports + translation factory
+│   ├── en.js                     #   English
+│   ├── zh-CN.js                  #   Simplified Chinese
+│   ├── zh-TW.js                  #   Traditional Chinese (extends zh-CN)
+│   └── ru.js                     #   Russian (extends en)
 ├── init-wizard.js                # First-run initialization wizard
 ├── updater.js                    # CLI self-update
 ├── command-suggestions.js        # Command typo suggestions
@@ -483,6 +490,7 @@ src/
 │   ├── index.js                  #   Tool registration entry
 │   ├── registry.js               #   Tool registry + sandbox execution
 │   ├── error.js                  #   Tool error types
+│   ├── error-codes.js            #   Standard error code constants (35)
 │   ├── utils.js                  #   Serialization & tool helpers
 │   ├── file-read.js              #   file.read — read files
 │   ├── file-write.js             #   file.write — write files
@@ -539,7 +547,7 @@ desktop/
 | `session.js` | Session lifecycle, CostTracker token usage statistics |
 | `slash-commands.js` | Startup banner, slash command routing, first-run detection |
 | `renderer.js` | ANSI themes, Markdown rendering, terminal output formatting |
-| `i18n.js` | Multi-language support (EN, zh-CN, zh-TW, RU) |
+| `i18n/` | Multi-language support (EN, zh-CN, zh-TW, RU) |
 | `init-wizard.js` | Interactive setup wizard (provider, API key, permissions) |
 | `updater.js` | Version checking & self-update |
 | `command-suggestions.js` | Command typo suggestions |
@@ -626,8 +634,10 @@ test/
 ├── agent-engine.test.js          # Agent engine behavior
 ├── auth-refactor.test.js         # Auth refactoring team
 ├── cli.test.js                   # CLI entry & commands
-├── config-memory.test.js         # Config, memory & context
+├── config-memory.test.js         # Config, memory, & context
 ├── context-window.test.js        # Context window management
+├── error-handling.test.js        # Error handling & serialization
+├── session-commands.test.js      # Session, command suggestions, InputHistory
 ├── desktop-git-assist.test.js    # Desktop Git assist
 ├── desktop-main.test.js          # Desktop main process
 ├── desktop-markdown.test.js      # Desktop Markdown rendering

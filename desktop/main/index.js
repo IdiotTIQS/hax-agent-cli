@@ -28,6 +28,7 @@ const { createProvider } = require("../../src/providers");
 const { Session } = require("../../src/session");
 const { createTeamRuntime } = require("../../src/teams/runtime");
 const { registerAgentTeamTools } = require("../../src/teams/tools");
+const { serializeProvider, serializeError } = require("../../src/utils/serialization");
 const { createLocalToolRegistry } = require("../../src/tools");
 
 const app = electron.app;
@@ -270,25 +271,6 @@ function serializeSession(session) {
       cost: session.costTracker.getCost(session.provider?.model),
       elapsed: session.getElapsedTime(),
     },
-  };
-}
-
-function serializeProvider(provider) {
-  if (!provider) return null;
-
-  return {
-    name: provider.name,
-    model: provider.model,
-    apiUrl: provider.apiUrl,
-  };
-}
-
-function serializeError(error) {
-  return {
-    name: error?.name || "Error",
-    code: error?.code || null,
-    message: error?.message || String(error || "Unknown error"),
-    stack: error?.stack || null,
   };
 }
 
