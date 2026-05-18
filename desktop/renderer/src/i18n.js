@@ -1,5 +1,5 @@
 // Desktop i18n wrapper — imports shared CommonJS i18n for Vue 3 usage via provide/inject.
-import sharedI18n from '../../../src/i18n.js';
+import sharedI18n from '../../../src/i18n/index.js';
 
 const { createTranslator: createBaseTranslator, DEFAULT_LOCALE } = sharedI18n;
 

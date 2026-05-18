@@ -1,5 +1,7 @@
 const zhCN = require('./zh-CN');
 
+// zh-TW is a Traditional Chinese override layer. Keys not listed here inherit
+// zh-CN so new UI text remains present even before a full regional translation.
 module.exports = {
   ...zhCN,
   'common.enabled': '已啟用',

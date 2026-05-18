@@ -23,6 +23,12 @@ const {
   createToolPreambleLimitText,
   createToolPreambleFinalAnswerPrompt,
 } = require("./shared");
+const {
+  createGeminiToolDefinitions: createToolDefinitions,
+  parseToolInput,
+  toGeminiToolName,
+  toRegistryToolName,
+} = require("./tool-adapters");
 
 const DEFAULT_MODEL = "gemini-2.5-flash-preview-05-20";
 const DEFAULT_MAX_TOKENS = 65536;
@@ -511,81 +517,6 @@ function toGeminiContents(messages) {
   }
 
   return contents;
-}
-
-function createToolDefinitions(toolRegistry) {
-  if (!toolRegistry || typeof toolRegistry.list !== "function") {
-    return [];
-  }
-
-  const functionDeclarations = toolRegistry.list().map((tool) => {
-    const schema = tool.inputSchema || { type: "object", properties: {} };
-
-    return {
-      name: toGeminiToolName(tool.name),
-      description: tool.description,
-      parameters: normalizeSchemaForGemini(schema),
-    };
-  });
-
-  return functionDeclarations.length > 0 ? [{ functionDeclarations }] : [];
-}
-
-function normalizeSchemaForGemini(schema) {
-  if (!schema || typeof schema !== "object") {
-    return { type: "OBJECT" };
-  }
-
-  const normalized = {};
-
-  if (schema.type) {
-    normalized.type = String(schema.type).toUpperCase();
-  }
-
-  if (schema.description) {
-    normalized.description = schema.description;
-  }
-
-  if (schema.properties) {
-    normalized.properties = {};
-    for (const [key, value] of Object.entries(schema.properties)) {
-      normalized.properties[key] = normalizeSchemaForGemini(value);
-    }
-  }
-
-  if (Array.isArray(schema.required)) {
-    normalized.required = schema.required;
-  }
-
-  if (schema.items) {
-    normalized.items = normalizeSchemaForGemini(schema.items);
-  }
-
-  if (schema.enum) {
-    normalized.enum = schema.enum;
-  }
-
-  return normalized;
-}
-
-function toGeminiToolName(name) {
-  return String(name).replace(/\./g, "_");
-}
-
-function toRegistryToolName(name) {
-  return String(name).replace(/_/g, ".");
-}
-
-function parseToolInput(argumentsRaw) {
-  if (!argumentsRaw) {
-    return {};
-  }
-
-  try {
-    return JSON.parse(argumentsRaw);
-  } catch (_error) {
-    return {};
-  }
 }
 
 function extractFunctionCalls(response) {

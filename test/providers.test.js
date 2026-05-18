@@ -145,7 +145,7 @@ test('anthropic provider creates Claude Code style request defaults', () => {
   const provider = new AnthropicProvider({ client: {} });
   const request = provider.createRequest({ prompt: 'build this' });
 
-  assert.equal(request.model, 'claude-opus-4-7');
+  assert.equal(request.model, 'claude-sonnet-4-20250514');
   assert.match(request.system, /professional AI coding assistant/);
   assert.match(request.system, /Never call file\.read with an empty path/);
   assert.deepEqual(request.thinking, { type: 'adaptive', display: 'summarized' });

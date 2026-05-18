@@ -10,6 +10,33 @@ import SettingsModal from './components/SettingsModal.vue';
 import Toast from './components/Toast.vue';
 import ApprovalModal from './components/ApprovalModal.vue';
 import { setLocale, t, DEFAULT_LOCALE } from './i18n.js';
+import { buildGitAssistPrompt } from './git-assist.mjs';
+import {
+  createMessagesFromSession,
+  extractSessionStats,
+  extractSettingsPatch,
+  serializeSessionId,
+} from './session-utils.mjs';
+import { upsertToolCallState } from './tool-call-state.mjs';
+import {
+  accumulateTokenUsage,
+  createChatMessage,
+  createLogEntry,
+  createRunState,
+  formatElapsed,
+  prependLimited,
+  toBackendPermissionMode,
+} from './ui-state-utils.mjs';
+import {
+  createEmptyContentSearch,
+  flattenTree,
+  normalizeContentSearchResult,
+  normalizeWorkspaceSnapshot,
+  pathBasename as getPathBasename,
+  pathsMatch,
+  shouldClearSelectedGitFile,
+  summarizeTree,
+} from './workspace-utils.mjs';
 
 provide('t', t);
 
@@ -42,15 +69,9 @@ const resizing = ref(null);
 const locale = ref(DEFAULT_LOCALE);
 const darkMode = ref(false);
 
-const messages = ref([{
-  id: crypto.randomUUID(),
-  role: 'assistant',
-  content: getWelcomeMessage(),
-  createdAt: new Date(),
-  turn: 0,
-}]);
+const messages = ref([createInitialMessage()]);
 const toolCalls = ref([]);
-const runLog = ref([{ id: crypto.randomUUID(), label: t('desktop.app.initialized'), time: new Date(), type: 'info' }]);
+const runLog = ref([createInitialLog()]);
 const sessionList = ref([]);
 const fileTreeData = ref([]);
 const skillsSnapshot = ref({ projectRoot: '', total: 0, visible: 0, skills: [] });
@@ -92,17 +113,6 @@ const modelOptions = [
   { value: 'gpt-4.1', label: 'GPT-4.1' },
   { value: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro' },
 ];
-
-function flattenTree(nodes, bucket = []) {
-  for (const node of Array.isArray(nodes) ? nodes : []) {
-    if (!node) continue;
-    bucket.push(node);
-    if (Array.isArray(node.children) && node.children.length > 0) {
-      flattenTree(node.children, bucket);
-    }
-  }
-  return bucket;
-}
 
 const filteredSkills = computed(() => {
   const query = activeNav.value === 'skills' ? panelQuery.value.trim().toLowerCase() : '';
@@ -206,8 +216,7 @@ let searchTimer = null;
 function startElapsedTimer() {
   turnStartTime = Date.now();
   elapsedTimer = setInterval(() => {
-    const sec = Math.floor((Date.now() - turnStartTime) / 1000);
-    elapsed.value = sec < 60 ? `${sec}s` : `${Math.floor(sec / 60)}m ${sec % 60}s`;
+    elapsed.value = formatElapsed(Date.now() - turnStartTime);
   }, 1000);
 }
 
@@ -229,63 +238,59 @@ function toggleTheme() {
 }
 
 function appendLog(label, type = 'info') {
-  runLog.value.unshift({ id: crypto.randomUUID(), label, time: new Date(), type });
-  runLog.value = runLog.value.slice(0, 50);
+  runLog.value = prependLimited(runLog.value, createLogEntry(label, type), 50);
 }
 
 function appendMessage(role, content, extra = {}) {
-  const msg = {
-    id: crypto.randomUUID(),
-    role,
-    content: String(content ?? ''),
-    createdAt: new Date(),
+  const msg = createChatMessage(role, content, {
     turn: currentTurn.value,
-    ...extra,
-  };
+    extra,
+  });
   messages.value.push(msg);
   return msg;
 }
 
+function applyRunState(state, overrides = {}) {
+  const nextState = createRunState(state, overrides);
+  if (nextState.isBusy !== undefined) isBusy.value = nextState.isBusy;
+  if (nextState.isThinking !== undefined) isThinking.value = nextState.isThinking;
+  if (nextState.isStreaming !== undefined) isStreaming.value = nextState.isStreaming;
+  if (nextState.activeAssistantId !== undefined) activeAssistantId.value = nextState.activeAssistantId;
+  if (nextState.statusState !== undefined) statusState.value = nextState.statusState;
+}
+
+function createWelcomeMessage() {
+  return createChatMessage('assistant', getWelcomeMessage(), {
+    turn: 0,
+  });
+}
+
+function createFallbackSessionId() {
+  return crypto.randomUUID();
+}
+
+function createInitialLog() {
+  return createLogEntry(t('desktop.app.initialized'));
+}
+
+function createInitialMessage() {
+  return createWelcomeMessage();
+}
+
 function serializeSession(r) {
-  if (!r) return '';
-  return r.id ?? r.sessionId ?? '';
+  return serializeSessionId(r);
 }
 
 function normalizeSettings(payload) {
-  const src = payload?.settings ?? payload;
-  if (!src || typeof src !== 'object') return;
-  const agent = src.agent ?? src;
-  if (agent.provider !== undefined) settings.provider = agent.provider;
-  if (agent.model !== undefined) settings.model = agent.model;
-  if (typeof agent.temperature === 'number') settings.temperature = agent.temperature;
-  if (src.desktop?.workspace !== undefined || src.workspace !== undefined) {
-    settings.workspace = src.desktop?.workspace ?? src.workspace ?? '';
+  const patch = extractSettingsPatch(payload);
+  if (patch.provider !== undefined) settings.provider = patch.provider;
+  if (patch.model !== undefined) settings.model = patch.model;
+  if (patch.temperature !== undefined) settings.temperature = patch.temperature;
+  if (patch.workspace !== undefined) settings.workspace = patch.workspace;
+  if (patch.locale) {
+    locale.value = patch.locale;
+    setLocale(patch.locale);
   }
-  const nextLocale = src.ui?.locale;
-  if (nextLocale) {
-    locale.value = nextLocale;
-    setLocale(nextLocale);
-  }
-}
-
-function summarizeTree(nodes, depth = 0) {
-  let files = 0;
-  let directories = 0;
-  let maxDepth = depth;
-  for (const node of Array.isArray(nodes) ? nodes : []) {
-    if (!node) continue;
-    if (Array.isArray(node.children) && node.children.length > 0) {
-      directories += 1;
-      const nested = summarizeTree(node.children, depth + 1);
-      files += nested.files;
-      directories += nested.directories;
-      maxDepth = Math.max(maxDepth, nested.depth);
-    } else {
-      files += 1;
-      maxDepth = Math.max(maxDepth, depth);
-    }
-  }
-  return { files, directories, depth: maxDepth };
 }
 
 function updateWorkspaceSummary(tree) {
@@ -298,19 +303,8 @@ function updateWorkspaceSummary(tree) {
   };
 }
 
-function normalizePathForCompare(value) {
-  return String(value || '').replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
-}
-
-function pathsMatch(left, right) {
-  const normalizedLeft = normalizePathForCompare(left);
-  const normalizedRight = normalizePathForCompare(right);
-  return Boolean(normalizedLeft && normalizedRight && normalizedLeft === normalizedRight);
-}
-
 function pathBasename(value) {
-  const parts = String(value || '').split(/[\\/]+/).filter(Boolean);
-  return parts.at(-1) || value || t('desktop.app.unnamedProject');
+  return getPathBasename(value, t('desktop.app.unnamedProject'));
 }
 
 function updateSessionWorkspace(sessionResult, options = {}) {
@@ -328,18 +322,11 @@ function updateSessionWorkspace(sessionResult, options = {}) {
 }
 
 function resetConversationView() {
-  messages.value = [{
-    id: crypto.randomUUID(),
-    role: 'assistant',
-    content: getWelcomeMessage(),
-    createdAt: new Date(),
-    turn: 0,
-  }];
+  messages.value = [createWelcomeMessage()];
   toolCalls.value = [];
   composer.value = '';
-  activeAssistantId.value = '';
+  applyRunState('idle');
   sessionProjectRoot.value = '';
-  isStreaming.value = false;
   currentTurn.value = 0;
   tokenUsed.value = 0;
   elapsed.value = '0s';
@@ -347,15 +334,16 @@ function resetConversationView() {
 }
 
 function updateStats(sessionResult) {
-  const s = sessionResult?.status ?? sessionResult;
-  if (!s) return;
-  if (typeof s.tokens === 'number') tokenUsed.value = s.tokens;
-  else if (typeof s.inputTokens === 'number' || typeof s.outputTokens === 'number') {
-    tokenUsed.value = Number(s.inputTokens || 0) + Number(s.outputTokens || 0);
-  }
-  if (typeof s.cost === 'number') cost.value = `$${s.cost.toFixed(4)}`;
-  if (typeof s.elapsed === 'string') elapsed.value = s.elapsed;
-  if (sessionResult?.provider?.model) settings.model = sessionResult.provider.model;
+  const stats = extractSessionStats(sessionResult);
+  if (typeof stats.tokens === 'number') tokenUsed.value = stats.tokens;
+  if (stats.cost) cost.value = stats.cost;
+  if (stats.elapsed) elapsed.value = stats.elapsed;
+  if (stats.model) settings.model = stats.model;
+}
+
+function finishRun(state = 'idle') {
+  applyRunState(state);
+  stopElapsedTimer();
 }
 
 function appendAssistantDelta(delta) {
@@ -367,37 +355,11 @@ function appendAssistantDelta(delta) {
 }
 
 function upsertToolCall(event) {
-  const name = event.name ?? event.tool ?? 'tool';
-  const attempt = event.attempt ?? 0;
-  const turn = event.turn ?? currentTurn.value;
-  const id = event.id ?? event.toolCallId ?? event.callId ?? event.tool_use_id ?? `${name}:${attempt}:${turn}`;
-  let existing = toolCalls.value.find((t) => t.id === id);
-  if (!existing && (event.status === 'done' || event.status === 'failed')) {
-    existing = toolCalls.value.find((t) => t.name === name && t.status === 'running');
-  }
-
-  const isResult = event.type === 'tool.result';
-  const patch = {
-    id,
-    name,
-    status: event.status ?? (isResult ? (event.isError ? 'failed' : 'done') : 'running'),
-    summary: isResult
-        ? (event.isError ? `${t('desktop.app.error')} — ${event.durationMs ?? '?'}ms` : `${t('desktop.app.done')} — ${event.durationMs ?? '?'}ms`)
-      : (event.displayInput ?? event.summary ?? ''),
-    input: event.input ? (typeof event.input === 'object' ? JSON.stringify(event.input, null, 2) : String(event.input)) : '',
-    output: isResult && event.data
-      ? (typeof event.data === 'object' ? JSON.stringify(event.data, null, 2) : String(event.data))
-      : (event.error ? String(event.error) : ''),
-    turn,
-    updatedAt: new Date(),
-  };
-
-  if (existing) {
-    Object.assign(existing, patch);
-  } else {
-    toolCalls.value.unshift(patch);
-    toolCalls.value = toolCalls.value.slice(0, 20);
-  }
+  toolCalls.value = upsertToolCallState(toolCalls.value, event, {
+    currentTurn: currentTurn.value,
+    doneLabel: t('desktop.app.done'),
+    errorLabel: t('desktop.app.error'),
+  });
 }
 
 async function loadSettings() {
@@ -414,19 +376,21 @@ async function loadSettings() {
 async function loadWorkspaceSnapshot() {
   if (typeof api.getWorkspaceSnapshot !== 'function') return;
   try {
-    const snapshot = await api.getWorkspaceSnapshot({ projectRoot: settings.workspace || undefined });
-    const snapshotRoot = snapshot.projectRoot || settings.workspace || '';
-    fileTreeData.value = snapshot.fileTree || [];
-    sessionList.value = snapshot.sessions || [];
+    const snapshot = normalizeWorkspaceSnapshot(
+      await api.getWorkspaceSnapshot({ projectRoot: settings.workspace || undefined }),
+      settings.workspace
+    );
+    fileTreeData.value = snapshot.fileTree;
+    sessionList.value = snapshot.sessions;
     updateWorkspaceSummary(fileTreeData.value);
-    workspaceSummary.value.path = snapshotRoot || workspaceSummary.value.path;
+    workspaceSummary.value.path = snapshot.projectRoot || workspaceSummary.value.path;
     if (snapshot.git) {
-      gitBranch.value = snapshot.git.branch || 'none';
-      gitAhead.value = Number(snapshot.git.ahead || 0);
-      gitBehind.value = Number(snapshot.git.behind || 0);
-      gitChanged.value = Number(snapshot.git.changed || 0);
-      gitFiles.value = snapshot.git.files || [];
-      if (selectedGitFile.value && !gitFiles.value.some((file) => file.path === selectedGitFile.value)) {
+      gitBranch.value = snapshot.git.branch;
+      gitAhead.value = snapshot.git.ahead;
+      gitBehind.value = snapshot.git.behind;
+      gitChanged.value = snapshot.git.changed;
+      gitFiles.value = snapshot.git.files;
+      if (shouldClearSelectedGitFile(selectedGitFile.value, gitFiles.value)) {
         selectedGitFile.value = '';
         selectedGitDiff.value = null;
       }
@@ -459,23 +423,11 @@ async function loadInsightPanels() {
 }
 
 function setMessagesFromSession(sessionResult) {
-  const restored = Array.isArray(sessionResult?.messages) ? sessionResult.messages : [];
-  messages.value = restored.length > 0
-    ? restored.map((message, index) => ({
-        id: crypto.randomUUID(),
-        role: message.role,
-        content: message.content || '',
-        createdAt: new Date(),
-        turn: Math.floor(index / 2),
-      }))
-    : [{
-        id: crypto.randomUUID(),
-        role: 'assistant',
-        content: t('desktop.app.noMessages'),
-        createdAt: new Date(),
-        turn: 0,
-      }];
-  currentTurn.value = Math.ceil(restored.length / 2);
+  const restored = createMessagesFromSession(sessionResult, {
+    emptyContent: t('desktop.app.noMessages'),
+  });
+  messages.value = restored.messages;
+  currentTurn.value = restored.currentTurn;
 }
 
 function handleSelectNav(key) {
@@ -499,7 +451,7 @@ function handleTogglePermission() {
 }
 
 function backendPermissionMode() {
-  return permissionMode.value === 'full' ? 'yolo' : 'normal';
+  return toBackendPermissionMode(permissionMode.value);
 }
 
 async function createSession() {
@@ -510,7 +462,7 @@ async function createSession() {
       projectRoot: settings.workspace || undefined,
       permissionMode: backendPermissionMode(),
     });
-    sessionId.value = serializeSession(result) || crypto.randomUUID();
+    sessionId.value = serializeSession(result) || createFallbackSessionId();
     resetConversationView();
     updateSessionWorkspace(result);
     updateStats(result);
@@ -544,8 +496,7 @@ async function resumeSession(targetSessionId) {
     setMessagesFromSession(result);
     const switchedWorkspace = updateSessionWorkspace(result, { switchWorkspace: Boolean(targetSession?.projectRoot) });
     toolCalls.value = [];
-    activeAssistantId.value = '';
-    isStreaming.value = false;
+    applyRunState('idle');
     updateStats(result);
     if (switchedWorkspace) {
       appendLog(`${t('desktop.app.workspaceSwitched')}: ${pathBasename(settings.workspace)}`, 'done');
@@ -573,12 +524,8 @@ async function submitAgentMessage(content, options = {}) {
   }
 
   appendMessage('user', normalizedContent);
-  isBusy.value = true;
-  isThinking.value = true;
-  isStreaming.value = false;
-  statusState.value = 'thinking';
+  applyRunState('thinking');
   currentTurn.value += 1;
-  activeAssistantId.value = '';
   errorText.value = '';
   startElapsedTimer();
   appendLog(options.logLabel || t('desktop.app.sendingCommand'), 'start');
@@ -601,7 +548,7 @@ async function submitAgentMessage(content, options = {}) {
       appendMessage('assistant', result.message ?? result.content);
     }
 
-    statusState.value = 'idle';
+    applyRunState('idle');
     appendLog(options.doneLabel || t('desktop.app.taskComplete'), 'done');
     return true;
   } catch (e) {
@@ -612,12 +559,7 @@ async function submitAgentMessage(content, options = {}) {
     toastRef.value?.error(`${t('desktop.app.sendFailed')}: ` + e.message);
     return false;
   } finally {
-    isBusy.value = false;
-    isThinking.value = false;
-    isStreaming.value = false;
-    activeAssistantId.value = '';
-    stopElapsedTimer();
-    if (statusState.value !== 'error') statusState.value = 'idle';
+    finishRun(statusState.value === 'error' ? 'error' : 'idle');
   }
 }
 
@@ -633,12 +575,7 @@ async function interruptAgent() {
   appendLog(t('desktop.app.interrupting'), 'start');
   try {
     await ensureApi('interrupt')({ sessionId: sessionId.value });
-    isBusy.value = false;
-    isThinking.value = false;
-    isStreaming.value = false;
-    activeAssistantId.value = '';
-    statusState.value = 'idle';
-    stopElapsedTimer();
+    finishRun('idle');
     appendLog(t('desktop.app.interrupted'), 'done');
     appendMessage('system', t('desktop.app.taskInterrupted'));
     toastRef.value?.warning(t('desktop.app.interruptWarning'));
@@ -651,7 +588,7 @@ async function searchWorkspaceContent() {
   if (typeof api.searchWorkspace !== 'function') return;
   const query = panelQuery.value.trim();
   if (activeNav.value !== 'search' || !query) {
-    contentSearch.value = { query: '', matches: [], scannedFiles: 0, truncated: false };
+    contentSearch.value = createEmptyContentSearch();
     return;
   }
 
@@ -662,12 +599,7 @@ async function searchWorkspaceContent() {
       query,
       maxResults: 120,
     });
-    contentSearch.value = {
-      query: result.query || query,
-      matches: result.matches || [],
-      scannedFiles: Number(result.scannedFiles || 0),
-      truncated: Boolean(result.truncated),
-    };
+    contentSearch.value = normalizeContentSearchResult(result, query);
   } catch (e) {
     errorText.value = e.message;
     appendLog(t('desktop.app.searchFailed'), 'fail');
@@ -713,38 +645,11 @@ async function loadGitDiff(filePath) {
 }
 
 function buildGitPrompt(intent) {
-  const diff = String(selectedGitDiff.value?.diff || '').trim();
-  if (!selectedGitFile.value || !diff) return '';
-
-  if (intent === 'commit') {
-    return [
-      `请基于下面这个 Git diff 草拟一条清晰的 commit message。`,
-      `要求：`,
-      `- 使用 Conventional Commits 风格`,
-      `- 只输出建议的标题和 2-4 条要点`,
-      `- 不要执行 git 命令`,
-      ``,
-      `文件：${selectedGitFile.value}`,
-      ``,
-      '```diff',
-      diff,
-      '```',
-    ].join('\n');
-  }
-
-  return [
-    `请解释下面这个 Git diff。`,
-    `请重点说明：`,
-    `- 这次变更改变了什么行为`,
-    `- 有哪些风险或需要补测的地方`,
-    `- 如果你发现明显问题，请直接指出`,
-    ``,
-    `文件：${selectedGitFile.value}`,
-    ``,
-    '```diff',
-    diff,
-    '```',
-  ].join('\n');
+  return buildGitAssistPrompt({
+    intent,
+    filePath: selectedGitFile.value,
+    diff: selectedGitDiff.value?.diff,
+  });
 }
 
 async function handleGitAssist(intent) {
@@ -784,7 +689,7 @@ function stopResize() {
 }
 
 function onKeyDown(e) {
-  if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+  if ((e.ctrlKey || e.metaKey) && String(e.key || '').toLowerCase() === 'k') {
     e.preventDefault();
     showSettings.value = !showSettings.value;
   }
@@ -796,25 +701,19 @@ function handleAgentEvent(event) {
   if (!type) return;
   switch (type) {
     case 'turn.started':
-      isBusy.value = true;
-      isThinking.value = true;
-      isStreaming.value = false;
-      activeAssistantId.value = '';
-      statusState.value = 'thinking';
+      applyRunState('thinking');
       appendLog(t('desktop.app.turnStart'), 'start');
       break;
     case 'message.delta':
       appendAssistantDelta(event.delta);
-      statusState.value = 'running';
-      isThinking.value = false;
-      isStreaming.value = true;
+      applyRunState('running', { activeAssistantId: activeAssistantId.value });
       break;
     case 'thinking':
       statusState.value = 'thinking';
       break;
     case 'tool.start':
       upsertToolCall({ ...event, status: 'running' });
-      statusState.value = 'running';
+      applyRunState('toolRunning');
       appendLog(`${t('desktop.app.toolStart')}: ${event.name}`, 'start');
       break;
     case 'tool.result':
@@ -829,8 +728,7 @@ function handleAgentEvent(event) {
       if (event.status) {
         updateStats(event);
       } else {
-        if (typeof event.inputTokens === 'number') tokenUsed.value += event.inputTokens;
-        if (typeof event.outputTokens === 'number') tokenUsed.value += event.outputTokens;
+        tokenUsed.value = accumulateTokenUsage(tokenUsed.value, event);
       }
       break;
     case 'skill.start':
@@ -840,34 +738,19 @@ function handleAgentEvent(event) {
       appendLog(`${t('desktop.app.skillMatched')}: ${event.name || event.skill || '?'}`);
       break;
     case 'turn.completed':
-      isBusy.value = false;
-      isThinking.value = false;
-      isStreaming.value = false;
-      activeAssistantId.value = '';
-      statusState.value = 'idle';
+      finishRun('idle');
       updateStats(event);
-      stopElapsedTimer();
       appendLog(t('desktop.app.turnComplete'), 'done');
       void loadWorkspaceSnapshot();
       break;
     case 'turn.interrupted':
-      isBusy.value = false;
-      isThinking.value = false;
-      isStreaming.value = false;
-      activeAssistantId.value = '';
-      statusState.value = 'idle';
-      stopElapsedTimer();
+      finishRun('idle');
       appendMessage('system', t('desktop.app.taskInterrupted'));
       appendLog(t('desktop.app.turnInterrupted'));
       break;
     case 'turn.failed':
-      isBusy.value = false;
-      isThinking.value = false;
-      isStreaming.value = false;
-      activeAssistantId.value = '';
+      finishRun('error');
       errorText.value = event.error?.message ?? t('desktop.app.agentError');
-      statusState.value = 'error';
-      stopElapsedTimer();
       appendMessage('system', `${t('desktop.app.errorPrefix')}: ${errorText.value}`, { tone: 'danger' });
       appendLog(t('desktop.app.turnFailed'), 'fail');
       break;
@@ -964,7 +847,7 @@ watch([activeNav, panelQuery], () => {
 </script>
 
 <template>
-  <main class="desk" :style="{ gridTemplateColumns: sidebarWidth + 'px 3px 1fr 3px ' + inspectorWidth + 'px' }">
+  <main class="desk" :style="{ gridTemplateColumns: sidebarWidth + 'px 3px minmax(0, 1fr) 3px ' + inspectorWidth + 'px' }">
     <Sidebar
       :sessions="sessionList"
       :active-id="sessionId"

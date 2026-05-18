@@ -3,7 +3,7 @@ const context = require('./context');
 const fileContext = require('./file-context');
 const memory = require('./memory');
 const orchestration = require('./orchestration');
-const runtime = require('./runtime');
+const basicRuntime = require('./runtime');
 const { createAuthRefactorTeam } = require('./teams/auth-refactor');
 const agentTeams = require('./teams/runtime');
 const teamAgents = require('./teams/agents');
@@ -16,8 +16,9 @@ module.exports = {
   context,
   fileContext,
   memory,
+  basicRuntime,
   ...orchestration,
-  ...runtime,
+  ...basicRuntime,
   ...agentTeams,
   ...teamAgents,
   ...teamTools,

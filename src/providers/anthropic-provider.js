@@ -30,8 +30,12 @@ const {
   createToolPreambleLimitText,
   createToolPreambleFinalAnswerPrompt,
 } = require("./shared");
+const {
+  createAnthropicToolDefinitions: createToolDefinitions,
+  toRegistryToolName,
+} = require("./tool-adapters");
 
-const DEFAULT_MODEL = "claude-opus-4-7";
+const DEFAULT_MODEL = "claude-sonnet-4-20250514";
 const DEFAULT_MAX_TOKENS = 8192;
 
 class AnthropicProvider extends ChatProvider {
@@ -488,26 +492,6 @@ function toAnthropicMessages(input) {
 function createSystemPrompt(systemPrompt) {
   const extraPrompt = typeof systemPrompt === "string" ? systemPrompt.trim() : "";
   return extraPrompt ? `${DEFAULT_SYSTEM_PROMPT}\n\n${extraPrompt}` : DEFAULT_SYSTEM_PROMPT;
-}
-
-function createToolDefinitions(toolRegistry) {
-  if (!toolRegistry || typeof toolRegistry.list !== "function") {
-    return [];
-  }
-
-  return toolRegistry.list().map((tool) => ({
-    name: toAnthropicToolName(tool.name),
-    description: tool.description,
-    input_schema: tool.inputSchema || { type: "object", properties: {} },
-  }));
-}
-
-function toAnthropicToolName(name) {
-  return String(name).replace(/[^a-zA-Z0-9_-]/g, "_");
-}
-
-function toRegistryToolName(name) {
-  return String(name).replace(/_/g, ".");
 }
 
 function extractToolUses(content) {

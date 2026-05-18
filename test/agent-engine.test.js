@@ -3,7 +3,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
-const { AgentEngine, AgentEventType } = require('../src/agent-engine');
+const { AgentEngine, AgentEventType, readGoalStatus } = require('../src/agent-engine');
 const { MockProvider } = require('../src/providers');
 const { Session } = require('../src/session');
 const { ToolRegistry } = require('../src/tools');
@@ -173,4 +173,65 @@ test('agent engine injects custom instructions and relevant file context into pr
   assert.match(captured[0].system, /desktopStreaming/);
   assert.equal(events[0].context.fileContext.includedFiles, 1);
   assert.deepEqual(session.messages.map((message) => message.content), ['fix desktop streaming', 'ok']);
+});
+
+test('agent engine injects active goal into provider system prompt', async () => {
+  const captured = [];
+  const provider = {
+    name: 'capture',
+    model: 'mock-large',
+    async *stream(request) {
+      captured.push(request);
+      yield { type: 'text', delta: 'ok' };
+      yield { type: 'usage', inputTokens: 10, outputTokens: 1 };
+    },
+  };
+  const { engine, session } = createEngine({ provider });
+  session.goal = {
+    enabled: true,
+    text: 'make tests pass before stopping',
+    createdAt: new Date().toISOString(),
+  };
+
+  await collect(engine.sendMessage('continue'));
+
+  assert.match(captured[0].system, /<active-goal>/);
+  assert.match(captured[0].system, /make tests pass before stopping/);
+});
+
+test('agent engine continues active goals until completion status', async () => {
+  const captured = [];
+  const responses = [
+    'made progress\nGOAL_STATUS: continue',
+    'done with evidence\nGOAL_STATUS: complete',
+  ];
+  const provider = {
+    name: 'capture',
+    model: 'mock-large',
+    async *stream(request) {
+      captured.push(request);
+      yield { type: 'text', delta: responses[captured.length - 1] || 'extra\nGOAL_STATUS: complete' };
+      yield { type: 'usage', inputTokens: 10, outputTokens: 1 };
+    },
+  };
+  const { engine, session } = createEngine({ provider });
+  session.goal = {
+    enabled: true,
+    text: 'finish the task',
+    maxContinuations: 3,
+    createdAt: new Date().toISOString(),
+  };
+
+  const events = await collect(engine.sendMessage('start'));
+  const completed = events.filter((event) => event.type === AgentEventType.completed);
+
+  assert.equal(captured.length, 2);
+  assert.equal(completed.length, 2);
+  assert.match(captured[1].messages.at(-1).content, /\[goal continuation\]/);
+});
+
+test('readGoalStatus extracts explicit goal status', () => {
+  assert.equal(readGoalStatus('ok\nGOAL_STATUS: complete'), 'complete');
+  assert.equal(readGoalStatus('blocked\nGOAL_STATUS: blocked'), 'blocked');
+  assert.equal(readGoalStatus('no marker'), 'continue');
 });

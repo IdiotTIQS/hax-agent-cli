@@ -33,6 +33,8 @@ const AgentEventType = Object.freeze({
   skillMatched: "skill.matched",
 });
 
+const DEFAULT_GOAL_CONTINUATIONS = 5;
+
 class AgentEngine {
   constructor(options = {}) {
     if (!options.session) {
@@ -91,13 +93,46 @@ class AgentEngine {
       return;
     }
 
-    yield* this._runProviderTurn({
+    let completion = null;
+    for await (const event of this._runProviderTurn({
       content,
       userMessage: { role: "user", content },
       system: buildSkillSystemPrompt(skills),
       persistTranscript: options.persistTranscript !== false,
       interruptionTestEnabled: this.env.HAX_AGENT_TEST_INTERRUPT_AFTER_TEXT === "1",
-    });
+    })) {
+      if (event.type === AgentEventType.completed) completion = event;
+      yield event;
+    }
+
+    if (!shouldContinueGoal(session, completion?.assistantMessage?.content)) {
+      return;
+    }
+
+    const maxContinuations = getGoalContinuationLimit(session);
+    for (let index = 0; index < maxContinuations; index += 1) {
+      const continuationContent = [
+        "[goal continuation]",
+        `Active goal: ${session.goal.text}`,
+        "Continue working toward the active goal. Use tools and verification where useful. If the goal is complete, state the evidence and end with GOAL_STATUS: complete.",
+      ].join("\n");
+
+      let continuationCompletion = null;
+      for await (const event of this._runProviderTurn({
+        content: continuationContent,
+        userMessage: { role: "user", content: continuationContent, internal: true },
+        system: buildSkillSystemPrompt(skills),
+        persistTranscript: false,
+        interruptionTestEnabled: false,
+      })) {
+        if (event.type === AgentEventType.completed) continuationCompletion = event;
+        yield event;
+      }
+
+      if (!shouldContinueGoal(session, continuationCompletion?.assistantMessage?.content)) {
+        return;
+      }
+    }
   }
 
   async *_runSkill(skill, args = [], options = {}) {
@@ -150,6 +185,7 @@ class AgentEngine {
     const promptContext = await buildTurnSystemPrompt({
       baseSystem: options.system,
       settings: session.settings,
+      session,
       projectRoot: this.projectRoot,
       query: options.content,
     });
@@ -334,6 +370,20 @@ async function buildTurnSystemPrompt(options = {}) {
     ].join("\n"));
   }
 
+  const activeGoal = options.session?.goal?.enabled && options.session.goal.text
+    ? String(options.session.goal.text).trim()
+    : "";
+  if (activeGoal) {
+    blocks.push([
+      "<active-goal>",
+      `The user set a persistent goal for this session: ${activeGoal}`,
+      "Keep working toward this goal across turns. Do not treat the current reply as finished until you have made concrete progress and verified the result where possible.",
+      "At the end of each response, include a final line exactly as one of: GOAL_STATUS: complete, GOAL_STATUS: continue, or GOAL_STATUS: blocked.",
+      "Use GOAL_STATUS: complete only when the goal is satisfied and you have stated the evidence. Use GOAL_STATUS: blocked only when you cannot proceed without new user input. The user can disable this mode with /goal clear.",
+      "</active-goal>",
+    ].join("\n"));
+  }
+
   try {
     fileContext = await buildFileContext({
       settings,
@@ -411,8 +461,26 @@ function createEmptyFileContext() {
   };
 }
 
+function shouldContinueGoal(session, assistantText = "") {
+  if (!session.goal?.enabled || !session.goal.text) return false;
+  const status = readGoalStatus(assistantText);
+  return status !== "complete" && status !== "blocked";
+}
+
+function readGoalStatus(text = "") {
+  const match = String(text || "").match(/GOAL_STATUS:\s*(complete|continue|blocked)\b/i);
+  return match ? match[1].toLowerCase() : "continue";
+}
+
+function getGoalContinuationLimit(session) {
+  const explicit = Number(session.goal?.maxContinuations);
+  if (Number.isInteger(explicit) && explicit >= 0) return explicit;
+  return DEFAULT_GOAL_CONTINUATIONS;
+}
+
 module.exports = {
   AgentEngine,
   AgentEventType,
   buildTurnSystemPrompt,
+  readGoalStatus,
 };

@@ -26,6 +26,13 @@ const {
   createToolPreambleLimitText,
   createToolPreambleFinalAnswerPrompt,
 } = require("./shared");
+const {
+  createOpenAIToolDefinitions: createToolDefinitions,
+  createOpenAIToolResultBlock: createToolResultBlock,
+  parseToolInput,
+  toOpenAIToolName,
+  toRegistryToolName,
+} = require("./tool-adapters");
 
 const DEFAULT_MODEL = "gpt-4.1";
 const DEFAULT_MAX_TOKENS = 100000;
@@ -565,29 +572,6 @@ function createSystemPrompt(systemPrompt) {
   return extraPrompt ? `${DEFAULT_SYSTEM_PROMPT}\n\n${extraPrompt}` : DEFAULT_SYSTEM_PROMPT;
 }
 
-function createToolDefinitions(toolRegistry) {
-  if (!toolRegistry || typeof toolRegistry.list !== "function") {
-    return [];
-  }
-
-  return toolRegistry.list().map((tool) => ({
-    type: "function",
-    function: {
-      name: toOpenAIToolName(tool.name),
-      description: tool.description,
-      parameters: tool.inputSchema || { type: "object", properties: {} },
-    },
-  }));
-}
-
-function toOpenAIToolName(name) {
-  return String(name).replace(/[^a-zA-Z0-9_-]/g, "_");
-}
-
-function toRegistryToolName(name) {
-  return String(name).replace(/_/g, ".");
-}
-
 function createDsmlToolCalls(text, turn) {
   return parseDsmlToolCalls(text).map((call, index) => ({
     id: `dsml_${turn}_${index}`,
@@ -608,26 +592,6 @@ function sortedPreviewToolCalls(toolCalls) {
     .sort(([a], [b]) => a - b)
     .map(([, tc]) => tc)
     .filter((tc) => tc?.function?.name);
-}
-
-function createToolResultBlock(toolCallId, isError, content) {
-  return {
-    tool_call_id: toolCallId,
-    role: "tool",
-    content: typeof content === "string" ? content : JSON.stringify(content),
-  };
-}
-
-function parseToolInput(argumentsRaw) {
-  if (!argumentsRaw) {
-    return {};
-  }
-
-  try {
-    return JSON.parse(argumentsRaw);
-  } catch (_error) {
-    return {};
-  }
 }
 
 function parseResultData(data) {

@@ -10,17 +10,20 @@ const {
   createDesktopApprovalPrompt,
   normalizeSettingsUpdates,
   openExternalUrl,
+  registerIpcHandlers,
+  resolvePendingApproval,
+  resolvePendingApprovalsForSession,
+  shouldOpenDevTools,
+} = require('../desktop/main/index.js');
+const {
+  migrateLegacySessionRecords,
   readSessionList,
   readGitDiff,
   readGitStatus,
   readWorkspaceFile,
   readWorkspaceTree,
-  registerIpcHandlers,
-  resolvePendingApproval,
-  resolvePendingApprovalsForSession,
   searchWorkspaceContent,
-  shouldOpenDevTools,
-} = require('../desktop/main/index.js');
+} = require('../src/desktop-services');
 
 function createTempProject() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'hax-agent-desktop-'));
@@ -272,7 +275,7 @@ test('desktop session list summarizes latest useful user message', () => {
   assert.equal(session.preview, 'Latest follow up');
 });
 
-test('desktop session list includes legacy project transcripts', () => {
+test('desktop migrates legacy project transcripts into the configured session directory', () => {
   const projectRoot = createTempProject();
   const settings = config.loadSettings({
     projectRoot,
@@ -292,13 +295,16 @@ test('desktop session list includes legacy project transcripts', () => {
     sessions: { directory: path.join(projectRoot, '.hax-agent', 'sessions') },
   });
 
+  const migration = migrateLegacySessionRecords(settings);
   const previews = readSessionList(settings).map((session) => session.preview);
 
+  assert.deepEqual(migration, { migrated: 1, skipped: 0, failed: 0 });
   assert.ok(previews.includes('Global chat'));
   assert.ok(previews.includes('Legacy chat'));
+  assert.deepEqual(memory.readTranscript('legacy-session', settings).map((entry) => entry.content), ['Legacy chat']);
 });
 
-test('desktop can resume legacy project transcripts from the merged session list', async () => {
+test('desktop can resume migrated legacy project transcripts from the session list', async () => {
   const projectRoot = createTempProject();
   const ipc = createFakeIpc();
   const settings = config.loadSettings({

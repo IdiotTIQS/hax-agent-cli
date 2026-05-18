@@ -1,4 +1,4 @@
-const { createCommandRegistry } = require('./commands');
+const { createCommandRegistry } = require('./command-registry');
 const { createSession } = require('./sessions');
 const { createTaskList } = require('./tasks');
 

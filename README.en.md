@@ -187,6 +187,7 @@ Type the following slash commands in the Shell:
 | `/tools` | List available local tools |
 | `/skills [list|usage]` | List skills or view usage statistics |
 | `/skillify [description]` | Capture the current session as a reusable skill |
+| `/goal [--max n] <goal>` | Set a persistent goal until it completes, blocks, reaches the continuation limit, or `/goal clear` |
 | `/agents` | View built-in agent roles |
 | `/team [command]` | Manage agent teams, tasks, and messages |
 | `/models` | List available models for the current provider |
@@ -446,7 +447,7 @@ src/
 ├── session.js                    # Session lifecycle & cost tracking
 ├── agent-engine.js               # Agent engine: tool calling loop
 ├── orchestration.js              # Agent orchestration logic
-├── slash-commands.js             # Startup flow, banner, slash command routing
+├── desktop-services.js           # Desktop workspace, session, Git, and snapshot services
 ├── renderer.js                   # Terminal rendering, Markdown, ANSI themes
 ├── i18n/                         # Multi-language internationalization
 │   ├── index.js                  #   Module exports + translation factory
@@ -457,6 +458,7 @@ src/
 ├── init-wizard.js                # First-run initialization wizard
 ├── updater.js                    # CLI self-update
 ├── command-suggestions.js        # Command typo suggestions
+├── paste-utils.js                # Long-paste summaries and command-batch detection
 ├── permissions.js                # Tool permission management
 ├── debug.js                      # Debug logging
 │
@@ -469,12 +471,13 @@ src/
 │   ├── google-provider.js        #   Google (Gemini) implementation
 │   ├── mock-provider.js          #   Local mock implementation
 │   ├── messages.js               #   Message format normalization
-│   └── shared.js                 #   Provider shared utilities
+│   ├── shared.js                 #   Provider shared utilities
+│   └── tool-adapters.js          #   Provider tool-call format adapters
 │
 ├── runtime/                      # Agent runtime
 │   ├── index.js                  #   Module exports
 │   ├── agents.js                 #   Agent role definitions
-│   ├── commands.js               #   Slash command handling
+│   ├── command-registry.js       #   Generic runtime command registry
 │   ├── composition.js            #   Agent composition logic
 │   ├── messages.js               #   Runtime message handling
 │   ├── sessions.js               #   Session lifecycle
@@ -505,11 +508,11 @@ src/
 │   └── stock-quote.js            #   stock.quote — stock quotes
 │
 ├── commands/                     # Slash command system
-│   ├── index.js                  #   Module exports
+│   ├── index.js                  #   Single command runtime and handler dispatch table
 │   ├── definitions.js            #   Command definitions
-│   ├── handlers.js               #   Command handlers
-│   ├── autocomplete.js           #   Tab autocomplete
-│   └── shell-ui.js               #   Input history, syntax highlighting
+│   ├── memory.js                 #   Memory command executor
+│   ├── team.js                   #   Team command executor
+│   └── autocomplete.js           #   Tab autocomplete
 │
 ├── skills/                       # Skills system
 │   ├── index.js                  #   Module exports
@@ -545,18 +548,19 @@ desktop/
 | `memory.js` | JSON/JSONL file storage, session transcript read/write, memory CRUD |
 | `agent-engine.js` | Agent main loop: send request → execute tools → collect results |
 | `session.js` | Session lifecycle, CostTracker token usage statistics |
-| `slash-commands.js` | Startup banner, slash command routing, first-run detection |
 | `renderer.js` | ANSI themes, Markdown rendering, terminal output formatting |
+| `desktop-services.js` | Desktop workspace tree, search, session migration, Git, and settings snapshots |
 | `i18n/` | Multi-language support (EN, zh-CN, zh-TW, RU) |
 | `init-wizard.js` | Interactive setup wizard (provider, API key, permissions) |
 | `updater.js` | Version checking & self-update |
 | `command-suggestions.js` | Command typo suggestions |
+| `paste-utils.js` | Long-paste summaries, gray badges, and command-batch detection |
 | `permissions.js` | Tool permission level management & policy enforcement |
 | `providers/` | Provider abstraction with factory pattern, dynamic registration of new providers |
 | `runtime/` | Session management, agent role orchestration, task scheduling, command parsing |
 | `teams/` | Multi-agent team plan definitions, runtime, and communication tools |
 | `tools/` | Modular tool registry, path security validation, execution sandbox |
-| `commands/` | Slash command definitions, handling, autocomplete, and input history |
+| `commands/` | Single-track slash command definitions, handler dispatch, and autocomplete |
 | `skills/` | Skill parsing, loading, intent matching, and usage tracking |
 | `desktop/` | Electron main process, preload script, Vue desktop UI |
 

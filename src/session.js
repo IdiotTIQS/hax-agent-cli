@@ -195,6 +195,7 @@ class Session {
     this.availableModels = undefined;
     this.startTime = Date.now();
     this.modifiedFiles = new Set();
+    this.goal = null;
   }
 
   getElapsedTime() {
@@ -240,7 +241,9 @@ class Session {
       ctxMeter = `[${barColor}${'█'.repeat(filled)}${dim}${'░'.repeat(empty)}${reset}] ${pctLabel} ${formatTokenCount(stats.inputTokens)}/${formatTokenCount(stats.budgetTokens)} · `;
     }
 
-    return `${ctxMeter}${dim}${cwdShort}${reset} · ${dim}${provider}${reset} · ${dim}${model}${reset} · ${costColor}$${cost.toFixed(4)}${reset} · ${dim}${turns} turns${reset} · ${dim}${elapsed}${reset}${permMode}`;
+    const goalIndicator = this.goal?.enabled && this.goal.text ? ` · \x1B[95mgoal\x1B[0m` : '';
+
+    return `${ctxMeter}${dim}${cwdShort}${reset} · ${dim}${provider}${reset} · ${dim}${model}${reset} · ${costColor}$${cost.toFixed(4)}${reset} · ${dim}${turns} turns${reset} · ${dim}${elapsed}${reset}${permMode}${goalIndicator}`;
   }
 }
 

@@ -4,7 +4,8 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
-const { getSlashCommandSuggestion, getSubcommandSuggestion } = require('../src/slash-commands');
+const { SLASH_COMMANDS, getSlashCommandSuggestion, getSubcommandSuggestion, listCommandHandlerNames } = require('../src/commands');
+const { formatPastedInputBadge, formatPastedInputSummary, shouldRunPasteAsCommandBatch } = require('../src/paste-utils');
 const { ResponseRenderer, MarkdownRenderer } = require('../src/renderer');
 
 const cliPath = path.join(__dirname, '..', 'src', 'cli.js');
@@ -128,6 +129,31 @@ test('switches models in the interactive shell', () => {
   assert.match(plain, /Switched model to claude-sonnet-4-20250514/);
   assert.match(plain, /Switched model to custom-model/);
   assert.equal(result.stderr, '');
+});
+
+test('goal command sets, shows, and clears the active goal', () => {
+  const result = runCli([], {
+    input: '/goal --max 2 make tests pass\n/goal status\n/goal clear\n/exit\n',
+  });
+  const plain = stripAnsi(result.stdout);
+
+  assert.equal(result.status, 0);
+  assert.match(plain, /Goal set: make tests pass/);
+  assert.match(plain, /active: make tests pass/);
+  assert.match(plain, /max continuations: 2/);
+  assert.match(plain, /Goal cleared/);
+  assert.doesNotMatch(plain, /Command not implemented: \/goal/);
+  assert.equal(result.stderr, '');
+});
+
+test('all declared slash commands are wired to the active command handler', () => {
+  const wiredCommands = new Set(listCommandHandlerNames());
+
+  const missing = SLASH_COMMANDS
+    .map((command) => command.name)
+    .filter((name) => !wiredCommands.has(name));
+
+  assert.deepEqual(missing, []);
 });
 
 test('switches API URL in the interactive shell', () => {
@@ -278,6 +304,31 @@ test('shows status for each prompt without treating it as user input', () => {
   assert.equal(result.stderr, '');
 });
 
+test('keeps pasted prose as one chat message instead of splitting on newlines', () => {
+  const pasted = [
+    '狼回头，不是报恩，就是报仇！',
+    '第1章 萧默',
+    '',
+    '“爷爷，一路走好！”',
+    '> 棺前的一张铜镜倒影出了萧默的身影。',
+    '洪荒神尊',
+  ].join('\n');
+
+  assert.equal(shouldRunPasteAsCommandBatch(pasted), false);
+});
+
+test('detects pasted command batches for multi-command automation', () => {
+  assert.equal(shouldRunPasteAsCommandBatch('/models\n/model 1\n/exit'), true);
+  assert.equal(shouldRunPasteAsCommandBatch('!pwd\n/config'), true);
+  assert.equal(shouldRunPasteAsCommandBatch('/models\nplain text'), false);
+});
+
+test('formats pasted input as a compact echo summary', () => {
+  const pasted = '第1章 萧默\n\n“爷爷，一路走好！”\n洪荒神尊';
+  assert.equal(formatPastedInputSummary(pasted), `Pasted 4 lines, ${pasted.length} chars`);
+  assert.match(formatPastedInputBadge(pasted), /\x1B\[100m\x1B\[97m Pasted 4 lines,/);
+});
+
 test('clear resets the active chat context', () => {
   const result = runCli([], {
     input: 'first message\n/clear\nsecond message\n/exit\n',
@@ -344,6 +395,7 @@ test('suggests close slash commands across the command set', () => {
     ['memroy', 'memory'],
     ['skils', 'skills'],
     ['skilify', 'skillify'],
+    ['gaol', 'goal'],
     ['agnts', 'agents'],
     ['apiurl', 'api-url'],
     ['apikey', 'api-key'],

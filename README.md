@@ -187,6 +187,7 @@ hax-agent               # 任意目录下可用
 | `/tools` | 查看可用本地工具列表 |
 | `/skills [list|usage]` | 列出 Skills 或查看使用统计 |
 | `/skillify [description]` | 将当前会话捕获为可复用 Skill |
+| `/goal [--max n] <goal>` | 设置持续目标，直到完成、阻塞、达到续跑上限或 `/goal clear` |
 | `/agents` | 查看内置 Agent 角色 |
 | `/team [command]` | 管理 Agent 团队、任务和消息 |
 | `/models` | 查看当前 Provider 可用模型 |
@@ -446,7 +447,7 @@ src/
 ├── session.js                    # 会话生命周期与 Cost 追踪
 ├── agent-engine.js               # Agent 引擎：工具调用循环
 ├── orchestration.js              # Agent 协调逻辑
-├── slash-commands.js             # 启动流程、Banner、斜杠命令路由
+├── desktop-services.js           # 桌面端工作区、会话、Git 与快照服务
 ├── renderer.js                   # 终端渲染、Markdown、ANSI 主题
 ├── i18n/                         # 多语言国际化
 │   ├── index.js                  #   模块导出 + 翻译工厂
@@ -457,6 +458,7 @@ src/
 ├── init-wizard.js                # 首次运行初始化向导
 ├── updater.js                    # CLI 自更新
 ├── command-suggestions.js        # 命令纠错建议
+├── paste-utils.js                # 长文本粘贴摘要与批量命令识别
 ├── permissions.js                # 工具权限管理
 ├── debug.js                      # 调试日志
 │
@@ -469,12 +471,13 @@ src/
 │   ├── google-provider.js        #   Google (Gemini) 实现
 │   ├── mock-provider.js          #   本地 Mock 实现
 │   ├── messages.js               #   消息格式规范化
-│   └── shared.js                 #   Provider 共享工具
+│   ├── shared.js                 #   Provider 共享工具
+│   └── tool-adapters.js          #   Provider 工具调用格式适配
 │
 ├── runtime/                      # Agent 运行时
 │   ├── index.js                  #   模块导出
 │   ├── agents.js                 #   Agent 角色定义
-│   ├── commands.js               #   斜杠命令处理
+│   ├── command-registry.js       #   通用运行时命令注册表
 │   ├── composition.js            #   Agent 组合逻辑
 │   ├── messages.js               #   运行时消息处理
 │   ├── sessions.js               #   会话生命周期
@@ -505,11 +508,11 @@ src/
 │   └── stock-quote.js            #   stock.quote — 股票行情
 │
 ├── commands/                     # 斜杠命令系统
-│   ├── index.js                  #   模块导出
+│   ├── index.js                  #   单一命令运行时与 handler 分发表
 │   ├── definitions.js            #   命令定义
-│   ├── handlers.js               #   命令处理器
-│   ├── autocomplete.js           #   Tab 自动补全
-│   └── shell-ui.js               #   输入历史、语法高亮
+│   ├── memory.js                 #   记忆命令执行器
+│   ├── team.js                   #   团队命令执行器
+│   └── autocomplete.js           #   Tab 自动补全
 │
 ├── skills/                       # Skills 技能系统
 │   ├── index.js                  #   模块导出
@@ -545,18 +548,19 @@ desktop/
 | `memory.js` | JSON/JSONL 文件存储、会话 transcript 读写、记忆 CRUD |
 | `agent-engine.js` | Agent 主循环：发送请求 → 执行工具 → 收集结果 |
 | `session.js` | 会话生命周期、CostTracker token 用量统计 |
-| `slash-commands.js` | 启动 Banner、斜杠命令路由、首次运行检测 |
 | `renderer.js` | ANSI 主题、Markdown 渲染、终端输出格式化 |
+| `desktop-services.js` | 桌面端工作区树、搜索、会话迁移、Git 与配置快照 |
 | `i18n/` | 中/英/繁/俄多语言支持 |
 | `init-wizard.js` | 交互式初始化向导（Provider、API Key、权限） |
 | `updater.js` | 版本检查与自更新 |
 | `command-suggestions.js` | 命令纠错建议 |
+| `paste-utils.js` | 长文本粘贴摘要、灰底 badge 与批量命令识别 |
 | `permissions.js` | 工具权限等级管理与策略执行 |
 | `providers/` | Provider 抽象与工厂模式，支持动态注册新 Provider |
 | `runtime/` | 会话管理、Agent 角色编排、任务调度、命令解析 |
 | `teams/` | 多 Agent 团队计划定义、运行时与通信工具 |
 | `tools/` | 模块化工具注册表、路径安全验证、执行沙箱 |
-| `commands/` | 斜杠命令定义、处理、自动补全与输入历史 |
+| `commands/` | 单轨斜杠命令定义、handler 分发与自动补全 |
 | `skills/` | Skills 技能解析、加载、意图匹配与使用追踪 |
 | `desktop/` | Electron 主进程、预加载脚本、Vue 桌面端界面 |
 

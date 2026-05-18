@@ -8,6 +8,7 @@ const SLASH_COMMANDS = [
   { name: 'tools', descriptionKey: 'cmd.tools', description: 'List available tools', aliases: ['t'] },
   { name: 'skills', descriptionKey: 'cmd.skills', description: 'List or manage skills', aliases: ['skill'], argHint: '[list|usage]' },
   { name: 'skillify', descriptionKey: 'cmd.skillify', description: 'Capture this session as a reusable skill', aliases: [], argHint: '[description]' },
+  { name: 'goal', descriptionKey: 'cmd.goal', description: 'Set a persistent goal the assistant should keep pursuing', aliases: [], argHint: '[status|clear|<goal>]' },
   { name: 'agents', descriptionKey: 'cmd.agents', description: 'List available agents', aliases: ['a'] },
   { name: 'team', descriptionKey: 'cmd.team', description: 'Manage agent teams and teammates', aliases: ['teams'], argHint: '[new|spawn|task|run|status|send|inbox|agents]' },
   { name: 'models', descriptionKey: 'cmd.models', description: 'List available models', aliases: ['m'] },

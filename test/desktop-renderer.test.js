@@ -305,13 +305,14 @@ test('RightPanel emits git assist actions for selected diff', async () => {
   });
 
   const buttons = wrapper.findAll('.git-action-btn');
-  assert.equal(buttons.length, 2);
+  assert.equal(buttons.length, 4);
   assert.equal(buttons[0].attributes('disabled'), undefined);
 
-  await buttons[0].trigger('click');
-  await buttons[1].trigger('click');
+  for (const button of buttons) {
+    await button.trigger('click');
+  }
 
-  assert.deepEqual(wrapper.emitted('git-assist').map((event) => event[0]), ['explain', 'commit']);
+  assert.deepEqual(wrapper.emitted('git-assist').map((event) => event[0]), ['explain', 'commit', 'pr', 'review']);
   wrapper.unmount();
 });
 

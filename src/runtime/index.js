@@ -1,6 +1,6 @@
 module.exports = {
   ...require('./agents'),
-  ...require('./commands'),
+  ...require('./command-registry'),
   ...require('./composition'),
   ...require('./messages'),
   ...require('./sessions'),

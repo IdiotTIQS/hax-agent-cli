@@ -214,6 +214,22 @@ const toolStatusLabel = (tc) => {
             >
               {{ t('desktop.panel.commitMessage') }}
             </button>
+            <button
+              class="git-action-btn"
+              type="button"
+              :disabled="!hasSelectedDiff || isBusy"
+              @click="emit('git-assist', 'pr')"
+            >
+              {{ t('desktop.panel.prDescription') }}
+            </button>
+            <button
+              class="git-action-btn"
+              type="button"
+              :disabled="!hasSelectedDiff || isBusy"
+              @click="emit('git-assist', 'review')"
+            >
+              {{ t('desktop.panel.reviewChecklist') }}
+            </button>
           </div>
           <div v-if="selectedGitDiff?.truncated" class="empty-panel">{{ t('desktop.panel.diffTruncated') }}</div>
           <div v-if="selectedGitDiff?.diff" class="git-diff-lines">

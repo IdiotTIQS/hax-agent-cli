@@ -5,7 +5,7 @@ const path = require('node:path');
 const { spawn } = require('node:child_process');
 const { createProvider } = require('./providers');
 const { loadSettings } = require('./config');
-const { loadRecentTranscript, handleChatMessage, renderBanner, handleSlashCommand } = require('./slash-commands');
+const { loadRecentTranscript, handleChatMessage, renderBanner, handleSlashCommand } = require('./commands');
 const { autoCompleteSlashCommand } = require('./commands/autocomplete');
 const { suggestCommand } = require('./command-suggestions');
 const { createLocalToolRegistry } = require('./tools');
@@ -18,6 +18,7 @@ const { checkForUpdate, performUpdate, restartProcess, wasRestarted } = require(
 const { runInitWizard, shouldRunFirstRunInit } = require('./init-wizard');
 const { debug, isDebugEnabled } = require('./debug');
 const { createTranslator } = require('./i18n');
+const { formatPastedInputBadge, formatPastedInputSummary, shouldRunPasteAsCommandBatch } = require('./paste-utils');
 
 const VERSION = require('../package.json').version;
 
@@ -107,7 +108,7 @@ function runInitCommand(args) {
 function runModelsCommand(args) {
   const settings = loadSettings();
   const provider = createProvider(settings.agent, process.env);
-  const { printModels } = require('./slash-commands');
+  const { printModels } = require('./commands');
 
   printModels(provider, { write: (s) => process.stdout.write(stripAnsi(s)) })
     .catch((err) => { console.error(`Failed to list models: ${err.message}`); process.exit(1); });
@@ -145,7 +146,7 @@ function runTeamCommand(args) {
   }
 
   const settings = loadSettings();
-  const { createCliTeamRuntime, executeTeamCommand } = require('./slash-commands');
+  const { createCliTeamRuntime, executeTeamCommand } = require('./commands');
   const runtime = createCliTeamRuntime(settings);
 
   executeTeamCommand(runtime, args[0] || 'help', args.slice(1), { settings })
@@ -249,6 +250,27 @@ function runResumeCommand(args) {
 function resolveTranscriptMessageLimit(settings = {}) {
   const limit = Number(settings.prompts?.maxTranscriptMessages);
   return Number.isFinite(limit) && limit > 0 ? limit : Infinity;
+}
+
+function createReadlineOutput(output = process.stdout) {
+  return {
+    muted: false,
+    get columns() { return output.columns; },
+    get rows() { return output.rows; },
+    get isTTY() { return output.isTTY; },
+    write(data, ...args) {
+      if (this.muted) {
+        const callback = args.find((arg) => typeof arg === 'function');
+        if (callback) process.nextTick(callback);
+        return true;
+      }
+      return output.write(data, ...args);
+    },
+    on: (...args) => output.on(...args),
+    off: (...args) => output.off(...args),
+    once: (...args) => output.once(...args),
+    removeListener: (...args) => output.removeListener(...args),
+  };
 }
 
 function runSessionsCommand(args) {
@@ -365,9 +387,10 @@ async function runShell(args, explicitSession) {
     session.permissionManager.mode = 'yolo';
   }
 
+  const readlineOutput = createReadlineOutput(process.stdout);
   const rl = readline.createInterface({
     input: process.stdin,
-    output: process.stdout,
+    output: readlineOutput,
     terminal: true,
   });
 
@@ -462,6 +485,18 @@ async function runShell(args, explicitSession) {
   process.stdin.on('keypress', (_char, key) => {
     if (!key) return;
     if (session.interactivePromptActive) return;
+
+    if (key.name === 'paste-start') {
+      startBracketedPaste();
+      return;
+    }
+
+    if (key.name === 'paste-end') {
+      endBracketedPaste();
+      return;
+    }
+
+    if (bracketedPasteActive) return;
 
     if (vimMode && (key.name === 'escape' || (key.ctrl && key.name === 'c'))) {
       vimCommandBuffer = '';
@@ -815,6 +850,9 @@ async function runShell(args, explicitSession) {
   let multilineBuffer = [];
   let pasteBuffer = [];
   let pasteTimer = null;
+  let stagedPastedInput = null;
+  let bracketedPasteActive = false;
+  let bracketedPasteLines = [];
   const PASTE_THRESHOLD_MS = 80;
 
   /**
@@ -840,8 +878,23 @@ async function runShell(args, explicitSession) {
   }
 
   rl.on('line', (line) => {
-    const now = Date.now();
+    if (bracketedPasteActive) {
+      bracketedPasteLines.push(line);
+      return;
+    }
+
     clearActivePrompt(line);
+
+    if (stagedPastedInput) {
+      const staged = stagedPastedInput;
+      stagedPastedInput = null;
+      if (line.trim() === staged.summary) {
+        lineQueue = lineQueue.then(() => processLine(staged.content, { pasted: true }));
+        return;
+      }
+      processLineNormal(line);
+      return;
+    }
 
     // Paste detection: if lines arrive rapidly, buffer and join them
     if (pasteTimer) {
@@ -852,8 +905,13 @@ async function runShell(args, explicitSession) {
         pasteBuffer = [];
         pasteTimer = null;
         rl.setPrompt(mainPrompt());
-        lineQueue = lineQueue.then(() => processLine(joined));
+        processPastedInput(joined);
       }, PASTE_THRESHOLD_MS);
+      return;
+    }
+
+    if (!screen.isTTY()) {
+      processLineNormal(line);
       return;
     }
 
@@ -868,6 +926,31 @@ async function runShell(args, explicitSession) {
     }, PASTE_THRESHOLD_MS);
     return;
   });
+
+  function startBracketedPaste() {
+    bracketedPasteActive = true;
+    bracketedPasteLines = [];
+    rl.line = '';
+    rl.cursor = 0;
+    readlineOutput.muted = true;
+  }
+
+  function endBracketedPaste() {
+    if (!bracketedPasteActive) return;
+
+    bracketedPasteActive = false;
+    readlineOutput.muted = false;
+    if (rl.line) {
+      bracketedPasteLines.push(rl.line);
+    }
+    const input = bracketedPasteLines.join('\n');
+    bracketedPasteLines = [];
+    rl.line = '';
+    rl.cursor = 0;
+
+    clearActivePrompt('');
+    processPastedInput(input);
+  }
 
   function processLineNormal(line) {
     // Multi-line continuation: trailing backslash (bash-style)
@@ -889,21 +972,34 @@ async function runShell(args, explicitSession) {
     lineQueue = lineQueue.then(() => processLine(finalLine));
   }
 
-  async function processLine(line) {
-    // If multiple lines arrived via paste detection, process each individually
-    // to avoid losing slash commands after the first one
-    if (line.includes('\n')) {
-      const subLines = line.split('\n');
-      for (const subLine of subLines) {
-        await processLine(subLine);
+  function processPastedInput(input) {
+    if (shouldRunPasteAsCommandBatch(input)) {
+      for (const pastedLine of input.split(/\r?\n/)) {
+        if (pastedLine.trim()) {
+          lineQueue = lineQueue.then(() => processLine(pastedLine));
+        }
       }
       return;
     }
 
+    stagePastedInput(input);
+  }
+
+  function stagePastedInput(input) {
+    const content = String(input || '');
+    const summary = formatPastedInputSummary(content);
+    stagedPastedInput = { content, summary };
+    rl.line = summary;
+    rl.cursor = summary.length;
+    prompt(true);
+  }
+
+  async function processLine(line, options = {}) {
     history.add(line);
     const trimmed = line.trim();
+    const isSingleLineInput = !String(line).includes('\n');
 
-    if (trimmed.startsWith('/')) {
+    if (isSingleLineInput && trimmed.startsWith('/')) {
       if (trimmed === '/exit' || trimmed === '/quit' || trimmed === '/q') {
         withInputAreaHidden(() => {
           screen.clearLine();
@@ -964,7 +1060,7 @@ async function runShell(args, explicitSession) {
       return;
     }
 
-    if (trimmed.startsWith('!')) {
+    if (isSingleLineInput && trimmed.startsWith('!')) {
       const shellLine = trimmed.slice(1).trim();
       if (!shellLine) {
         prompt();
@@ -1022,8 +1118,8 @@ async function runShell(args, explicitSession) {
 
     const time = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
     // Highlight slash commands in user echo: /cmd args → colored /cmd + dim args
-    let echoLine = trimmed;
-    if (trimmed.startsWith('/')) {
+    let echoLine = options.pasted ? formatPastedInputBadge(trimmed) : trimmed;
+    if (!options.pasted && trimmed.startsWith('/')) {
       const spaceIdx = trimmed.indexOf(' ');
       if (spaceIdx === -1) {
         echoLine = styled(THEME.accent, trimmed);
@@ -1058,6 +1154,7 @@ async function runShell(args, explicitSession) {
   process.stdin.on('keypress', (char, key) => {
     if (!key) return;
     if (session.interactivePromptActive) return;
+    if (key.name === 'paste-start' || key.name === 'paste-end' || bracketedPasteActive) return;
 
     if (key.name === 'c' && key.ctrl) {
       if (session.isStreaming) {
@@ -1157,4 +1254,4 @@ function setupErrorHandlers() {
   });
 }
 
-module.exports = { main };
+module.exports = { main, shouldRunPasteAsCommandBatch, formatPastedInputSummary, formatPastedInputBadge };

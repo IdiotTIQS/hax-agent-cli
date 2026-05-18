@@ -4,7 +4,7 @@ import { computed, inject, ref } from 'vue';
 const props = defineProps({
   modelValue: { type: String, default: '' },
   isBusy: { type: Boolean, default: false },
-  maxLength: { type: Number, default: 4000 },
+  maxLength: { type: Number, default: 200000 },
   placeholder: { type: String, default: '' },
   permissionMode: { type: String, default: 'normal' },
 });
