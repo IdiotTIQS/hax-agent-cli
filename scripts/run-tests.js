@@ -1,7 +1,6 @@
 'use strict';
 
-// Cross-platform test runner — finds all *.test.js (and optionally *.smoke.js)
-// files and runs them via node --test.
+// Cross-platform test runner — finds all *.test.js files and runs them via node --test.
 // npm scripts with quoted globs fail on Linux CI because the shell doesn't
 // expand them, and Node 18 --test doesn't support ** globs.
 //
@@ -31,7 +30,8 @@ const testDir = path.join(__dirname, '..', 'test');
 let files = collectTestFiles(testDir).map(f => path.relative(process.cwd(), f));
 
 if (prefix) {
-  files = files.filter(f => f.startsWith(prefix));
+  const normalized = prefix.replace(/\\/g, '/');
+  files = files.filter(f => f.replace(/\\/g, '/').startsWith(normalized));
 }
 
 if (files.length === 0) {
@@ -39,9 +39,33 @@ if (files.length === 0) {
   process.exit(1);
 }
 
-const cp = spawn(process.execPath, ['--test', ...files], {
+const nodeArgs = ['--test'];
+
+// --test-timeout kills individual tests that leak async resources.
+// Supported since Node 20.10.  Ignored (with warning) on older versions.
+const major = parseInt(process.versions.node.split('.')[0], 10);
+const minor = parseInt(process.versions.node.split('.')[1], 10);
+if (major > 20 || (major === 20 && minor >= 10)) {
+  nodeArgs.push('--test-timeout=15000');
+}
+
+nodeArgs.push(...files);
+
+const cp = spawn(process.execPath, nodeArgs, {
   stdio: 'inherit',
   shell: false,
 });
 
-cp.on('exit', (code) => process.exit(code || 0));
+// Global safety net: kill the entire process tree after 5 minutes.
+// Some test files hang in teardown even with --test-timeout.
+const GLOBAL_TIMEOUT_MS = 300_000;
+const killer = setTimeout(() => {
+  console.error('\n[run-tests] Global timeout reached — aborting.\n');
+  cp.kill('SIGTERM');
+  setTimeout(() => cp.kill('SIGKILL'), 5000);
+}, GLOBAL_TIMEOUT_MS);
+
+cp.on('exit', (code) => {
+  clearTimeout(killer);
+  process.exit(code || 0);
+});
