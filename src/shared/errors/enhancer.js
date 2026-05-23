@@ -4,7 +4,7 @@
  */
 "use strict";
 
-const { ErrorCodes } = require("../tools/error-codes");
+const { ErrorCodes } = require("../../tools/error-codes");
 
 // ── Suggestion database: maps error codes to user-facing guidance ────
 

@@ -7,7 +7,6 @@ const { EventBus } = require('./events/bus');
 const { createProvider } = require('./providers');
 const { loadSettings } = require('./config');
 const { loadRecentTranscript, handleChatMessage, renderBanner, handleSlashCommand } = require('./commands');
-const { autoCompleteSlashCommand } = require('./commands/autocomplete');
 const { suggestCommand } = require('./command-suggestions');
 const { createLocalToolRegistry } = require('./tools');
 const { UndoStack } = require('./undo-stack');
@@ -15,36 +14,19 @@ const { PluginRegistry } = require('./plugins');
 const { runBatchMode } = require('./batch');
 const { registerAgentTeamTools } = require('./teams/tools');
 const { DynamicCommandRegistry } = require('./infrastructure/command-registry');
-let createInputPipeline = null;
-try { ({ createInputPipeline } = require('./infrastructure/safety-pipeline')); } catch (_) { /* optional */ }
-let createPluginManager = null;
-try { ({ createPluginManager } = require('./infrastructure/plugin-manager')); } catch (_) { /* optional */ }
-let _setupBackgroundTasks = null;
-let _teardownBackgroundTasks = null;
-try {
-  const bg = require('./infrastructure/scheduler-setup');
-  _setupBackgroundTasks = bg.setupBackgroundTasks;
-  _teardownBackgroundTasks = bg.teardownBackgroundTasks;
-} catch (_) { /* optional */ }
-let _shutdownManager = null;
-let _SHUTDOWN_PRIORITY = null;
-try {
-  const sd = require('./shutdown');
-  _shutdownManager = sd.getShutdownManager;
-  _SHUTDOWN_PRIORITY = sd.PRIORITY;
-} catch (_) { /* optional */ }
-let setupKnowledgeManagement = null;
-try { ({ setupKnowledgeManagement } = require('./infrastructure/knowledge-setup')); } catch (_) { /* optional */ }
+const { createInputPipeline } = require('./infrastructure/safety-pipeline');
+const { createPluginManager } = require('./infrastructure/plugin-manager');
+const { setupBackgroundTasks: _setupBackgroundTasks, teardownBackgroundTasks: _teardownBackgroundTasks } = require('./infrastructure/scheduler-setup');
+const { getShutdownManager: _shutdownManager, PRIORITY: _SHUTDOWN_PRIORITY } = require('./shutdown');
+const { setupKnowledgeManagement } = require('./infrastructure/knowledge-setup');
 
 let activePreset = null;
 
 function resolveSettings() {
   const settings = loadSettings();
   if (activePreset) {
-    try {
-      const { applyPreset } = require('./config-presets');
-      return applyPreset(settings, activePreset);
-    } catch (_) { /* optional */ }
+    const { applyPreset } = require('./config-presets');
+    return applyPreset(settings, activePreset);
   }
   return settings;
 }
@@ -57,6 +39,10 @@ const { runInitWizard, shouldRunFirstRunInit } = require('./init-wizard');
 const { debug, isDebugEnabled } = require('./debug');
 const { createTranslator } = require('./i18n');
 const { formatPastedInputBadge, formatPastedInputSummary, shouldRunPasteAsCommandBatch } = require('./paste-utils');
+const { createApprovalPrompt } = require('./approval-prompt');
+const { createTerminalOutput } = require('./terminal-output');
+const { createTerminalInput } = require('./terminal-input');
+const { bootstrapSession } = require('./session-bootstrap');
 
 const VERSION = require('../package.json').version;
 
@@ -237,7 +223,7 @@ function runModelsCommand(args) {
 function runAgentsCommand() {
   const settings = resolveSettings();
   const { loadAgentDefinitions } = require('./teams/agents');
-  const { formatAgentList } = require('./formatters/agent-teams');
+  const { formatAgentList } = require('./teams/agent-teams-formatter');
 
   const definitions = loadAgentDefinitions({
     projectRoot: settings.projectRoot || process.cwd(),
@@ -259,7 +245,7 @@ function runTeamCommand(args) {
 
   if (args[0] === 'auth-refactor') {
     const { createAuthRefactorTeam } = require('./teams/auth-refactor');
-    const { formatTeamPlan } = require('./formatters/team-plan');
+    const { formatTeamPlan } = require('./teams/team-plan-formatter');
     const team = createAuthRefactorTeam();
     console.log(formatTeamPlan(team));
     return;
@@ -325,7 +311,7 @@ function runConfigCommand(args) {
   console.log(`\nRun 'hax-agent config edit' to edit, or 'hax-agent init' to re-run setup.`);
 }
 
-function runResumeCommand(args) {
+async function runResumeCommand(args) {
   const settings = resolveSettings();
   const { listSessions } = require('./memory');
   const sessions = listSessions(settings);
@@ -350,46 +336,28 @@ function runResumeCommand(args) {
     .slice(-resolveTranscriptMessageLimit(settings))
     .map((e) => ({ role: e.role, content: e.content || '' }));
 
-  let pluginRegistry;
-  let pluginManager = null;
-  if (createPluginManager) {
-    pluginManager = createPluginManager({
-      pluginsDir: path.join(require('node:os').homedir(), '.haxagent', 'plugins'),
-      installDir: path.join(process.cwd(), '.hax-agent', 'plugins'),
-      autoValidate: true,
-    });
-    pluginRegistry = pluginManager.registry;
-  } else {
-    pluginRegistry = new PluginRegistry();
-    pluginRegistry.loadPluginsFromDirectory(
-      path.join(require('node:os').homedir(), '.haxagent', 'plugins'),
-    );
+  let session;
+  try {
+    ({ session } = await bootstrapSession({
+      settings,
+      args: [],
+      root: process.cwd(),
+      createInputPipeline,
+      createPluginManager,
+      _setupBackgroundTasks,
+      _teardownBackgroundTasks,
+      _shutdownManager,
+      _SHUTDOWN_PRIORITY,
+      setupKnowledgeManagement,
+      createTranslator,
+    }));
+  } catch (err) {
+    console.error(`Failed to resume session: ${err.message}`);
+    process.exit(1);
   }
 
-  const provider = createProvider(settings.agent, process.env);
-  const toolRegistry = createLocalToolRegistry({
-    root: process.cwd(),
-    shellPolicy: settings.tools?.shell,
-    undoStack: new UndoStack(),
-    pluginRegistry,
-  });
-  registerAgentTeamTools(toolRegistry, { settings, projectRoot: process.cwd() });
-
-  const permissionManager = new PermissionManager({ mode: 'normal' });
-  const session = new Session({
-    provider,
-    settings,
-    toolRegistry,
-    permissionManager,
-    pluginRegistry,
-  });
   session.messages = messages;
   session.id = targetSession.id;
-
-  // Wire plugin manager into the session
-  if (pluginManager) {
-    session.pluginManager = pluginManager;
-  }
 
   runShell([], session);
 }
@@ -492,178 +460,35 @@ async function runShell(args, explicitSession) {
     resolvedSettings = require('./config').resolveSettings();
   }
 
-  const settings = resolvedSettings.settings;
-  const provider = explicitSession ? explicitSession.provider : createProvider(settings.agent, process.env);
-  const screen = new TerminalScreen();
-  const markdown = new MarkdownRenderer(screen.columns);
-
-  const permissionManager = explicitSession
-    ? explicitSession.permissionManager
-    : new PermissionManager({
-      mode: args.includes('--yolo') ? 'yolo' : (settings.permissions?.mode || 'normal'),
-      locale: settings.ui?.locale,
-      persistPath: path.join(process.cwd(), '.hax-agent', 'permissions.json'),
-    });
-
-  // Create plugin registry (raw or enhanced via plugin-manager)
-  let pluginRegistry;
-  let pluginManager = null;
-  if (createPluginManager) {
-    pluginManager = createPluginManager({
-      pluginsDir: path.join(require('node:os').homedir(), '.haxagent', 'plugins'),
-      installDir: path.join(process.cwd(), '.hax-agent', 'plugins'),
-      autoValidate: true,
-    });
-    // Also scan project-level plugins
-    pluginManager.scanDirectory(path.join(process.cwd(), '.hax-agent', 'plugins'));
-    pluginRegistry = pluginManager.registry;
-  } else {
-    pluginRegistry = new PluginRegistry();
-    pluginRegistry.loadPluginsFromDirectory(
-      path.join(require('node:os').homedir(), '.haxagent', 'plugins'),
-    );
-    pluginRegistry.loadPluginsFromDirectory(
-      path.join(process.cwd(), '.hax-agent', 'plugins'),
-    );
-  }
-
-  const toolRegistry = createLocalToolRegistry({
-    root: process.cwd(),
-    shellPolicy: settings.tools?.shell,
-    permissionManager,
-    undoStack: new UndoStack(),
-    pluginRegistry,
-  });
-  registerAgentTeamTools(toolRegistry, { settings, projectRoot: process.cwd() });
-
-  const session = explicitSession || new Session({
+  const {
+    settings: bootSettings,
     provider,
-    settings,
-    toolRegistry,
+    screen,
+    markdown,
     permissionManager,
+    toolRegistry,
+    session: bootSession,
+    history,
+    t,
     pluginRegistry,
+    pluginManager,
+  } = await bootstrapSession({
+    args,
+    settings: resolvedSettings.settings,
+    explicitSession,
+    root: process.cwd(),
+    createInputPipeline,
+    createPluginManager,
+    _setupBackgroundTasks,
+    _teardownBackgroundTasks,
+    _shutdownManager,
+    _SHUTDOWN_PRIORITY,
+    setupKnowledgeManagement,
+    createTranslator,
   });
 
-  // Initialize dynamic command registry and attach to session
-  if (!session.commandRegistry) {
-    session.commandRegistry = new DynamicCommandRegistry();
-  }
-
-  // Wire plugin manager into the session for /plugin commands
-  if (pluginManager) {
-    session.pluginManager = pluginManager;
-  }
-
-  // Wire safety pipeline into the session
-  if (createInputPipeline) {
-    try {
-      session.inputPipeline = createInputPipeline({
-        blockOnSeverity: settings.safety?.blockOnSeverity || 'CRITICAL',
-        warnOnSeverity: settings.safety?.warnOnSeverity || 'HIGH',
-        enableSafetyScan: settings.safety?.enableScanner !== false,
-        maxInputLength: settings.safety?.maxInputLength || null,
-      });
-    } catch (_) { /* safety pipeline optional */ }
-  }
-
-  // Fire onSessionStart plugin hooks
-  pluginRegistry.runHook('onSessionStart', { session }).catch(() => {});
-  permissionManager.locale = settings.ui?.locale;
-  if (session.permissionManager) {
-    session.permissionManager.locale = settings.ui?.locale;
-  }
-
-  // Wire EventBus into session — foundation for all event-driven modules
-  if (!session.eventBus) {
-    session.eventBus = new EventBus();
-  }
-  session.eventBus.emit('session:start', {
-    sessionId: session.id,
-    timestamp: new Date().toISOString(),
-  });
-
-  // ---- analytics: stats, anomaly detection, predictions ----
-  try {
-    const { setupAnalytics } = require('./infrastructure/analytics-setup');
-    setupAnalytics(session, {
-      anomalyAlerts: settings.analytics?.anomalyAlerts !== false,
-      generateReportOnEnd: settings.analytics?.generateReportOnEnd === true,
-    });
-  } catch (_) { /* analytics optional */ }
-
-  // ---- background task scheduler ----
-  if (_setupBackgroundTasks) {
-    try {
-      const tasks = _setupBackgroundTasks(session);
-      session._bgTasks = tasks;
-    } catch (_) { /* optional */ }
-  }
-
-  // ---- knowledge accumulation & advanced memory ----
-  if (setupKnowledgeManagement) {
-    try {
-      setupKnowledgeManagement(session);
-    } catch (_) { /* optional */ }
-  }
-
-  // ---- graceful shutdown hooks ----
-  if (_shutdownManager && _SHUTDOWN_PRIORITY) {
-    try {
-      const sm = _shutdownManager({ timeoutMs: 5_000 });
-
-      // Hook: tear down background workers (lowest = runs first)
-      sm.register('bg-teardown', _SHUTDOWN_PRIORITY.SAVE_STATE, async ({ reason }) => {
-        debug('shutdown', `bg-teardown reason=${reason}`);
-        if (session._bgTasks && _teardownBackgroundTasks) {
-          await _teardownBackgroundTasks(session);
-          session._bgTasks = null;
-        }
-      });
-
-      // Hook: flush logs, save state
-      sm.register('flush-logs', _SHUTDOWN_PRIORITY.CLOSE_STREAMS, () => {
-        debug('shutdown', 'flush-logs');
-        // Placeholder — real log flusher would go here
-      });
-
-      // Hook: release locks / close connections
-      sm.register('release-locks', _SHUTDOWN_PRIORITY.RELEASE_LOCKS, () => {
-        debug('shutdown', 'release-locks');
-        // Placeholder — file lock / DB connection teardown
-      });
-
-      // Hook: fire session:end on EventBus
-      sm.register('session-end', _SHUTDOWN_PRIORITY.NOTIFY, () => {
-        if (session.eventBus) {
-          try {
-            session.eventBus.emit('session:end', {
-              sessionId: session.id,
-              timestamp: new Date().toISOString(),
-            });
-          } catch (_) { /* best-effort */ }
-        }
-        if (session.pluginRegistry) {
-          session.pluginRegistry.runHook('onSessionEnd', { session }).catch(() => {});
-        }
-      });
-
-      // Hook: final debug ping
-      sm.register('shutdown-log', _SHUTDOWN_PRIORITY.LOG, () => {
-        debug('shutdown', 'graceful shutdown complete');
-      });
-    } catch (_) { /* optional */ }
-  }
-
-  const history = new InputHistory();
-  const t = (key, values) => createTranslator(session.settings?.ui?.locale)(key, values);
-
-  if (!explicitSession) {
-    loadRecentTranscript(session);
-  }
-
-  if (!screen.isTTY()) {
-    session.permissionManager.mode = 'yolo';
-  }
+  const settings = bootSettings;
+  const session = bootSession;
 
   const readlineOutput = createReadlineOutput(process.stdout);
   const rl = readline.createInterface({
@@ -672,379 +497,24 @@ async function runShell(args, explicitSession) {
     terminal: true,
   });
 
-  const inputAreaRows = 2;
-  let inputAreaActive = false;
-  let activePromptKind = 'main';
-  const moveCursorUp = (rows) => (rows > 0 ? `\x1B[${rows}A` : '');
-  const moveCursorDown = (rows) => (rows > 0 ? `\x1B[${rows}B` : '');
+  const terminalOutput = createTerminalOutput({ screen, session, rl, readlineOutput });
+  const {
+    mainPrompt,
+    withInputAreaHidden,
+    prompt,
+    setContinuationPrompt,
+    clearActivePrompt,
+    activateInputArea,
+  } = terminalOutput;
 
-  const mainPrompt = () => {
-    const width = screen.columns || 80;
-    const status = session.getStatusLine();
-    const statusText = stripAnsi(status);
-    const padding = Math.max(0, width - statusText.length - 2);
-    return `${THEME.statusLine} ${status} ${' '.repeat(padding)}${ANSI.reset || ''}\n${styled(THEME.promptPrefix, '>')} `;
-  };
-  const inputLinePrompt = () => `${styled(THEME.promptPrefix, '>')} `;
-  const drawFixedStatusLine = () => {
-    if (!screen.isTTY()) return;
-    const width = screen.columns || 80;
-    const status = session.getStatusLine();
-    const statusText = stripAnsi(status);
-    const padding = Math.max(0, width - statusText.length - 2);
-    screen.cursorTo(Math.max(1, screen.rows - 1), 1);
-    screen.write(`${ANSI.clearLine}${THEME.statusLine} ${status} ${' '.repeat(padding)}${ANSI.reset || ''}`);
-  };
-  const activateInputArea = () => {
-    if (!screen.isTTY()) return false;
-    screen.setScrollRegion(1, Math.max(1, screen.rows - inputAreaRows));
-    inputAreaActive = true;
-    return true;
-  };
-  const withInputAreaHidden = (writeFn) => {
-    if (!inputAreaActive || !screen.isTTY()) {
-      writeFn();
-      return;
-    }
-
-    screen.resetScrollRegion();
-    screen.cursorTo(Math.max(1, screen.rows - 1), 1);
-    screen.write(ANSI.clearLine);
-    screen.cursorTo(screen.rows, 1);
-    screen.write(ANSI.clearLine);
-    screen.setScrollRegion(1, Math.max(1, screen.rows - inputAreaRows));
-    screen.cursorTo(Math.max(1, screen.rows - inputAreaRows), 1);
-    writeFn();
-  };
-  const prompt = (preserveCursor = false) => {
-    activePromptKind = 'main';
-    if (screen.isTTY()) {
-      drawFixedStatusLine();
-      screen.cursorTo(screen.rows, 1);
-      screen.write(ANSI.clearLine);
-      rl.setPrompt(inputLinePrompt());
-    } else {
-      rl.setPrompt(mainPrompt());
-    }
-    rl.prompt(preserveCursor);
-  };
-  const setContinuationPrompt = () => {
-    activePromptKind = 'continuation';
-    rl.setPrompt(styled(THEME.dim, '│ ') + ' ');
-  };
-  const clearActivePrompt = (line = '') => {
-    if (!screen.isTTY()) return;
-
-    if (inputAreaActive && activePromptKind === 'main') {
-      screen.cursorTo(screen.rows, 1);
-      screen.write(ANSI.clearLine);
-      screen.cursorTo(Math.max(1, screen.rows - inputAreaRows), 1);
-      return;
-    }
-
-    const columns = Math.max(1, screen.columns || 80);
-    const promptPrefixLength = 2;
-    const inputRows = Math.max(1, Math.ceil((promptPrefixLength + stripAnsi(String(line)).length) / columns));
-    const rowsToClear = inputRows + (activePromptKind === 'main' ? 1 : 0);
-    process.stdout.write(moveCursorUp(rowsToClear));
-    for (let i = 0; i < rowsToClear; i++) {
-      process.stdout.write(`\r${ANSI.clearLine}`);
-      if (i < rowsToClear - 1) {
-        process.stdout.write(moveCursorDown(1));
-      }
-    }
-    process.stdout.write(`${moveCursorDown(1)}\r`);
-  };
-
-  rl.setPrompt(screen.isTTY() ? inputLinePrompt() : mainPrompt());
+  rl.setPrompt(screen.isTTY() ? terminalOutput.inputLinePrompt() : mainPrompt());
 
   screen.activate();
 
-  process.stdin.on('keypress', (_char, key) => {
-    if (!key) return;
-    if (session.interactivePromptActive) return;
+  // Input handling (keypress, vim mode, reverse search, tab complete)
+  // is managed by the terminal-input module — see createTerminalInput below.
 
-    if (key.name === 'paste-start') {
-      startBracketedPaste();
-      return;
-    }
-
-    if (key.name === 'paste-end') {
-      endBracketedPaste();
-      return;
-    }
-
-    if (bracketedPasteActive) return;
-
-    if (vimMode && (key.name === 'escape' || (key.ctrl && key.name === 'c'))) {
-      vimCommandBuffer = '';
-    }
-
-    if (vimMode && !vimInsertMode) {
-      handleVimKey(key, rl);
-      return;
-    }
-
-    if (key.name === 'up') {
-      const input = rl.line;
-      rl.line = history.up(input);
-      rl.cursor = rl.line.length;
-      rl._refreshLine();
-    } else if (key.name === 'down') {
-      rl.line = history.down(rl.line);
-      rl.cursor = rl.line.length;
-      rl._refreshLine();
-    } else if (key.ctrl && key.name === 'left') {
-      // Ctrl+Left: jump to previous word boundary
-      const line = rl.line;
-      let pos = rl.cursor - 1;
-      while (pos > 0 && line[pos - 1] === ' ') pos--;
-      while (pos > 0 && line[pos - 1] !== ' ') pos--;
-      rl.cursor = pos;
-      rl._refreshLine();
-    } else if (key.ctrl && key.name === 'right') {
-      // Ctrl+Right: jump to next word boundary
-      const line = rl.line;
-      let pos = rl.cursor;
-      while (pos < line.length && line[pos] !== ' ') pos++;
-      while (pos < line.length && line[pos] === ' ') pos++;
-      rl.cursor = pos;
-      rl._refreshLine();
-    } else if (key.ctrl && key.name === 'r') {
-      enterReverseSearch(rl, history, screen);
-      return;
-    } else if (key.name === 'tab') {
-      // readline already inserted \t into the line; strip it so autocomplete
-      // sees the actual user input, then re-insert if not a slash command
-      rl.line = rl.line.replace(/\t/g, '');
-      rl.cursor = rl.line.length;
-      const display = autoCompleteSlashCommand(rl, session);
-      if (display) {
-        rl._refreshLine();
-        if (display.length) {
-          process.stdout.write('\n' + display.join('\n') + '\n');
-          prompt(true);
-        }
-      } else {
-        // Not a slash command — restore the tab (readline default indent)
-        rl.line = rl.line + '\t';
-        rl.cursor = rl.line.length;
-        rl._refreshLine();
-      }
-    }
-  });
-
-  let vimMode = false;
-  let vimInsertMode = true;
-  let vimCommandBuffer = '';
-
-  function handleVimKey(key, rl) {
-    if (key.name === 'i' && !key.ctrl) {
-      vimInsertMode = true;
-    } else if (key.name === 'escape' || key.ctrl) {
-      vimInsertMode = true;
-      vimCommandBuffer = '';
-    } else if (key.name === 'h' && !key.ctrl) {
-      rl.cursor = Math.max(0, rl.cursor - 1);
-      rl._refreshLine();
-    } else if (key.name === 'l' && !key.ctrl) {
-      rl.cursor = Math.min(rl.line.length, rl.cursor + 1);
-      rl._refreshLine();
-    } else if (key.name === '0') {
-      rl.cursor = 0;
-      rl._refreshLine();
-    } else if (key.name === 'd' && !key.shift) {
-      vimCommandBuffer += 'd';
-    } else if (key.name === 'd' && vimCommandBuffer === 'd') {
-      rl.line = '';
-      rl.cursor = 0;
-      rl._refreshLine();
-      vimCommandBuffer = '';
-    } else if (key.name === 'w') {
-      const nextSpace = rl.line.indexOf(' ', rl.cursor);
-      rl.cursor = nextSpace === -1 ? rl.line.length : nextSpace + 1;
-      rl._refreshLine();
-    } else if (key.name === 'b') {
-      const prevSpace = rl.line.lastIndexOf(' ', rl.cursor - 1);
-      rl.cursor = prevSpace === -1 ? 0 : prevSpace + 1;
-      rl._refreshLine();
-    }
-  }
-
-  /**
-   * Interactive reverse-i-search (Ctrl+R). Like bash's reverse search:
-   * - Type to narrow search; match appears inline
-   * - Ctrl+R again to cycle to previous match
-   * - Enter to accept, Escape/Ctrl+C to cancel
-   */
-  function enterReverseSearch(rl, history, screen) {
-    if (history.entries.length === 0) return;
-
-    const origLine = rl.line;
-    let query = '';
-    let matchIndex = 0;
-    let active = true;
-
-    // Save current stdin handler and install search handler
-    const origKeypress = process.stdin.listeners('keypress').pop();
-    process.stdin.removeListener('keypress', origKeypress);
-
-    function render() {
-      const results = history.search(query);
-      const match = results[matchIndex % Math.max(1, results.length)] || '';
-      let highlight = match;
-      if (match && query) {
-        try {
-          const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-          // Guard against ReDoS: limit regex complexity
-          if (escaped.length <= 200) {
-            highlight = match.replace(new RegExp(escaped, 'gi'), m => `\x1b[1m\x1b[33m${m}\x1b[0m`);
-          } else {
-            // Fallback: plain highlight without regex
-            const idx = match.toLowerCase().indexOf(query.toLowerCase());
-            if (idx >= 0) {
-              highlight = match.slice(0, idx) + `\x1b[1m\x1b[33m${match.slice(idx, idx + query.length)}\x1b[0m` + match.slice(idx + query.length);
-            }
-          }
-        } catch {
-          // Regex failed — use plain match fallback
-          const idx = match.toLowerCase().indexOf(query.toLowerCase());
-          if (idx >= 0) {
-            highlight = match.slice(0, idx) + `\x1b[1m\x1b[33m${match.slice(idx, idx + query.length)}\x1b[0m` + match.slice(idx + query.length);
-          }
-        }
-      }
-
-      process.stdout.write('\r\x1b[K'); // clear line
-      if (query) {
-        process.stdout.write(`\x1b[2m(reverse-i-search)\x1b[0m \`${query}': ${highlight}`);
-      } else {
-        process.stdout.write(`\x1b[2m(reverse-i-search)\x1b[0m \`': `);
-      }
-    }
-
-    function accept() {
-      active = false;
-      const results = history.search(query);
-      if (results.length > 0) {
-        rl.line = results[matchIndex % results.length];
-        rl.cursor = rl.line.length;
-      }
-      cleanup();
-      process.stdout.write('\r\x1b[K');
-      rl._refreshLine();
-    }
-
-    function cancel() {
-      active = false;
-      rl.line = origLine;
-      rl.cursor = rl.line.length;
-      cleanup();
-      process.stdout.write('\r\x1b[K');
-      rl._refreshLine();
-    }
-
-    function cleanup() {
-      process.stdin.removeListener('keypress', onKey);
-      process.stdin.on('keypress', origKeypress);
-    }
-
-    function onKey(_char, key) {
-      if (!active) return;
-      if (!key) return;
-
-      if (key.name === 'return' || key.name === 'enter') {
-        accept();
-      } else if (key.name === 'escape' || (key.ctrl && key.name === 'c')) {
-        cancel();
-      } else if (key.ctrl && key.name === 'r') {
-        matchIndex++;
-        render();
-      } else if (key.name === 'backspace') {
-        query = query.slice(0, -1);
-        matchIndex = 0;
-        render();
-      } else if (_char && _char.length === 1 && !key.ctrl && !key.meta) {
-        query += _char;
-        matchIndex = 0;
-        render();
-      }
-    }
-
-    process.stdin.on('keypress', onKey);
-    render();
-
-    // Pause readline so it doesn't eat our keystrokes
-    rl.pause();
-    process.stdin.once('keypress', () => {}); // dummy to keep events flowing
-  }
-
-  function createApprovalPrompt() {
-    if (!screen.isTTY()) {
-      toolRegistry.permissionManager.mode = 'yolo';
-      return null;
-    }
-
-    return ({ toolName, toolArgs, level, description }) => {
-      return new Promise((resolve) => {
-        const levelLabel = PERMISSION_LABELS[level] || level;
-        const levelColor = level === PermissionLevel.DANGEROUS ? THEME.error
-          : level === PermissionLevel.ASK ? THEME.warning : THEME.success;
-
-        screen.write(`\n${levelColor}╭─ ${t('approval.title')} ─────────────────────────────────╮${ANSI.reset}\n`);
-        screen.write(`${levelColor}│${ANSI.reset}  ${t('approval.level')}: ${styled(levelColor, levelLabel)}\n`);
-        screen.write(`${levelColor}│${ANSI.reset}  ${t('approval.operation')}: ${styled(THEME.bold, toolName)}\n`);
-
-        const descLines = description.split('\n');
-        for (const line of descLines) {
-          screen.write(`${levelColor}│${ANSI.reset}  ${styled(THEME.dim, line)}\n`);
-        }
-
-        screen.write(`${levelColor}│${ANSI.reset}\n`);
-        screen.write(`${levelColor}│${ANSI.reset}  ${styled(THEME.promptPrefix, '[Y]')} ${t('approval.allow')}    ${styled(THEME.error, '[N]')} ${t('approval.deny')}\n`);
-        screen.write(`${levelColor}│${ANSI.reset}  ${styled(THEME.promptPrefix, '[A]')} ${t('approval.alwaysAllow')}  ${styled(THEME.error, '[D]')} ${t('approval.alwaysDeny')}\n`);
-        screen.write(`${levelColor}╰──────────────────────────────────────────────╯${ANSI.reset}\n`);
-        screen.write(styled(THEME.dim, t('approval.prompt')) + ' ');
-
-        let resolved = false;
-
-        const onKeyPress = (char, key) => {
-          if (!key || resolved) return;
-          const c = (char || '').toLowerCase();
-
-          if (c === 'y' || (key.name === 'return' && !char)) {
-            resolved = true; cleanup();
-            screen.write('Y\n');
-            resolve('approve');
-          } else if (c === 'n') {
-            resolved = true; cleanup();
-            screen.write('N\n');
-            resolve('deny');
-          } else if (c === 'a') {
-            resolved = true; cleanup();
-            screen.write('A\n');
-            resolve('always_allow');
-          } else if (c === 'd') {
-            resolved = true; cleanup();
-            screen.write('D\n');
-            resolve('always_deny');
-          }
-        };
-
-        function cleanup() {
-          process.stdin.removeListener('keypress', onKeyPress);
-          if (process.stdin.isTTY) {
-            try { process.stdin.setRawMode(false); } catch (_) {}
-          }
-        }
-
-        process.stdin.setRawMode(true);
-        process.stdin.on('keypress', onKeyPress);
-      });
-    };
-  }
-
-  toolRegistry.approvalCallback = createApprovalPrompt();
+  toolRegistry.approvalCallback = createApprovalPrompt({ screen, t });
 
   renderBanner(screen, session);
 
@@ -1122,16 +592,24 @@ async function runShell(args, explicitSession) {
     });
   }
 
-  let pendingExitCount = 0;
-  let lineQueue = Promise.resolve();
+  // Input state managed by terminal-input module.
   session.interactivePromptActive = false;
-  let multilineBuffer = [];
-  let pasteBuffer = [];
-  let pasteTimer = null;
-  let stagedPastedInput = null;
-  let bracketedPasteActive = false;
-  let bracketedPasteLines = [];
-  const PASTE_THRESHOLD_MS = 80;
+
+  const terminalInput = createTerminalInput({
+    rl,
+    screen,
+    session,
+    history,
+    callbacks: {
+      onProcessLine: processLine,
+      getMainPrompt: mainPrompt,
+      onSetContinuationPrompt: setContinuationPrompt,
+      clearActivePrompt,
+      prompt,
+      onPerformCleanExit: () => performCleanExit(session, screen, t),
+      withInputAreaHidden,
+    },
+  });
 
   /**
    * Perform a clean exit: show file changes, session stats, save transcript, then quit.
@@ -1179,133 +657,8 @@ async function runShell(args, explicitSession) {
     process.exit(0);
   }
 
-  rl.on('line', (line) => {
-    if (bracketedPasteActive) {
-      bracketedPasteLines.push(line);
-      return;
-    }
-
-    clearActivePrompt(line);
-
-    if (stagedPastedInput) {
-      const staged = stagedPastedInput;
-      stagedPastedInput = null;
-      if (line.trim() === staged.summary) {
-        lineQueue = lineQueue.then(() => processLine(staged.content, { pasted: true }));
-        return;
-      }
-      processLineNormal(line);
-      return;
-    }
-
-    // Paste detection: if lines arrive rapidly, buffer and join them
-    if (pasteTimer) {
-      clearTimeout(pasteTimer);
-      pasteBuffer.push(line);
-      pasteTimer = setTimeout(() => {
-        const joined = pasteBuffer.join('\n');
-        pasteBuffer = [];
-        pasteTimer = null;
-        rl.setPrompt(mainPrompt());
-        processPastedInput(joined);
-      }, PASTE_THRESHOLD_MS);
-      return;
-    }
-
-    if (!screen.isTTY()) {
-      processLineNormal(line);
-      return;
-    }
-
-    // Start paste detection window — if next line arrives within threshold, we're pasting
-    pasteBuffer = [line];
-    pasteTimer = setTimeout(() => {
-      // No rapid follow-up — single line, process normally
-      const singleLine = pasteBuffer[0];
-      pasteBuffer = [];
-      pasteTimer = null;
-      processLineNormal(singleLine);
-    }, PASTE_THRESHOLD_MS);
-    return;
-  });
-
-  function startBracketedPaste() {
-    bracketedPasteActive = true;
-    bracketedPasteLines = [];
-    rl.line = '';
-    rl.cursor = 0;
-    readlineOutput.muted = true;
-  }
-
-  function endBracketedPaste() {
-    if (!bracketedPasteActive) return;
-
-    bracketedPasteActive = false;
-    readlineOutput.muted = false;
-    if (rl.line) {
-      bracketedPasteLines.push(rl.line);
-    }
-    const input = bracketedPasteLines.join('\n');
-    bracketedPasteLines = [];
-    rl.line = '';
-    rl.cursor = 0;
-
-    clearActivePrompt('');
-    processPastedInput(input);
-  }
-
-  function processLineNormal(line) {
-    // Multi-line continuation: trailing backslash (bash-style)
-    if (line.endsWith('\\')) {
-      multilineBuffer.push(line.slice(0, -1));
-      setContinuationPrompt();
-      rl.prompt();
-      return;
-    }
-
-    let finalLine = line;
-    if (multilineBuffer.length > 0) {
-      multilineBuffer.push(line);
-      finalLine = multilineBuffer.join('\n');
-      multilineBuffer = [];
-      rl.setPrompt(mainPrompt());
-    }
-
-    lineQueue = lineQueue.then(() => processLine(finalLine));
-  }
-
-  function processPastedInput(input) {
-    if (shouldRunPasteAsCommandBatch(input)) {
-      for (const pastedLine of input.split(/\r?\n/)) {
-        if (pastedLine.trim()) {
-          lineQueue = lineQueue.then(() => processLine(pastedLine));
-        }
-      }
-      return;
-    }
-
-    // Auto-process pasted content immediately — no manual confirmation needed.
-    // Display the badge as an informational echo, then send the content.
-    const content = String(input || '');
-    const badge = formatPastedInputBadge(content);
-    withInputAreaHidden(() => {
-      screen.clearLine();
-      screen.write(`\n${badge}\n`);
-    });
-    lineQueue = lineQueue.then(() => processLine(content, { pasted: true }));
-    prompt();
-  }
-
-  // Keep stagePastedInput for programmatic use, but the interactive paste path
-  // now auto-processes (above) instead of staging.
-  function stagePastedInput(input) {
-    const content = String(input || '');
-    const summary = formatPastedInputSummary(content);
-    stagedPastedInput = { content, summary };
-    rl.line = summary;
-    rl.cursor = summary.length;
-    prompt(true);
-  }
+  // Line handling and paste detection are managed by terminal-input module.
+  // See createTerminalInput() call above.
 
   async function processLine(line, options = {}) {
     history.add(line);
@@ -1323,12 +676,13 @@ async function runShell(args, explicitSession) {
       }
 
       if (trimmed === '/vim') {
-        vimMode = !vimMode;
-        vimInsertMode = true;
+        const newVimMode = !terminalInput.getVimMode();
+        terminalInput.setVimMode(newVimMode);
+        terminalInput.setVimInsertMode(true);
         withInputAreaHidden(() => {
           screen.clearLine();
           screen.write(trimmed + '\n');
-          screen.write(styled(THEME.success, t('shell.vimMode', { state: vimMode ? t('common.enabled') : t('common.disabled') })) + '\n');
+          screen.write(styled(THEME.success, t('shell.vimMode', { state: newVimMode ? t('common.enabled') : t('common.disabled') })) + '\n');
         });
         prompt();
         return;
@@ -1477,7 +831,7 @@ async function runShell(args, explicitSession) {
   }
 
   rl.on('close', () => {
-    if (inputAreaActive && screen.isTTY()) {
+    if (terminalOutput.getInputAreaActive() && screen.isTTY()) {
       screen.resetScrollRegion();
     }
     screen.cursorTo(screen.rows, 1);
@@ -1487,13 +841,13 @@ async function runShell(args, explicitSession) {
       process.exit(0);
     }
     session.shouldExit = false;
-    pendingExitCount = 0;
+    terminalInput.setPendingExitCount(0);
   });
 
   process.stdin.on('keypress', (char, key) => {
     if (!key) return;
     if (session.interactivePromptActive) return;
-    if (key.name === 'paste-start' || key.name === 'paste-end' || bracketedPasteActive) return;
+    if (key.name === 'paste-start' || key.name === 'paste-end' || terminalInput.getBracketedPasteActive()) return;
 
     if (key.name === 'c' && key.ctrl) {
       if (session.isStreaming) {
@@ -1507,13 +861,14 @@ async function runShell(args, explicitSession) {
         return;
       }
 
-      pendingExitCount += 1;
-      if (pendingExitCount === 1) {
+      const count = terminalInput.getPendingExitCount() + 1;
+      terminalInput.setPendingExitCount(count);
+      if (count === 1) {
         withInputAreaHidden(() => {
           screen.write('\n' + styled(THEME.warning, t('shell.ctrlCExit')) + '\n');
         });
         prompt();
-        setTimeout(() => { pendingExitCount = 0; }, 2000);
+        setTimeout(() => { terminalInput.setPendingExitCount(0); }, 2000);
       } else {
         withInputAreaHidden(() => {
           screen.write('\n');
@@ -1524,7 +879,7 @@ async function runShell(args, explicitSession) {
     }
 
     if (key.name === 'l' && key.ctrl) {
-      if (inputAreaActive && screen.isTTY()) {
+      if (terminalOutput.getInputAreaActive() && screen.isTTY()) {
         screen.resetScrollRegion();
       }
       screen.clear();

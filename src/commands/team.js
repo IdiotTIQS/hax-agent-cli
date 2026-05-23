@@ -8,7 +8,7 @@ const {
   formatRunResult,
   formatTeamList,
   formatTeamSnapshot,
-} = require('../formatters/agent-teams');
+} = require('../teams/agent-teams-formatter');
 
 function createCliTeamRuntime(settings) {
   return createTeamRuntime({

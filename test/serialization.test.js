@@ -13,7 +13,7 @@ const {
   serializeSkill,
   serializeProviderIssue,
   isTerminalToolLimitReason,
-} = require("../src/utils/serialization");
+} = require("../src/shared/serialization");
 
 test("serializeProvider: returns null for null/undefined provider", () => {
   assert.equal(serializeProvider(null), null);

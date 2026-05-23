@@ -5,7 +5,7 @@ const { createProvider } = require('../providers');
 const { loadAllSkills, createSkillifySkill, recordSkillUsage } = require('../skills');
 const { buildSkillSystemPrompt, matchSkillByIntent, getSkillsForSession } = require('../skills/intent-matcher');
 const { loadAgentDefinitions } = require('../teams/agents');
-const { formatTeamPlan } = require('../formatters/team-plan');
+const { formatTeamPlan } = require('../teams/team-plan-formatter');
 const { PERMISSION_LABELS } = require('../permissions');
 const {
   THEME, TerminalScreen, MarkdownRenderer, ResponseRenderer,

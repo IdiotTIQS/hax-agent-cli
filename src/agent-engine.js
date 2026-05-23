@@ -17,7 +17,7 @@ const {
   serializeSkill,
   serializeProviderIssue,
   isTerminalToolLimitReason,
-} = require("./utils/serialization");
+} = require("./shared/serialization");
 
 // Optional observability integration — gracefully degrades if the module is missing.
 let _getMetrics = null;

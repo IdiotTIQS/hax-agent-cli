@@ -7,7 +7,7 @@
 const { describe, it } = require("node:test");
 const assert = require("node:assert/strict");
 
-const { ErrorEnhancer, SUGGESTIONS, enhanceError } = require("../../src/errors/enhancer");
+const { ErrorEnhancer, SUGGESTIONS, enhanceError } = require("../../src/shared/errors/enhancer");
 const { ToolExecutionError } = require("../../src/tools/error");
 
 // ── enhance ────────────────────────────────────────────────────────

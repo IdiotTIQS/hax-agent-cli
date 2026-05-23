@@ -1,4 +1,4 @@
-const { ANSI } = require('./renderer');
+const { ANSI } = require('./renderer-ansi');
 
 function shouldRunPasteAsCommandBatch(input) {
   const lines = String(input || '').split(/\r?\n/).map((entry) => entry.trim()).filter(Boolean);

@@ -24,6 +24,13 @@ const {
   md5,
   sha256,
 } = require('./hash');
+const {
+  serializeProvider,
+  serializeError,
+  serializeSkill,
+  serializeProviderIssue,
+  isTerminalToolLimitReason,
+} = require('./serialization');
 
 module.exports = {
   // deep-clone
@@ -42,4 +49,11 @@ module.exports = {
   fingerprint,
   md5,
   sha256,
+
+  // serialization
+  serializeProvider,
+  serializeError,
+  serializeSkill,
+  serializeProviderIssue,
+  isTerminalToolLimitReason,
 };

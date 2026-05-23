@@ -16,7 +16,7 @@ const {
 } = require('../src/teams/planner');
 const { loadAgentDefinitions } = require('../src/teams/agents');
 const { createTeamRuntime } = require('../src/teams/runtime');
-const { formatTeamPlan } = require('../src/formatters/team-plan');
+const { formatTeamPlan } = require('../src/teams/team-plan-formatter');
 
 function getAvailableAgentTypes() {
   const defs = loadAgentDefinitions({ projectRoot: process.cwd() });

@@ -7,7 +7,7 @@
 const { describe, it } = require("node:test");
 const assert = require("node:assert/strict");
 
-const { ErrorRecovery, ACTIONS, AUTO_RECOVERABLE } = require("../../src/errors/recovery");
+const { ErrorRecovery, ACTIONS, AUTO_RECOVERABLE } = require("../../src/shared/errors/recovery");
 const { ToolExecutionError } = require("../../src/tools/error");
 
 // ── ACTIONS constants ──────────────────────────────────────────────

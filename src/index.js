@@ -11,8 +11,8 @@ const { createAuthRefactorTeam } = require('./teams/auth-refactor');
 const agentTeams = require('./teams/runtime');
 const teamAgents = require('./teams/agents');
 const teamTools = require('./teams/tools');
-const { formatTeamPlan } = require('./formatters/team-plan');
-const agentTeamFormatters = require('./formatters/agent-teams');
+const { formatTeamPlan } = require('./teams/team-plan-formatter');
+const agentTeamFormatters = require('./teams/agent-teams-formatter');
 const collab = require('./collab');
 const coordination = require('./coordination');
 const debate = require('./debate');
@@ -118,12 +118,12 @@ const cache = require('./cache');
 const capability = require('./capability');
 const catalog = require('./catalog');
 const cliUtils = require('./cli-utils');
-const errors = require('./errors');
+const errors = require('./shared/errors');
 const files = require('./files');
 const format = require('./format');
 const deps = require('./deps');
 const shared = require('./shared');
-const utils = require('./utils');
+// utils/ merged into shared/ — serialization re-exports via shared/index.js
 const events = require('./events');
 
 module.exports = {
@@ -226,7 +226,6 @@ module.exports = {
   ...format,
   ...deps,
   ...shared,
-  ...utils,
   ...events,
 
   ...compatCore,

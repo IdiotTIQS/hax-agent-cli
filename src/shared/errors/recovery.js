@@ -5,7 +5,7 @@
  */
 "use strict";
 
-const { ErrorCodes } = require("../tools/error-codes");
+const { ErrorCodes } = require("../../tools/error-codes");
 
 // ── Recovery action constants ──────────────────────────────────────
 

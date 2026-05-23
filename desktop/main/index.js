@@ -14,7 +14,7 @@ const { PermissionManager } = require("../../src/permissions");
 const { createProvider } = require("../../src/providers");
 const { Session } = require("../../src/session");
 const { registerAgentTeamTools } = require("../../src/teams/tools");
-const { serializeProvider, serializeError } = require("../../src/utils/serialization");
+const { serializeProvider, serializeError } = require("../../src/shared/serialization");
 const { createLocalToolRegistry } = require("../../src/tools");
 const {
   findTranscriptSession,
