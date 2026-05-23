@@ -6,14 +6,12 @@ const { spawn } = require('node:child_process');
 const { EventBus } = require('./events/bus');
 const { createProvider } = require('./providers');
 const { loadSettings } = require('./config');
-const { loadRecentTranscript, handleChatMessage, renderBanner, handleSlashCommand } = require('./commands');
+const { handleChatMessage, renderBanner, handleSlashCommand } = require('./commands');
 const { suggestCommand } = require('./command-suggestions');
 const { createLocalToolRegistry } = require('./tools');
 const { UndoStack } = require('./undo-stack');
-const { PluginRegistry } = require('./plugins');
 const { runBatchMode } = require('./batch');
 const { registerAgentTeamTools } = require('./teams/tools');
-const { DynamicCommandRegistry } = require('./infrastructure/command-registry');
 const { createInputPipeline } = require('./infrastructure/safety-pipeline');
 const { createPluginManager } = require('./infrastructure/plugin-manager');
 const { setupBackgroundTasks: _setupBackgroundTasks, teardownBackgroundTasks: _teardownBackgroundTasks } = require('./infrastructure/scheduler-setup');
@@ -30,9 +28,8 @@ function resolveSettings() {
   }
   return settings;
 }
-const { loadAllSkills, createSkillifySkill, recordSkillUsage } = require('./skills');
-const { PermissionManager, PermissionLevel, PERMISSION_LABELS } = require('./permissions');
-const { Session, InputHistory } = require('./session');
+const { PermissionManager } = require('./permissions');
+const { Session } = require('./session');
 const { THEME, ANSI, TerminalScreen, MarkdownRenderer, stripAnsi, styled } = require('./renderer');
 const { checkForUpdate, performUpdate, restartProcess, wasRestarted } = require('./updater');
 const { runInitWizard, shouldRunFirstRunInit } = require('./init-wizard');
@@ -606,7 +603,6 @@ async function runShell(args, explicitSession) {
       onSetContinuationPrompt: setContinuationPrompt,
       clearActivePrompt,
       prompt,
-      onPerformCleanExit: () => performCleanExit(session, screen, t),
       withInputAreaHidden,
     },
   });
@@ -738,7 +734,7 @@ async function runShell(args, explicitSession) {
       const bangPermission = await session.permissionManager.checkPermission(
         'shell.run',
         { command: shellLine },
-        session.approvalCallback || null,
+        session.toolRegistry.approvalCallback || null,
       );
       if (!bangPermission.approved) {
         withInputAreaHidden(() => {

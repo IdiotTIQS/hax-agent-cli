@@ -1,8 +1,7 @@
 'use strict';
 
-const { ANSI, THEME } = require('./renderer');
 const { autoCompleteSlashCommand } = require('./commands/autocomplete');
-const { formatPastedInputBadge, formatPastedInputSummary, shouldRunPasteAsCommandBatch } = require('./paste-utils');
+const { formatPastedInputSummary, shouldRunPasteAsCommandBatch } = require('./paste-utils');
 
 const PASTE_THRESHOLD_MS = 80;
 

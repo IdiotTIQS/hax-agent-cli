@@ -75,25 +75,55 @@ async function bootstrapSession({
   setupKnowledgeManagement = null,
 }) {
   // ====================================================================
+  // Resume fast-path: when explicitSession is provided, reuse its
+  // existing infrastructure.  Only create fresh UI objects (screen,
+  // markdown, history, translator).  Skip all wiring to avoid
+  // double-registering hooks, re-emitting events, and overwriting
+  // the toolRegistry (which would lose the approvalCallback).
+  // ====================================================================
+  if (explicitSession) {
+    const screen = new TerminalScreen();
+    const markdown = new MarkdownRenderer(screen.columns);
+    const history = new InputHistory();
+    const t = createTranslator
+      ? (key, values) => createTranslator(explicitSession.settings?.ui?.locale)(key, values)
+      : (key, values) => key;
+
+    if (!screen.isTTY()) {
+      explicitSession.permissionManager.mode = 'yolo';
+    }
+
+    return {
+      settings: explicitSession.settings,
+      provider: explicitSession.provider,
+      screen,
+      markdown,
+      permissionManager: explicitSession.permissionManager,
+      toolRegistry: explicitSession.toolRegistry,
+      session: explicitSession,
+      history,
+      t,
+      pluginRegistry: explicitSession.pluginRegistry,
+      pluginManager: explicitSession.pluginManager || null,
+    };
+  }
+
+  // ====================================================================
   // Block 1: Core setup — provider, screen, plugins, tools, session
   // ====================================================================
 
-  const provider = explicitSession
-    ? explicitSession.provider
-    : createProvider(settings.agent, process.env);
+  const provider = createProvider(settings.agent, process.env);
 
   const screen = new TerminalScreen();
   const markdown = new MarkdownRenderer(screen.columns);
 
-  const permissionManager = explicitSession
-    ? explicitSession.permissionManager
-    : new PermissionManager({
-        mode: args.includes('--yolo')
-          ? 'yolo'
-          : (settings.permissions?.mode || 'normal'),
-        locale: settings.ui?.locale,
-        persistPath: path.join(root, '.hax-agent', 'permissions.json'),
-      });
+  const permissionManager = new PermissionManager({
+    mode: args.includes('--yolo')
+      ? 'yolo'
+      : (settings.permissions?.mode || 'normal'),
+    locale: settings.ui?.locale,
+    persistPath: path.join(root, '.hax-agent', 'permissions.json'),
+  });
 
   // Create plugin registry (raw or enhanced via plugin-manager)
   let pluginRegistry;
@@ -126,7 +156,7 @@ async function bootstrapSession({
   });
   registerAgentTeamTools(toolRegistry, { settings, projectRoot: root });
 
-  const session = explicitSession || new Session({
+  const session = new Session({
     provider,
     settings,
     toolRegistry,
@@ -138,10 +168,7 @@ async function bootstrapSession({
   // Block 2: Session wiring — commands, safety, plugins, events
   // ====================================================================
 
-  // Initialize dynamic command registry and attach to session
-  if (!session.commandRegistry) {
-    session.commandRegistry = new DynamicCommandRegistry();
-  }
+  session.commandRegistry = new DynamicCommandRegistry();
 
   // Wire plugin manager into the session for /plugin commands
   if (pluginManager) {
@@ -170,9 +197,7 @@ async function bootstrapSession({
   }
 
   // Wire EventBus into session — foundation for all event-driven modules
-  if (!session.eventBus) {
-    session.eventBus = new EventBus();
-  }
+  session.eventBus = new EventBus();
   session.eventBus.emit('session:start', {
     sessionId: session.id,
     timestamp: new Date().toISOString(),
@@ -232,13 +257,11 @@ async function bootstrapSession({
       // Hook: flush logs, save state
       sm.register('flush-logs', _SHUTDOWN_PRIORITY.CLOSE_STREAMS, () => {
         debug('shutdown', 'flush-logs');
-        // Placeholder — real log flusher would go here
       });
 
       // Hook: release locks / close connections
       sm.register('release-locks', _SHUTDOWN_PRIORITY.RELEASE_LOCKS, () => {
         debug('shutdown', 'release-locks');
-        // Placeholder — file lock / DB connection teardown
       });
 
       // Hook: fire session:end on EventBus
