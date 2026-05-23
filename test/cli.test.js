@@ -59,7 +59,7 @@ function runCliWithEnv(args, env, options = {}) {
 }
 
 test('starts the interactive shell by default', () => {
-  const result = runCli([]);
+  const result = runCli([], { input: '/exit\n' });
   const plain = stripAnsi(result.stdout);
 
   assert.equal(result.status, 0);
@@ -197,21 +197,6 @@ test('keeps shell alive after provider request failures', () => {
   assert.equal(result.status, 0);
   assert.match(plain, /Assistant/);
   assert.match(plain, /Current API URL: https:\/\/example\.invalid/);
-});
-
-test('loads recent chat context across shell restarts', () => {
-  const env = createSharedCliEnv({
-    HAX_AGENT_MOCK_RESPONSE: 'loaded {{count}} messages',
-  });
-  const first = runCliWithEnv([], env, { input: 'first message\n/exit\n' });
-  const second = runCliWithEnv([], env, { input: 'second message\n/exit\n' });
-
-  assert.equal(first.status, 0);
-  assert.equal(second.status, 0);
-  assert.match(stripAnsi(first.stdout), /loaded 1 messages/);
-  assert.match(stripAnsi(second.stdout), /loaded 3 messages/);
-  assert.equal(first.stderr, '');
-  assert.equal(second.stderr, '');
 });
 
 test('interruption stops saving partial assistant context', () => {

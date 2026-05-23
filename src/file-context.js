@@ -57,11 +57,19 @@ async function buildFileContext(options = {}) {
 
   const indexedFiles = await collectProjectFiles(projectRoot, limits);
 
+  if (indexedFiles.length === 0) {
+    return createEmptyResult();
+  }
+
   // Score files concurrently with an I/O-friendly concurrency cap.
   const FILE_SCORE_CONCURRENCY = 16;
   const ranked = [];
   const pending = indexedFiles.slice();
   let active = 0;
+
+  if (pending.length === 0) {
+    return createEmptyResult();
+  }
 
   await new Promise((resolve) => {
     function next() {

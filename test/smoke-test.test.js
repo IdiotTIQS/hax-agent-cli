@@ -136,7 +136,8 @@ test('PluginRegistry: unregister removes hooks', async (t) => {
 test('Memory: namespace and tags persistence', async (t) => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'hax-mem-'));
   const opts = {
-    settings: { projectRoot: dir },
+    projectRoot: dir,
+    memoryDirectory: path.join(dir, 'memory'),
     namespace: 'production',
     tags: ['architecture', 'critical'],
   };
@@ -154,7 +155,7 @@ test('Memory: namespace and tags persistence', async (t) => {
 
 test('Memory: namespace filtering in search', async (t) => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'hax-mem-'));
-  const baseOpts = { settings: { projectRoot: dir } };
+  const baseOpts = { projectRoot: dir, memoryDirectory: path.join(dir, 'memory') };
 
   writeMemory('api-key-prod', 'prod-key-123', { ...baseOpts, namespace: 'production' });
   writeMemory('api-key-dev', 'dev-key-456', { ...baseOpts, namespace: 'development' });
@@ -177,7 +178,7 @@ test('Memory: namespace filtering in search', async (t) => {
 
 test('Memory: weighted search scoring', async (t) => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'hax-mem-'));
-  const baseOpts = { settings: { projectRoot: dir } };
+  const baseOpts = { projectRoot: dir, memoryDirectory: path.join(dir, 'memory') };
 
   // Name match should score higher than content match
   writeMemory('kubernetes-scaling', 'This is about database scaling strategies', baseOpts);

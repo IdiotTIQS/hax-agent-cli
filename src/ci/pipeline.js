@@ -651,12 +651,16 @@ function sleep(ms) {
 }
 
 function withTimeout(promise, ms, message) {
-  return Promise.race([
-    promise,
-    sleep(ms).then(() =>
-      Promise.reject(new PipelineError("TIMEOUT", message || `Timeout after ${ms}ms`))
-    ),
-  ]);
+  let timer;
+  const timeoutPromise = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      reject(new PipelineError("TIMEOUT", message || `Timeout after ${ms}ms`));
+    }, Math.max(0, Number(ms) || 0));
+  });
+
+  return Promise.race([promise, timeoutPromise]).finally(() => {
+    clearTimeout(timer);
+  });
 }
 
 module.exports = { CIPipeline, PipelineError };

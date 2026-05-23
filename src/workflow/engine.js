@@ -605,10 +605,11 @@ function sleep(ms) {
 }
 
 function withTimeout(promise, ms, message) {
-  return Promise.race([
-    promise,
-    sleep(ms).then(() => Promise.reject(new Error(message || `Timeout after ${ms}ms`))),
-  ]);
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(message || `Timeout after ${ms}ms`)), Math.max(0, Number(ms) || 0));
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
 function clone(value) {

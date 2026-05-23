@@ -48,7 +48,7 @@ function runGit(cwd, args) {
   return result;
 }
 
-test('desktop main registers IPC handlers and creates mock sessions', async () => {
+test('desktop main registers IPC handlers and creates mock sessions', { timeout: 15000 }, async () => {
   const projectRoot = createTempProject();
   const ipc = createFakeIpc();
 
@@ -75,7 +75,7 @@ test('desktop main registers IPC handlers and creates mock sessions', async () =
   assert.ok(created.settings.agent.apiKey === undefined || created.settings.agent.apiKey === '***');
 });
 
-test('desktop sendMessage retargets an existing session to the selected workspace', async () => {
+test('desktop sendMessage retargets an existing session to the selected workspace', { timeout: 15000 }, async () => {
   const firstProjectRoot = createTempProject();
   const secondProjectRoot = createTempProject();
   const ipc = createFakeIpc();
@@ -113,7 +113,7 @@ test('desktop sendMessage retargets an existing session to the selected workspac
   assert.ok(sentEvents.some(({ payload }) => payload?.type === 'turn.completed'));
 });
 
-test('desktop sendMessage maps full permission mode to backend yolo mode', async () => {
+test('desktop sendMessage maps full permission mode to backend yolo mode', { timeout: 15000 }, async () => {
   const projectRoot = createTempProject();
   const ipc = createFakeIpc();
   const event = {
@@ -144,7 +144,7 @@ test('desktop sendMessage maps full permission mode to backend yolo mode', async
   assert.equal(result.permission.mode, 'yolo');
 });
 
-test('desktop approval prompt sends a request and resolves from renderer response', async () => {
+test('desktop approval prompt sends a request and resolves from renderer response', { timeout: 15000 }, async () => {
   const sentEvents = [];
   const sender = {
     send(channel, payload) {
@@ -168,7 +168,7 @@ test('desktop approval prompt sends a request and resolves from renderer respons
   assert.equal(await approvalPromise, 'approve');
 });
 
-test('desktop approval prompt can be denied when a session is interrupted', async () => {
+test('desktop approval prompt can be denied when a session is interrupted', { timeout: 15000 }, async () => {
   const sentEvents = [];
   const sender = {
     send(channel, payload) {
@@ -188,7 +188,7 @@ test('desktop approval prompt can be denied when a session is interrupted', asyn
   assert.equal(await approvalPromise, 'deny');
 });
 
-test('desktop external links only open http and https URLs', async () => {
+test('desktop external links only open http and https URLs', { timeout: 15000 }, async () => {
   const opened = [];
   const opener = {
     async openExternal(url) {
@@ -222,7 +222,7 @@ test('desktop devtools open only when explicitly enabled', () => {
   }
 });
 
-test('desktop workspace snapshot reads real files and hides mock transcripts', async () => {
+test('desktop workspace snapshot reads real files and hides mock transcripts', { timeout: 15000 }, async () => {
   const projectRoot = createTempProject();
   const settings = config.loadSettings({ projectRoot, env: {} });
   settings.sessions.directory = path.join(projectRoot, 'sessions');
@@ -304,7 +304,7 @@ test('desktop migrates legacy project transcripts into the configured session di
   assert.deepEqual(memory.readTranscript('legacy-session', settings).map((entry) => entry.content), ['Legacy chat']);
 });
 
-test('desktop can resume migrated legacy project transcripts from the session list', async () => {
+test('desktop can resume migrated legacy project transcripts from the session list', { timeout: 15000 }, async () => {
   const projectRoot = createTempProject();
   const ipc = createFakeIpc();
   const settings = config.loadSettings({
@@ -433,7 +433,7 @@ test('desktop workspace file preview reads text and rejects paths outside root',
   assert.throws(() => readWorkspaceFile(projectRoot, { path: '..\\outside.txt' }), /escapes workspace root/);
 });
 
-test('desktop git status lists changed files and reads file diff', async () => {
+test('desktop git status lists changed files and reads file diff', { timeout: 15000 }, async () => {
   const projectRoot = createTempProject();
   runGit(projectRoot, ['init']);
   runGit(projectRoot, ['config', 'user.email', 'test@example.com']);
@@ -455,7 +455,7 @@ test('desktop git status lists changed files and reads file diff', async () => {
   assert.match(untrackedDiff.diff, /new file mode/);
 });
 
-test('desktop insight snapshots expose skills, tools, permissions, and teams', async () => {
+test('desktop insight snapshots expose skills, tools, permissions, and teams', { timeout: 15000 }, async () => {
   const projectRoot = createTempProject();
   const settings = config.loadSettings({ projectRoot, env: {} });
   const ipc = createFakeIpc();

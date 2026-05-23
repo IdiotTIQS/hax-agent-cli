@@ -384,7 +384,7 @@ class IntentDetector {
 
     for (const [sub, keywords] of Object.entries(map)) {
       const count = keywords.filter((kw) => normalized.includes(kw.toLowerCase())).length;
-      if (count > bestCount) {
+      if (count >= bestCount) {
         bestCount = count;
         bestSub = sub;
       }

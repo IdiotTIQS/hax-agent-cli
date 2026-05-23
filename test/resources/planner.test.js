@@ -170,7 +170,10 @@ test("ResourcePlanner: learn updates estimates for a task type", () => {
   planner.learn("custom", { tokens: 2000, apiCalls: 2, toolExecutions: 1, time: 10000, memory: 32, disk: 8 });
 
   const after = planner.estimateNeeds({ id: "t", type: "custom" });
-  assert.ok(after.confidence > 0.3, "Confidence should improve after learning");
+  assert.equal(after.tokens, 2000, "Should use learned token estimate");
+  assert.equal(after.apiCalls, 2, "Should use learned API call estimate");
+  assert.equal(after.toolExecutions, 1, "Should use learned tool execution estimate");
+  assert.notEqual(before.totalCost, after.totalCost, "Total cost should change after learning");
 });
 
 test("ResourcePlanner: learn validates taskType argument", () => {

@@ -94,16 +94,35 @@ function listSessions(options = {}) {
     .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
 }
 
+function normalizeTags(raw) {
+  if (raw == null) return [];
+  if (Array.isArray(raw)) {
+    return [...new Set(raw.filter(t => typeof t === 'string').map(t => t.toLowerCase().trim()).filter(t => t.length > 0))];
+  }
+  if (typeof raw === 'string') {
+    return raw.split(',').map(t => t.toLowerCase().trim()).filter(t => t.length > 0);
+  }
+  return [];
+}
+
 function writeMemory(name, content, options = {}) {
   const namespace = typeof options.namespace === 'string' ? options.namespace.trim() : 'default';
-  const tags = Array.isArray(options.tags) ? [...new Set(options.tags.filter(t => typeof t === 'string'))] : [];
-  const filePath = getMemoryPath(name, options);
+  const tags = normalizeTags(options.tags);
   const existing = readMemory(name, options);
+  // When updating without explicit namespace, carry forward the existing namespace
+  // so the file path matches the original location
+  const effectiveNamespace = existing && typeof options.namespace !== 'string'
+    ? existing.namespace || 'default'
+    : namespace;
+  const effectiveTags = existing && options.tags == null
+    ? existing.tags || []
+    : tags;
+  const filePath = getMemoryPath(name, { ...options, namespace: effectiveNamespace });
   const now = new Date().toISOString();
   const record = {
     name,
     namespace: existing?.namespace || namespace,
-    tags: existing?.tags || tags,
+    tags: effectiveTags,
     createdAt: existing?.createdAt || now,
     updatedAt: now,
     content,
@@ -116,18 +135,45 @@ function writeMemory(name, content, options = {}) {
 }
 
 function readMemory(name, options = {}) {
-  const filePath = getMemoryPath(name, options);
+  const safeName = toFileSafeName(name, 'memory name');
+  const fileName = `${safeName}.json`;
 
-  if (!fs.existsSync(filePath)) {
+  // If namespace explicitly specified, only look there
+  if (typeof options.namespace === 'string') {
+    const filePath = getMemoryPath(name, options);
+    if (fs.existsSync(filePath)) {
+      return readJsonFile(filePath);
+    }
     return null;
   }
 
-  return readJsonFile(filePath);
+  // First try root directory (no namespace / default namespace)
+  const rootPath = path.join(createStorage(options).memoryDirectory, fileName);
+  if (fs.existsSync(rootPath)) {
+    return readJsonFile(rootPath);
+  }
+
+  // Then search namespace subdirectories
+  const storage = createStorage(options);
+  if (fs.existsSync(storage.memoryDirectory)) {
+    const entries = fs.readdirSync(storage.memoryDirectory, { withFileTypes: true });
+    for (const entry of entries) {
+      if (entry.isDirectory()) {
+        const nsFilePath = path.join(storage.memoryDirectory, entry.name, fileName);
+        if (fs.existsSync(nsFilePath)) {
+          return readJsonFile(nsFilePath);
+        }
+      }
+    }
+  }
+
+  return null;
 }
 
 function listMemories(options = {}) {
   const storage = createStorage(options);
   const filterNamespace = typeof options.namespace === 'string' ? options.namespace.trim() : null;
+  const filterTag = typeof options.tag === 'string' ? options.tag.trim().toLowerCase() : null;
 
   if (!fs.existsSync(storage.memoryDirectory)) {
     return [];
@@ -143,19 +189,31 @@ function listMemories(options = {}) {
       if (entry.isDirectory() && !filterNamespace) {
         collectFromDir(fullPath);
       } else if (entry.isFile() && entry.name.endsWith('.json')) {
-        results.push(readJsonFile(fullPath));
+        try {
+          results.push(readJsonFile(fullPath));
+        } catch (_) {
+          // Skip corrupt or unreadable memory files silently
+        }
       }
     }
   }
 
-  if (filterNamespace) {
+  if (filterNamespace && filterNamespace !== 'default') {
     const nsDir = path.join(storage.memoryDirectory, toFileSafeName(filterNamespace, 'namespace'));
     collectFromDir(nsDir);
   } else {
     collectFromDir(storage.memoryDirectory);
   }
 
-  return results.sort((left, right) => String(right.updatedAt || '').localeCompare(String(left.updatedAt || '')));
+  let filtered = results;
+  if (filterNamespace) {
+    filtered = filtered.filter((mem) => (mem.namespace || 'default') === filterNamespace);
+  }
+  if (filterTag) {
+    filtered = filtered.filter((mem) => (mem.tags || []).some((t) => t.toLowerCase() === filterTag));
+  }
+
+  return filtered.sort((left, right) => String(right.updatedAt || '').localeCompare(String(left.updatedAt || '')));
 }
 
 function deleteMemory(name, options = {}) {
@@ -364,6 +422,7 @@ module.exports = {
   getSessionTranscriptPath,
   listMemories,
   listSessions,
+  normalizeTags,
   readMemory,
   readTranscript,
   readTranscriptMetadata,
