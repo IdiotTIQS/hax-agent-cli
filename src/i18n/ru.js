@@ -22,7 +22,7 @@ module.exports = {
   'shell.permissionMode': 'Режим разрешений: {mode} · Используйте /permissions для управления',
   'shell.sessionEnded': 'Сессия завершена.',
   'shell.sessionStats': 'Стоимость: ${cost} · Ходы: {turns}',
-  'shell.contextCleared': 'Контекст очищен.',
+  'shell.contextCleared': 'Контекст очищен ({count} сообщений).',
   'shell.cannotSend': 'Нельзя отправить сообщение, пока ассистент генерирует ответ.',
   'shell.ctrlCExit': 'Нажмите Ctrl+C еще раз для выхода.',
   'shell.vimMode': 'Режим Vim {state}.',

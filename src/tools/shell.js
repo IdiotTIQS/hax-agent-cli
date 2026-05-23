@@ -71,9 +71,10 @@ function resolveWindowsCommand(command) {
 
   return new Promise((resolve) => {
     const child = spawn('where', [command], { shell: true, windowsHide: true });
-    let stdout = '';
-    child.stdout.on('data', (d) => { stdout += d; });
+    const chunks = [];
+    child.stdout.on('data', (d) => { chunks.push(d); });
     child.on('close', (code) => {
+      const stdout = Buffer.concat(chunks).toString('utf8');
       const resolved = code === 0 ? selectWindowsExecutable(stdout, command) : command;
       _winCommandCache.set(command, resolved);
       resolve(resolved);
@@ -102,12 +103,28 @@ function selectWindowsExecutable(whereOutput, fallback) {
 }
 
 async function runCommand(options) {
-  const resolvedCommand = await resolveWindowsCommand(options.command);
-  const spawnSpec = createSpawnSpec(resolvedCommand, options.args);
+  let resolvedCommand = await resolveWindowsCommand(options.command);
+  let spawnArgs = options.args;
+
+  // On Windows, if the resolved command doesn't look like a real executable and
+  // no explicit args were provided, try splitting the command string into
+  // [executable, ...args] so "powershell -Command ..." works as expected.
+  if (process.platform === 'win32' && spawnArgs.length === 0 && resolvedCommand.includes(' ')) {
+    const parts = splitCommandLine(resolvedCommand);
+    const maybeExe = await resolveWindowsCommand(parts[0]);
+    if (maybeExe !== parts[0] || path.extname(maybeExe)) {
+      resolvedCommand = maybeExe;
+      spawnArgs = parts.slice(1);
+    }
+  }
+
+  const spawnSpec = createSpawnSpec(resolvedCommand, spawnArgs);
 
   return new Promise((resolve, reject) => {
-    let stdout = '';
-    let stderr = '';
+    const stdoutChunks = [];
+    let stdoutSize = 0;
+    const stderrChunks = [];
+    let stderrSize = 0;
     let timedOut = false;
     let outputExceeded = false;
     const child = spawn(spawnSpec.command, spawnSpec.args, {
@@ -124,19 +141,23 @@ async function runCommand(options) {
     }, options.timeoutMs);
 
     child.stdout.on('data', (chunk) => {
-      stdout = appendOutput(stdout, chunk, options.maxBuffer);
-      outputExceeded = outputExceeded || stdout.length >= options.maxBuffer;
-
-      if (outputExceeded) {
+      const chunkStr = chunk.toString('utf8');
+      stdoutSize += chunkStr.length;
+      if (stdoutSize <= options.maxBuffer) {
+        stdoutChunks.push(chunk);
+      } else {
+        outputExceeded = true;
         child.kill('SIGTERM');
       }
     });
 
     child.stderr.on('data', (chunk) => {
-      stderr = appendOutput(stderr, chunk, options.maxBuffer);
-      outputExceeded = outputExceeded || stderr.length >= options.maxBuffer;
-
-      if (outputExceeded) {
+      const chunkStr = chunk.toString('utf8');
+      stderrSize += chunkStr.length;
+      if (stderrSize <= options.maxBuffer) {
+        stderrChunks.push(chunk);
+      } else {
+        outputExceeded = true;
         child.kill('SIGTERM');
       }
     });
@@ -152,13 +173,13 @@ async function runCommand(options) {
       clearTimeout(timeout);
 
       resolve({
-        command: options.command,
-        args: options.args,
+        command: resolvedCommand,
+        args: spawnArgs,
         cwd: toWorkspacePath(options.root, options.cwd),
         exitCode,
         signal,
-        stdout,
-        stderr,
+        stdout: Buffer.concat(stdoutChunks).toString('utf8'),
+        stderr: Buffer.concat(stderrChunks).toString('utf8'),
         timedOut,
         outputExceeded,
       });
@@ -202,9 +223,39 @@ function quoteCmdArg(value) {
   return `"${escaped}"`;
 }
 
-function appendOutput(current, chunk, maxBuffer) {
-  const next = current + chunk.toString('utf8');
-  return next.length > maxBuffer ? next.slice(0, maxBuffer) : next;
+function splitCommandLine(commandLine) {
+  const parts = [];
+  let current = '';
+  let inSingle = false;
+  let inDouble = false;
+
+  for (let i = 0; i < commandLine.length; i++) {
+    const ch = commandLine[i];
+
+    if (inSingle) {
+      if (ch === "'") { inSingle = false; continue; }
+      current += ch;
+      continue;
+    }
+
+    if (inDouble) {
+      if (ch === '"') { inDouble = false; continue; }
+      if (ch === '\\' && commandLine[i + 1] === '"') { current += '"'; i++; continue; }
+      current += ch;
+      continue;
+    }
+
+    if (ch === "'") { inSingle = true; continue; }
+    if (ch === '"') { inDouble = true; continue; }
+    if (ch === ' ' || ch === '\t') {
+      if (current) { parts.push(current); current = ''; }
+      continue;
+    }
+    current += ch;
+  }
+
+  if (current) parts.push(current);
+  return parts;
 }
 
-module.exports = { createShellTool, normalizeShellPolicy, selectWindowsExecutable, createSpawnSpec };
+module.exports = { createShellTool, normalizeShellPolicy, selectWindowsExecutable, createSpawnSpec, splitCommandLine };

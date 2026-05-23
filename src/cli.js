@@ -3,13 +3,51 @@
 const readline = require('node:readline');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
+const { EventBus } = require('./events/bus');
 const { createProvider } = require('./providers');
 const { loadSettings } = require('./config');
 const { loadRecentTranscript, handleChatMessage, renderBanner, handleSlashCommand } = require('./commands');
 const { autoCompleteSlashCommand } = require('./commands/autocomplete');
 const { suggestCommand } = require('./command-suggestions');
 const { createLocalToolRegistry } = require('./tools');
+const { UndoStack } = require('./undo-stack');
+const { PluginRegistry } = require('./plugins');
+const { runBatchMode } = require('./batch');
 const { registerAgentTeamTools } = require('./teams/tools');
+const { DynamicCommandRegistry } = require('./infrastructure/command-registry');
+let createInputPipeline = null;
+try { ({ createInputPipeline } = require('./infrastructure/safety-pipeline')); } catch (_) { /* optional */ }
+let createPluginManager = null;
+try { ({ createPluginManager } = require('./infrastructure/plugin-manager')); } catch (_) { /* optional */ }
+let _setupBackgroundTasks = null;
+let _teardownBackgroundTasks = null;
+try {
+  const bg = require('./infrastructure/scheduler-setup');
+  _setupBackgroundTasks = bg.setupBackgroundTasks;
+  _teardownBackgroundTasks = bg.teardownBackgroundTasks;
+} catch (_) { /* optional */ }
+let _shutdownManager = null;
+let _SHUTDOWN_PRIORITY = null;
+try {
+  const sd = require('./shutdown');
+  _shutdownManager = sd.getShutdownManager;
+  _SHUTDOWN_PRIORITY = sd.PRIORITY;
+} catch (_) { /* optional */ }
+let setupKnowledgeManagement = null;
+try { ({ setupKnowledgeManagement } = require('./infrastructure/knowledge-setup')); } catch (_) { /* optional */ }
+
+let activePreset = null;
+
+function resolveSettings() {
+  const settings = loadSettings();
+  if (activePreset) {
+    try {
+      const { applyPreset } = require('./config-presets');
+      return applyPreset(settings, activePreset);
+    } catch (_) { /* optional */ }
+  }
+  return settings;
+}
 const { loadAllSkills, createSkillifySkill, recordSkillUsage } = require('./skills');
 const { PermissionManager, PermissionLevel, PERMISSION_LABELS } = require('./permissions');
 const { Session, InputHistory } = require('./session');
@@ -22,10 +60,52 @@ const { formatPastedInputBadge, formatPastedInputSummary, shouldRunPasteAsComman
 
 const VERSION = require('../package.json').version;
 
-const KNOWN_COMMANDS = ['chat', 'init', 'models', 'agents', 'team', 'resume', 'sessions', 'config', 'doctor', 'help', '--help', '-h', '--version', '-v', '-V', '--no-color', '--debug'];
+const KNOWN_COMMANDS = ['chat', 'init', 'models', 'agents', 'team', 'resume', 'sessions', 'config', 'doctor', 'help', '--help', '-h', '--version', '-v', '-V', '--no-color', '--debug', '--preset', '--batch', '--batch-file', '--batch-output', '--model'];
 const TOP_LEVEL_COMMAND_SUGGESTIONS = KNOWN_COMMANDS
   .filter((command) => !command.startsWith('-'))
   .map((command) => ({ match: command, suggest: command }));
+
+function createCliTranslator() {
+  try {
+    const { loadSettings } = require('./config');
+    const settings = loadSettings();
+    return createTranslator(settings?.ui?.locale);
+  } catch (_) {
+    return createTranslator('en');
+  }
+}
+
+async function runBatch(inputFile, outputFile, modelOverride) {
+  const { loadSettings: ls } = require('./config');
+  const settings = ls();
+  if (modelOverride) settings.agent.model = modelOverride;
+
+  const provider = createProvider(settings.agent, process.env);
+  const toolRegistry = createLocalToolRegistry({
+    root: process.cwd(),
+    shellPolicy: settings.tools?.shell,
+    undoStack: new UndoStack(),
+  });
+  registerAgentTeamTools(toolRegistry, { settings, projectRoot: process.cwd() });
+
+  const permissionManager = new PermissionManager({ mode: 'yolo' });
+  const session = new Session({
+    provider,
+    settings,
+    toolRegistry,
+    permissionManager,
+  });
+  session.eventBus = new EventBus();
+
+  const exitCode = await runBatchMode({
+    session,
+    settings,
+    inputFile,
+    outputFile,
+    raw: true,
+  });
+  return exitCode;
+}
 
 function main(argv = process.argv) {
   const args = argv.slice(2);
@@ -44,6 +124,38 @@ function main(argv = process.argv) {
     args.splice(args.indexOf('--debug'), 1);
   }
 
+  // Handle --preset early
+  const presetIdx = args.indexOf('--preset');
+  if (presetIdx >= 0 && presetIdx + 1 < args.length) {
+    activePreset = args[presetIdx + 1];
+    args.splice(presetIdx, 2);
+  }
+
+  if (args.includes('--list-presets')) {
+    try {
+      const { listPresets } = require('./config-presets');
+      console.log('Available presets:');
+      for (const p of listPresets()) {
+        console.log(`  ${p.name.padEnd(14)} ${p.description}`);
+      }
+    } catch (_) {
+      console.log('No presets available.');
+    }
+    process.exit(0);
+  }
+
+  // Batch mode: non-interactive processing
+  if (args.includes('--batch') || args.includes('--batch-file')) {
+    const batchInputIdx = args.indexOf('--batch-file');
+    const batchInputFile = batchInputIdx >= 0 ? args[batchInputIdx + 1] : null;
+    const batchOutputIdx = args.indexOf('--batch-output');
+    const batchOutputFile = batchOutputIdx >= 0 ? args[batchOutputIdx + 1] : null;
+    const modelIdx = args.indexOf('--model');
+    const batchModel = modelIdx >= 0 ? args[modelIdx + 1] : null;
+    runBatch(batchInputFile, batchOutputFile, batchModel).then((exitCode) => process.exit(exitCode));
+    return;
+  }
+
   switch (primary) {
     case '--version':
     case '-v':
@@ -53,23 +165,30 @@ function main(argv = process.argv) {
       break;
     case 'help':
     case '--help':
-    case '-h':
-      console.log('Hax Agent CLI v' + VERSION);
-      console.log('  hax-agent [chat]               Start interactive shell (default)');
-      console.log('  hax-agent init                 Run first-time setup wizard');
-      console.log('  hax-agent models               List available models');
-      console.log('  hax-agent agents               List agent definitions');
-      console.log('  hax-agent team auth-refactor   Print an auth-refactor team plan');
-      console.log('  hax-agent doctor               Run diagnostics');
-      console.log('  hax-agent help                 Show this help');
-      console.log('  hax-agent sessions             List previous sessions');
-      console.log('  hax-agent resume [session-id]  Resume a previous session');
-      console.log('  hax-agent config [edit]        Show or edit configuration');
-      console.log('  hax-agent config --json        Output configuration as JSON');
-      console.log('  hax-agent -v, --version        Print version number');
-      console.log('  hax-agent --no-color           Disable ANSI color output');
-      console.log('  hax-agent --debug              Enable verbose debug logging');
+    case '-h': {
+      const t = createCliTranslator();
+      console.log(t('cli.help.title', { version: VERSION }));
+      console.log(`  hax-agent [chat]               ${t('cli.help.chat')}`);
+      console.log(`  hax-agent init                 ${t('cli.help.init')}`);
+      console.log(`  hax-agent models               ${t('cli.help.models')}`);
+      console.log(`  hax-agent agents               ${t('cli.help.agents')}`);
+      console.log(`  hax-agent team auth-refactor   ${t('cli.help.team')}`);
+      console.log(`  hax-agent doctor               ${t('cli.help.doctor')}`);
+      console.log(`  hax-agent help                 ${t('cli.help.help')}`);
+      console.log(`  hax-agent sessions             ${t('cli.help.sessions')}`);
+      console.log(`  hax-agent resume [session-id]  ${t('cli.help.resume')}`);
+      console.log(`  hax-agent config [edit]        ${t('cli.help.config')}`);
+      console.log(`  hax-agent config --json        ${t('cli.help.configJson')}`);
+      console.log(`  hax-agent --batch               ${t('cli.help.batch')}`);
+      console.log(`  hax-agent --batch-file <file>   ${t('cli.help.batchFile')}`);
+      console.log(`  hax-agent --batch-output <file> ${t('cli.help.batchOutput')}`);
+      console.log(`  hax-agent --model <id>          ${t('cli.help.batchModel')}`);
+      console.log(`  hax-agent --preset <name>       ${t('cli.help.preset', { presets: 'coding|autonomous|review|chat|ci|learn' })}`);
+      console.log(`  hax-agent -v, --version        ${t('cli.help.version')}`);
+      console.log(`  hax-agent --no-color           ${t('cli.help.noColor')}`);
+      console.log(`  hax-agent --debug              ${t('cli.help.debug')}`);
       break;
+    }
     case 'init': runInitCommand(args.slice(1)); break;
     case 'models': runModelsCommand(args.slice(1)); break;
     case 'agents': runAgentsCommand(args.slice(1)); break;
@@ -81,10 +200,11 @@ function main(argv = process.argv) {
     default:
       if (primary && !KNOWN_COMMANDS.includes(primary)) {
         const suggestion = suggestCommand(primary, TOP_LEVEL_COMMAND_SUGGESTIONS);
-        console.error(`Unknown command: ${primary}`);
-        if (suggestion) console.error(`Did you mean: hax-agent ${suggestion}?`);
-        console.log('Usage: hax-agent <command>');
-        console.log('  hax-agent help   Show available commands');
+        const t = createCliTranslator();
+        console.error(t('cli.errors.unknownCommand', { command: primary }));
+        if (suggestion) console.error(t('cli.errors.didYouMean', { command: suggestion }));
+        console.log(t('cli.errors.usage'));
+        console.log(t('cli.errors.showHelp'));
         process.exit(1);
       }
       runShell(args);
@@ -106,7 +226,7 @@ function runInitCommand(args) {
 }
 
 function runModelsCommand(args) {
-  const settings = loadSettings();
+  const settings = resolveSettings();
   const provider = createProvider(settings.agent, process.env);
   const { printModels } = require('./commands');
 
@@ -115,7 +235,7 @@ function runModelsCommand(args) {
 }
 
 function runAgentsCommand() {
-  const settings = loadSettings();
+  const settings = resolveSettings();
   const { loadAgentDefinitions } = require('./teams/agents');
   const { formatAgentList } = require('./formatters/agent-teams');
 
@@ -145,7 +265,7 @@ function runTeamCommand(args) {
     return;
   }
 
-  const settings = loadSettings();
+  const settings = resolveSettings();
   const { createCliTeamRuntime, executeTeamCommand } = require('./commands');
   const runtime = createCliTeamRuntime(settings);
 
@@ -168,9 +288,12 @@ function runConfigCommand(args) {
   if (args[0] === 'edit') {
     // Open config file in default editor
     const editor = process.env.EDITOR || process.env.VISUAL || (process.platform === 'win32' ? 'notepad' : 'vi');
-    const child = spawn(editor, configPath ? [configPath] : [], {
+    const editorParts = editor.split(/\s+/);
+    const editorCmd = editorParts[0];
+    const editorArgs = [...editorParts.slice(1), ...(configPath ? [configPath] : [])];
+    const child = spawn(editorCmd, editorArgs, {
       stdio: 'inherit',
-      shell: true,
+      shell: false,
     });
     child.on('exit', (code) => {
       if (code !== 0) console.error(`Editor exited with code ${code}`);
@@ -203,7 +326,7 @@ function runConfigCommand(args) {
 }
 
 function runResumeCommand(args) {
-  const settings = loadSettings();
+  const settings = resolveSettings();
   const { listSessions } = require('./memory');
   const sessions = listSessions(settings);
 
@@ -227,10 +350,28 @@ function runResumeCommand(args) {
     .slice(-resolveTranscriptMessageLimit(settings))
     .map((e) => ({ role: e.role, content: e.content || '' }));
 
+  let pluginRegistry;
+  let pluginManager = null;
+  if (createPluginManager) {
+    pluginManager = createPluginManager({
+      pluginsDir: path.join(require('node:os').homedir(), '.haxagent', 'plugins'),
+      installDir: path.join(process.cwd(), '.hax-agent', 'plugins'),
+      autoValidate: true,
+    });
+    pluginRegistry = pluginManager.registry;
+  } else {
+    pluginRegistry = new PluginRegistry();
+    pluginRegistry.loadPluginsFromDirectory(
+      path.join(require('node:os').homedir(), '.haxagent', 'plugins'),
+    );
+  }
+
   const provider = createProvider(settings.agent, process.env);
   const toolRegistry = createLocalToolRegistry({
     root: process.cwd(),
     shellPolicy: settings.tools?.shell,
+    undoStack: new UndoStack(),
+    pluginRegistry,
   });
   registerAgentTeamTools(toolRegistry, { settings, projectRoot: process.cwd() });
 
@@ -240,9 +381,15 @@ function runResumeCommand(args) {
     settings,
     toolRegistry,
     permissionManager,
+    pluginRegistry,
   });
   session.messages = messages;
   session.id = targetSession.id;
+
+  // Wire plugin manager into the session
+  if (pluginManager) {
+    session.pluginManager = pluginManager;
+  }
 
   runShell([], session);
 }
@@ -274,7 +421,7 @@ function createReadlineOutput(output = process.stdout) {
 }
 
 function runSessionsCommand(args) {
-  const settings = loadSettings();
+  const settings = resolveSettings();
 
   if (args[0] === 'clear') {
     const { clearSessions } = require('./memory');
@@ -303,7 +450,7 @@ function runSessionsCommand(args) {
 }
 
 async function runDoctorCommand() {
-  const settings = loadSettings();
+  const settings = resolveSettings();
   const provider = createProvider(settings.agent, process.env);
   const locale = require('./i18n').normalizeLocale(settings.ui?.locale);
 
@@ -358,10 +505,34 @@ async function runShell(args, explicitSession) {
       persistPath: path.join(process.cwd(), '.hax-agent', 'permissions.json'),
     });
 
+  // Create plugin registry (raw or enhanced via plugin-manager)
+  let pluginRegistry;
+  let pluginManager = null;
+  if (createPluginManager) {
+    pluginManager = createPluginManager({
+      pluginsDir: path.join(require('node:os').homedir(), '.haxagent', 'plugins'),
+      installDir: path.join(process.cwd(), '.hax-agent', 'plugins'),
+      autoValidate: true,
+    });
+    // Also scan project-level plugins
+    pluginManager.scanDirectory(path.join(process.cwd(), '.hax-agent', 'plugins'));
+    pluginRegistry = pluginManager.registry;
+  } else {
+    pluginRegistry = new PluginRegistry();
+    pluginRegistry.loadPluginsFromDirectory(
+      path.join(require('node:os').homedir(), '.haxagent', 'plugins'),
+    );
+    pluginRegistry.loadPluginsFromDirectory(
+      path.join(process.cwd(), '.hax-agent', 'plugins'),
+    );
+  }
+
   const toolRegistry = createLocalToolRegistry({
     root: process.cwd(),
     shellPolicy: settings.tools?.shell,
     permissionManager,
+    undoStack: new UndoStack(),
+    pluginRegistry,
   });
   registerAgentTeamTools(toolRegistry, { settings, projectRoot: process.cwd() });
 
@@ -370,10 +541,117 @@ async function runShell(args, explicitSession) {
     settings,
     toolRegistry,
     permissionManager,
+    pluginRegistry,
   });
+
+  // Initialize dynamic command registry and attach to session
+  if (!session.commandRegistry) {
+    session.commandRegistry = new DynamicCommandRegistry();
+  }
+
+  // Wire plugin manager into the session for /plugin commands
+  if (pluginManager) {
+    session.pluginManager = pluginManager;
+  }
+
+  // Wire safety pipeline into the session
+  if (createInputPipeline) {
+    try {
+      session.inputPipeline = createInputPipeline({
+        blockOnSeverity: settings.safety?.blockOnSeverity || 'CRITICAL',
+        warnOnSeverity: settings.safety?.warnOnSeverity || 'HIGH',
+        enableSafetyScan: settings.safety?.enableScanner !== false,
+        maxInputLength: settings.safety?.maxInputLength || null,
+      });
+    } catch (_) { /* safety pipeline optional */ }
+  }
+
+  // Fire onSessionStart plugin hooks
+  pluginRegistry.runHook('onSessionStart', { session }).catch(() => {});
   permissionManager.locale = settings.ui?.locale;
   if (session.permissionManager) {
     session.permissionManager.locale = settings.ui?.locale;
+  }
+
+  // Wire EventBus into session — foundation for all event-driven modules
+  if (!session.eventBus) {
+    session.eventBus = new EventBus();
+  }
+  session.eventBus.emit('session:start', {
+    sessionId: session.id,
+    timestamp: new Date().toISOString(),
+  });
+
+  // ---- analytics: stats, anomaly detection, predictions ----
+  try {
+    const { setupAnalytics } = require('./infrastructure/analytics-setup');
+    setupAnalytics(session, {
+      anomalyAlerts: settings.analytics?.anomalyAlerts !== false,
+      generateReportOnEnd: settings.analytics?.generateReportOnEnd === true,
+    });
+  } catch (_) { /* analytics optional */ }
+
+  // ---- background task scheduler ----
+  if (_setupBackgroundTasks) {
+    try {
+      const tasks = _setupBackgroundTasks(session);
+      session._bgTasks = tasks;
+    } catch (_) { /* optional */ }
+  }
+
+  // ---- knowledge accumulation & advanced memory ----
+  if (setupKnowledgeManagement) {
+    try {
+      setupKnowledgeManagement(session);
+    } catch (_) { /* optional */ }
+  }
+
+  // ---- graceful shutdown hooks ----
+  if (_shutdownManager && _SHUTDOWN_PRIORITY) {
+    try {
+      const sm = _shutdownManager({ timeoutMs: 5_000 });
+
+      // Hook: tear down background workers (lowest = runs first)
+      sm.register('bg-teardown', _SHUTDOWN_PRIORITY.SAVE_STATE, async ({ reason }) => {
+        debug('shutdown', `bg-teardown reason=${reason}`);
+        if (session._bgTasks && _teardownBackgroundTasks) {
+          await _teardownBackgroundTasks(session);
+          session._bgTasks = null;
+        }
+      });
+
+      // Hook: flush logs, save state
+      sm.register('flush-logs', _SHUTDOWN_PRIORITY.CLOSE_STREAMS, () => {
+        debug('shutdown', 'flush-logs');
+        // Placeholder — real log flusher would go here
+      });
+
+      // Hook: release locks / close connections
+      sm.register('release-locks', _SHUTDOWN_PRIORITY.RELEASE_LOCKS, () => {
+        debug('shutdown', 'release-locks');
+        // Placeholder — file lock / DB connection teardown
+      });
+
+      // Hook: fire session:end on EventBus
+      sm.register('session-end', _SHUTDOWN_PRIORITY.NOTIFY, () => {
+        if (session.eventBus) {
+          try {
+            session.eventBus.emit('session:end', {
+              sessionId: session.id,
+              timestamp: new Date().toISOString(),
+            });
+          } catch (_) { /* best-effort */ }
+        }
+        if (session.pluginRegistry) {
+          session.pluginRegistry.runHook('onSessionEnd', { session }).catch(() => {});
+        }
+      });
+
+      // Hook: final debug ping
+      sm.register('shutdown-log', _SHUTDOWN_PRIORITY.LOG, () => {
+        debug('shutdown', 'graceful shutdown complete');
+      });
+    } catch (_) { /* optional */ }
   }
 
   const history = new InputHistory();
@@ -874,6 +1152,30 @@ async function runShell(args, explicitSession) {
       screen.write(`\n${styled(THEME.success, t('shell.sessionEnded'))} ${styled(THEME.dim, t('shell.sessionStats', { cost: cost.toFixed(4), turns: session.costTracker.turnCount }))}\n`);
     });
     screen.deactivate();
+
+    // Delegate to ShutdownManager for coordinated teardown.
+    // Hooks run in priority order: bg-teardown → flush-logs → release-locks → session-end → shutdown-log.
+    // If ShutdownManager is unavailable, perform a direct process.exit.
+    if (_shutdownManager) {
+      try {
+        const sm = _shutdownManager();
+        sm.shutdown({ reason: 'user', exitCode: 0 });
+        return; // shutdown() calls process.exit internally
+      } catch (_) { /* fall through to direct exit */ }
+    }
+
+    // Fallback: direct exit when ShutdownManager is not available
+    if (session.eventBus) {
+      try {
+        session.eventBus.emit('session:end', {
+          sessionId: session.id,
+          timestamp: new Date().toISOString(),
+        });
+      } catch (_) {}
+    }
+    if (session.pluginRegistry) {
+      session.pluginRegistry.runHook('onSessionEnd', { session }).catch(() => {});
+    }
     process.exit(0);
   }
 
@@ -982,9 +1284,20 @@ async function runShell(args, explicitSession) {
       return;
     }
 
-    stagePastedInput(input);
+    // Auto-process pasted content immediately — no manual confirmation needed.
+    // Display the badge as an informational echo, then send the content.
+    const content = String(input || '');
+    const badge = formatPastedInputBadge(content);
+    withInputAreaHidden(() => {
+      screen.clearLine();
+      screen.write(`\n${badge}\n`);
+    });
+    lineQueue = lineQueue.then(() => processLine(content, { pasted: true }));
+    prompt();
   }
 
+  // Keep stagePastedInput for programmatic use, but the interactive paste path
+  // now auto-processes (above) instead of staging.
   function stagePastedInput(input) {
     const content = String(input || '');
     const summary = formatPastedInputSummary(content);
@@ -1116,6 +1429,32 @@ async function runShell(args, explicitSession) {
       return;
     }
 
+    // --- Safety pipeline: sanitize, detect, warn, block ---
+    let cleanedText = trimmed;
+    if (session.inputPipeline) {
+      try {
+        const result = session.inputPipeline.processInput(trimmed);
+        if (result.blocked) {
+          withInputAreaHidden(() => {
+            screen.write(styled(THEME.error, `\n  Input blocked:`));
+            if (result.warnings.length > 0) {
+              screen.write(' ' + result.warnings.join('; '));
+            }
+            screen.write('\n\n');
+          });
+          prompt();
+          return;
+        }
+        if (result.warnings.length > 0) {
+          withInputAreaHidden(() => {
+            screen.write(styled(THEME.warning, `  Warning: ${result.warnings.join('; ')}`));
+            screen.write('\n');
+          });
+        }
+        cleanedText = result.cleaned || trimmed;
+      } catch (_) { /* safety pipeline is best-effort */ }
+    }
+
     const time = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
     // Highlight slash commands in user echo: /cmd args → colored /cmd + dim args
     let echoLine = options.pasted ? formatPastedInputBadge(trimmed) : trimmed;
@@ -1133,7 +1472,7 @@ async function runShell(args, explicitSession) {
       screen.write(`${styled(THEME.userIndicator, `You ${time}`)}  ${echoLine}\n`);
     });
 
-    await handleChatMessage(trimmed, { screen, session, markdown });
+    await handleChatMessage(cleanedText, { screen, session, markdown });
     prompt();
   }
 

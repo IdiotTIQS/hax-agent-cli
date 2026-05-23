@@ -4,7 +4,7 @@ const { ToolExecutionError } = require('./error');
 const {
   DEFAULT_FILE_OP_TIMEOUT_MS,
   requireString,
-  resolveWithinRoot,
+  resolveWithinRootSafe,
   toWorkspacePath,
   statPath,
   withTimeout,
@@ -26,11 +26,16 @@ function createDeleteFileTool() {
       const filePath = requireString(args.path, 'path');
       const permanent = args.permanent === true;
 
-      const resolvedPath = resolveWithinRoot(context.root, filePath);
+      const resolvedPath = await resolveWithinRootSafe(context.root, filePath);
       const stats = await withTimeout(statPath(resolvedPath), DEFAULT_FILE_OP_TIMEOUT_MS, `stat ${filePath}`);
 
       if (!stats.isFile()) {
         throw new ToolExecutionError('NOT_A_FILE', `Path is not a file: ${filePath}`);
+      }
+
+      let originalContent = '';
+      if (context.undoStack) {
+        originalContent = await withTimeout(fs.readFile(resolvedPath, { encoding: 'utf8' }).catch(() => ''), DEFAULT_FILE_OP_TIMEOUT_MS, `read ${filePath} for undo`);
       }
 
       if (permanent) {
@@ -42,6 +47,16 @@ function createDeleteFileTool() {
         const timestamp = Date.now();
         const trashPath = path.join(trashDir, `${timestamp}-${baseName}`);
         await withTimeout(fs.rename(resolvedPath, trashPath), DEFAULT_FILE_OP_TIMEOUT_MS, `move ${filePath} to trash`);
+      }
+
+      if (context.undoStack && originalContent !== null) {
+        context.undoStack.push({
+          toolName: 'file.delete',
+          filePath: resolvedPath,
+          originalContent,
+          newContent: '',
+          description: `${permanent ? 'Delete' : 'Trash'} ${path.basename(filePath)}`,
+        });
       }
 
       return {

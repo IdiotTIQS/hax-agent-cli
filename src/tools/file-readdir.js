@@ -5,7 +5,7 @@ const {
   IGNORED_DIRECTORY_NAMES,
   requireString,
   readPositiveInteger,
-  resolveWithinRoot,
+  resolveWithinRootSafe,
   toWorkspacePath,
   statPath,
 } = require('./utils');
@@ -32,7 +32,7 @@ function createReadDirectoryTool() {
       const maxEntries = readPositiveInteger(args.maxEntries, DEFAULT_MAX_ENTRIES, 'maxEntries');
       const includeHidden = args.includeHidden === true;
 
-      const resolvedPath = resolveWithinRoot(context.root, dirPath);
+      const resolvedPath = await resolveWithinRootSafe(context.root, dirPath);
       const stat = await statPath(resolvedPath);
 
       if (!stat.isDirectory()) {

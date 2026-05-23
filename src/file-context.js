@@ -49,20 +49,39 @@ async function buildFileContext(options = {}) {
 
   const limits = readLimits(config);
   const queryTerms = tokenize(query);
+  const queryLower = query.toLowerCase();
 
   if (queryTerms.length === 0) {
     return createEmptyResult();
   }
 
   const indexedFiles = await collectProjectFiles(projectRoot, limits);
-  const ranked = [];
 
-  for (const file of indexedFiles) {
-    const scored = await scoreFile(file, projectRoot, query, queryTerms, limits);
-    if (scored.score > 0) {
-      ranked.push(scored);
+  // Score files concurrently with an I/O-friendly concurrency cap.
+  const FILE_SCORE_CONCURRENCY = 16;
+  const ranked = [];
+  const pending = indexedFiles.slice();
+  let active = 0;
+
+  await new Promise((resolve) => {
+    function next() {
+      while (active < FILE_SCORE_CONCURRENCY && pending.length > 0) {
+        const file = pending.shift();
+        active += 1;
+        scoreFile(file, projectRoot, queryLower, queryTerms, limits).then((scored) => {
+          if (scored.score > 0) ranked.push(scored);
+          active -= 1;
+          if (active === 0 && pending.length === 0) resolve();
+          else next();
+        }, () => {
+          active -= 1;
+          if (active === 0 && pending.length === 0) resolve();
+          else next();
+        });
+      }
     }
-  }
+    next();
+  });
 
   ranked.sort((a, b) => b.score - a.score || a.relativePath.localeCompare(b.relativePath));
 
@@ -162,7 +181,7 @@ async function collectProjectFiles(projectRoot, limits) {
   return files;
 }
 
-async function scoreFile(file, projectRoot, query, queryTerms, limits) {
+async function scoreFile(file, projectRoot, queryLower, queryTerms, limits) {
   let content;
   try {
     content = await fs.readFile(file.absolutePath, "utf8");
@@ -177,7 +196,7 @@ async function scoreFile(file, projectRoot, query, queryTerms, limits) {
   const relativeLower = normalizeSlashes(path.relative(projectRoot, file.absolutePath)).toLowerCase();
   const fileNameLower = path.basename(relativeLower).toLowerCase();
   const contentLower = content.toLowerCase();
-  let score = scorePath(relativeLower, fileNameLower, query, queryTerms);
+  let score = scorePath(relativeLower, fileNameLower, queryLower, queryTerms);
 
   for (const term of queryTerms) {
     if (term.length < 2) continue;
@@ -203,8 +222,7 @@ async function scoreFile(file, projectRoot, query, queryTerms, limits) {
   return { ...file, score, content };
 }
 
-function scorePath(relativeLower, fileNameLower, query, queryTerms) {
-  const queryLower = query.toLowerCase();
+function scorePath(relativeLower, fileNameLower, queryLower, queryTerms) {
   let score = 0;
 
   for (const term of queryTerms) {

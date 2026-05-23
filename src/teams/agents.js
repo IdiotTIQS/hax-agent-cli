@@ -362,5 +362,6 @@ module.exports = {
   loadAgentDefinitions,
   normalizeAgentDefinition,
   parseAgentFile,
+  normalizeName,
   parseFrontmatter,
 };

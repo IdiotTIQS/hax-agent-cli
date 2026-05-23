@@ -1,3 +1,7 @@
+'use strict';
+
+const { requireEnum, requireString } = require('./utils');
+
 const AgentStatus = Object.freeze({
   idle: 'idle',
   running: 'running',
@@ -52,16 +56,5 @@ function createAgentDescriptor(input) {
   return createAgent(input).snapshot();
 }
 
-function requireString(value, name) {
-  if (typeof value !== 'string' || value.trim() === '') {
-    throw new TypeError(`${name} must be a non-empty string`);
-  }
-}
-
-function requireEnum(value, options, name) {
-  if (!Object.values(options).includes(value)) {
-    throw new TypeError(`${name} must be one of: ${Object.values(options).join(', ')}`);
-  }
-}
 
 module.exports = { AgentDefinition, AgentStatus, createAgent, createAgentDescriptor };

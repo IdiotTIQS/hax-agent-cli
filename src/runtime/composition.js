@@ -1,6 +1,9 @@
+'use strict';
+
 const { createCommandRegistry } = require('./command-registry');
 const { createSession } = require('./sessions');
 const { createTaskList } = require('./tasks');
+const { requireString } = require('./utils');
 
 class RuntimeComposition {
   constructor(input = {}) {
@@ -46,10 +49,5 @@ function createRuntimeComposition(input) {
   return new RuntimeComposition(input);
 }
 
-function requireString(value, name) {
-  if (typeof value !== 'string' || value.trim() === '') {
-    throw new TypeError(`${name} must be a non-empty string`);
-  }
-}
 
 module.exports = { RuntimeComposition, createRuntimeComposition };

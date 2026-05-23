@@ -1,3 +1,5 @@
+'use strict';
+
 const ANSI = {
   reset: '\x1B[0m',
   bold: '\x1B[1m',
@@ -116,6 +118,31 @@ const CLAUDE_BANNER = [
   `${THEME.accent}   ╰${'─'.repeat(40)}╯${ANSI.reset}`,
   '',
 ];
+
+// Hoisted regexes for _renderInline -- compiled once, reused on every text token.
+const RE_BOLD = /^\*\*(.+?)\*\*/;
+const RE_ITALIC = /^\*(.+?)\*/;
+const RE_CODE = /^`([^`]+)`/;
+const RE_STRIKETHROUGH = /^~~(.+?)~~/;
+const RE_LINK = /^\[([^\]]+)\]\(([^)]+)\)/;
+
+/**
+ * Fast linear scan for the next markdown special character.
+ * Uses indexOf chains so the JIT can inline each call.
+ */
+function findNextSpecial(text, start, end) {
+  let idx = -1;
+  let tmp;
+  tmp = text.indexOf('*', start);
+  if (tmp !== -1 && tmp < end) idx = idx === -1 ? tmp : tmp < idx ? tmp : idx;
+  tmp = text.indexOf('`', start);
+  if (tmp !== -1 && tmp < end) idx = idx === -1 ? tmp : tmp < idx ? tmp : idx;
+  tmp = text.indexOf('[', start);
+  if (tmp !== -1 && tmp < end) idx = idx === -1 ? tmp : tmp < idx ? tmp : idx;
+  tmp = text.indexOf('~', start);
+  if (tmp !== -1 && tmp < end) idx = idx === -1 ? tmp : tmp < idx ? tmp : idx;
+  return idx;
+}
 
 class TerminalScreen {
   constructor(stream = process.stdout) {
@@ -396,62 +423,81 @@ class MarkdownRenderer {
     if (!text) return '';
     let result = '';
     let cursor = 0;
+    const len = text.length;
 
-    while (cursor < text.length) {
-      const remaining = text.slice(cursor);
+    while (cursor < len) {
+      const ch = text[cursor];
 
-      const boldMatch = remaining.match(/^\*\*(.+?)\*\*/);
-      if (boldMatch && boldMatch.index === 0 && boldMatch[1].length > 0) {
-        result += `${THEME.bold}${boldMatch[1]}${ANSI.reset}`;
-        cursor += boldMatch[0].length;
-        continue;
-      }
+      if (ch === '*') {
+        if (text[cursor + 1] === '*' && text[cursor + 2] === '~') {
+          result += ch;
+          cursor += 1;
+          continue;
+        }
 
-      const italicMatch = remaining.match(/^\*(.+?)\*/);
-      if (italicMatch && italicMatch.index === 0 && italicMatch[1].length > 0 && !remaining.startsWith('**')) {
-        result += `${THEME.italic}${italicMatch[1]}${ANSI.reset}`;
-        cursor += italicMatch[0].length;
-        continue;
-      }
+        const boldMatch = RE_BOLD.exec(text.slice(cursor));
+        if (boldMatch && boldMatch.index === 0 && boldMatch[1].length > 0) {
+          result += `${THEME.bold}${boldMatch[1]}${ANSI.reset}`;
+          cursor += boldMatch[0].length;
+          continue;
+        }
 
-      const codeMatch = remaining.match(/^`([^`]+)`/);
-      if (codeMatch && codeMatch.index === 0) {
-        result += `${THEME.codeText}${codeMatch[1]}${ANSI.reset}`;
-        cursor += codeMatch[0].length;
-        continue;
-      }
+        const italicMatch = RE_ITALIC.exec(text.slice(cursor));
+        if (italicMatch && italicMatch.index === 0 && italicMatch[1].length > 0) {
+          result += `${THEME.italic}${italicMatch[1]}${ANSI.reset}`;
+          cursor += italicMatch[0].length;
+          continue;
+        }
 
-      const strikethroughMatch = remaining.match(/^~~(.+?)~~/);
-      if (strikethroughMatch && strikethroughMatch.index === 0) {
-        result += `${ANSI.strikethrough}${strikethroughMatch[1]}${ANSI.reset}`;
-        cursor += strikethroughMatch[0].length;
-        continue;
-      }
-
-      const linkMatch = remaining.match(/^\[([^\]]+)\]\(([^)]+)\)/);
-      if (linkMatch && linkMatch.index === 0) {
-        result += `${THEME.link}${linkMatch[1]}${ANSI.reset}`;
-        cursor += linkMatch[0].length;
-        continue;
-      }
-
-      if (text[cursor] === '*' || text[cursor] === '`' || text[cursor] === '[' || text[cursor] === '~') {
-        result += text[cursor];
+        result += ch;
         cursor += 1;
         continue;
       }
 
-      const nextSpecial = text.slice(cursor).search(/[*`\[~]/);
-      if (nextSpecial === -1) {
+      if (ch === '`') {
+        const codeMatch = RE_CODE.exec(text.slice(cursor));
+        if (codeMatch && codeMatch.index === 0) {
+          result += `${THEME.codeText}${codeMatch[1]}${ANSI.reset}`;
+          cursor += codeMatch[0].length;
+          continue;
+        }
+        result += ch;
+        cursor += 1;
+        continue;
+      }
+
+      if (ch === '~') {
+        const strikethroughMatch = RE_STRIKETHROUGH.exec(text.slice(cursor));
+        if (strikethroughMatch && strikethroughMatch.index === 0) {
+          result += `${ANSI.strikethrough}${strikethroughMatch[1]}${ANSI.reset}`;
+          cursor += strikethroughMatch[0].length;
+          continue;
+        }
+        result += ch;
+        cursor += 1;
+        continue;
+      }
+
+      if (ch === '[') {
+        const linkMatch = RE_LINK.exec(text.slice(cursor));
+        if (linkMatch && linkMatch.index === 0) {
+          result += `${THEME.link}${linkMatch[1]}${ANSI.reset}`;
+          cursor += linkMatch[0].length;
+          continue;
+        }
+        result += ch;
+        cursor += 1;
+        continue;
+      }
+
+      // Fast path: scan ahead for the next special character via indexOf
+      const specialIdx = findNextSpecial(text, cursor + 1, len);
+      if (specialIdx === -1) {
         result += text.slice(cursor);
         break;
-      } else if (nextSpecial > 0) {
-        result += text.slice(cursor, cursor + nextSpecial);
-        cursor += nextSpecial;
-      } else {
-        result += text[cursor];
-        cursor += 1;
       }
+      result += text.slice(cursor, specialIdx);
+      cursor = specialIdx;
     }
 
     return result;

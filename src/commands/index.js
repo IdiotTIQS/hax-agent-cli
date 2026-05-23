@@ -1,3 +1,4 @@
+const path = require('node:path');
 const { loadSettings, updateUserSettings } = require('../config');
 const { createSessionId, listSessions, readTranscript } = require('../memory');
 const { createProvider } = require('../providers');
@@ -19,11 +20,20 @@ const { AgentEngine, AgentEventType } = require('../agent-engine');
 const {
   SLASH_COMMANDS, SKILLS_SUBCOMMANDS, PERMISSIONS_SUBCOMMANDS,
   MEMORY_SUBCOMMANDS, CONTEXT_SUBCOMMANDS, TEAM_SUBCOMMANDS,
-  isThemeEnabled, setThemeEnabled, isVimMode, setVimMode,
+  PERSONALITY_SUBCOMMANDS, isThemeEnabled, setThemeEnabled,
+  isVimMode, setVimMode,
 } = require('./definitions');
 const { handleMemoryCommand: executeMemoryCommand } = require('./memory');
 const { createCliTeamRuntime, executeTeamCommand } = require('./team');
 const { resolveContextWindowTokens, inferModelContextWindowTokens } = require('../context-window');
+const { exportSessionToMarkdown, exportSessionToJson, exportSessionToText } = require('../export');
+const { UndoStack } = require('../undo-stack');
+const { handleHealthCommand, handleMetricsCommand, handleAuditCommand } = require('./dashboard');
+const { handlePersonalityCommand } = require('./personality');
+const { handleAnalyticsCommand, handleReportCommand } = (() => {
+  try { return require('./analytics'); } catch (_) { return {}; }
+})();
+const { handlePluginCommand } = require('./plugin');
 
 function getTranslator(session) {
   return createTranslator(session?.settings?.ui?.locale);
@@ -45,6 +55,7 @@ function getSubcommandSuggestion(commandName, subCommand) {
     context: CONTEXT_SUBCOMMANDS,
     cache: CONTEXT_SUBCOMMANDS,
     team: TEAM_SUBCOMMANDS,
+    personality: PERSONALITY_SUBCOMMANDS,
   };
   const suggestion = suggestCommand(subCommand, candidatesByCommand[commandName] || []);
   return suggestion ? `/${commandName} ${suggestion}` : null;
@@ -113,6 +124,17 @@ function loadRecentTranscript(session) {
   if (restored.length > 0) {
     session.messages = restored;
     session.id = latestSession.id;
+  }
+
+  // Restore persisted goal from transcript
+  try {
+    const { restoreGoal } = require('../goal-persistence');
+    const savedGoal = restoreGoal(latestSession.id, { settings: session.settings });
+    if (savedGoal) {
+      session.goal = savedGoal;
+    }
+  } catch (_) {
+    // goal-persistence module not available — skip
   }
 }
 
@@ -197,9 +219,11 @@ function toProviderChunk(type, event) {
 async function handleSlashCommand(line, context) {
   const [commandName, ...args] = line.slice(1).split(/\s+/);
 
-  const command = SLASH_COMMANDS.find(c =>
-    c.name === commandName || c.aliases?.includes(commandName)
-  );
+  // Use dynamic registry if available, otherwise fall back to static lookup
+  const registry = context.session?.commandRegistry || null;
+  const command = registry
+    ? registry.findCommand(commandName)
+    : SLASH_COMMANDS.find(c => c.name === commandName || c.aliases?.includes(commandName));
 
   if (!command) {
     const skills = loadAllSkills(context.session.settings.projectRoot || process.cwd());
@@ -224,7 +248,9 @@ async function handleSlashCommand(line, context) {
     return;
   }
 
-  const handler = COMMAND_HANDLERS[command.name];
+  const handler = registry
+    ? registry.getHandler(command.name)
+    : COMMAND_HANDLERS[command.name];
   if (!handler) {
     context.screen.write(`${THEME.error}Command not implemented: /${command.name}${ANSI.reset || ''}\n`);
     return;
@@ -264,6 +290,26 @@ const COMMAND_HANDLERS = Object.freeze({
   copy: (_args, context) => copyLastResponse(context),
   rename: (args, context) => renameSession(args, context),
   status: (_args, context) => showStatus(context),
+  undo: (_args, context) => handleUndo(context),
+  redo: (_args, context) => handleRedo(context),
+  export: (args, context) => handleExport(args, context),
+  health: (_args, context) => handleHealthCommand(_args, context),
+  metrics: (_args, context) => handleMetricsCommand(_args, context),
+  audit: (_args, context) => handleAuditCommand(_args, context),
+  personality: (args, context) => handlePersonalityCommand(args, context),
+  analytics: (args, context) => {
+    if (typeof handleAnalyticsCommand === 'function') {
+      return handleAnalyticsCommand(args, context);
+    }
+    context.screen.write(`${THEME.warning}Analytics module not available.${THEME.reset || ''}\n`);
+  },
+  report: (args, context) => {
+    if (typeof handleReportCommand === 'function') {
+      return handleReportCommand(args, context);
+    }
+    context.screen.write(`${THEME.warning}Report module not available.${THEME.reset || ''}\n`);
+  },
+  plugin: (args, context) => handlePluginCommand(args, context),
 });
 
 function listCommandHandlerNames() {
@@ -551,6 +597,10 @@ function handleGoalCommand(args, { screen, session }) {
 
   if (subCommand === 'clear' || subCommand === 'off' || subCommand === 'reset') {
     session.goal = null;
+    try {
+      const { persistGoal } = require('../goal-persistence');
+      persistGoal(session.id, null, { settings: session.settings });
+    } catch (_) { /* optional module */ }
     screen.write(`${THEME.success}Goal cleared.${ANSI.reset || ''}\n`);
     return;
   }
@@ -567,6 +617,10 @@ function handleGoalCommand(args, { screen, session }) {
     maxContinuations,
     createdAt: new Date().toISOString(),
   };
+  try {
+    const { persistGoal } = require('../goal-persistence');
+    persistGoal(session.id, session.goal, { settings: session.settings });
+  } catch (_) { /* optional module */ }
   screen.write(`${THEME.success}Goal set:${ANSI.reset || ''} ${goalText}\n`);
   screen.write(`${THEME.dim}I will keep pushing toward this goal until it is complete, blocked, reaches the continuation limit, or you clear it with /goal clear.${ANSI.reset || ''}\n`);
 }
@@ -1278,8 +1332,70 @@ function showStatus({ screen, session }) {
   screen.write(`\n${THEME.dim}  /help for commands  ·  /sessions to browse history${ANSI.reset || ''}\n\n`);
 }
 
+async function handleUndo({ session, screen }) {
+  const undoStack = session.toolRegistry?.undoStack;
+  if (!undoStack) {
+    screen.write('Undo is not available in this session.\n');
+    return;
+  }
+  if (!undoStack.canUndo()) {
+    screen.write('Nothing to undo.\n');
+    return;
+  }
+  const result = await undoStack.undo();
+  if (result.undone) {
+    screen.write(`${result.description}\n`);
+  } else {
+    screen.write(`${result.description}\n`);
+  }
+}
+
+async function handleRedo({ session, screen }) {
+  const undoStack = session.toolRegistry?.undoStack;
+  if (!undoStack) {
+    screen.write('Redo is not available in this session.\n');
+    return;
+  }
+  if (!undoStack.canRedo()) {
+    screen.write('Nothing to redo.\n');
+    return;
+  }
+  const result = await undoStack.redo();
+  if (result.redone) {
+    screen.write(`${result.description}\n`);
+  } else {
+    screen.write(`${result.description}\n`);
+  }
+}
+
+function handleExport(args, { session, screen }) {
+  const format = (args[0] || 'md').toLowerCase();
+  const validFormats = { md: 'markdown', json: 'json', text: 'text', txt: 'text' };
+  const resolvedFormat = validFormats[format] || 'markdown';
+
+  const exportDir = path.join(process.cwd(), '.hax-agent', 'exports');
+  const timestamp = Date.now();
+  const ext = resolvedFormat === 'markdown' ? 'md' : resolvedFormat === 'json' ? 'json' : 'txt';
+  const outputPath = path.join(exportDir, `${session.id}-${timestamp}.${ext}`);
+
+  try {
+    let result;
+    if (resolvedFormat === 'markdown') {
+      result = exportSessionToMarkdown(session.id, outputPath, { settings: session.settings });
+    } else if (resolvedFormat === 'json') {
+      result = exportSessionToJson(session.id, outputPath, { settings: session.settings });
+    } else {
+      result = exportSessionToText(session.id, outputPath, { settings: session.settings });
+    }
+    screen.write(`Exported ${result.entries} messages to ${result.path}\n`);
+  } catch (err) {
+    screen.write(`Export failed: ${err.message}\n`);
+  }
+}
+
 module.exports = {
   SLASH_COMMANDS,
+  COMMAND_HANDLERS,
   renderBanner,
   renderStatusLine,
   loadRecentTranscript,

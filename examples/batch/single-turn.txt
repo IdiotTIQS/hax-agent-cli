@@ -1,0 +1,1 @@
+Review the file src/batch.js for potential security issues, performance bottlenecks, and error handling gaps. Provide a concise report with actionable recommendations.

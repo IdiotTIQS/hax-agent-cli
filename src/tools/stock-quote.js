@@ -59,7 +59,7 @@ function createStockQuoteTool() {
 
 async function fetchSinaChinese(code, timeoutMs) {
   return new Promise((resolve, reject) => {
-    const url = `https://hq.sinajs.cn/list=${code}`;
+    const url = `https://hq.sinajs.cn/list=${encodeURIComponent(code)}`;
     const req = https.get(url, {
       headers: { Referer: "https://finance.sina.com.cn" },
       timeout: timeoutMs,

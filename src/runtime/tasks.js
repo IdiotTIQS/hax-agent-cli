@@ -1,3 +1,7 @@
+'use strict';
+
+const { requireEnum, requireString } = require('./utils');
+
 const TaskStatus = Object.freeze({
   pending: 'pending',
   inProgress: 'in_progress',
@@ -80,16 +84,5 @@ function createTaskList(tasks) {
   return new TaskList(tasks);
 }
 
-function requireString(value, name) {
-  if (typeof value !== 'string' || value.trim() === '') {
-    throw new TypeError(`${name} must be a non-empty string`);
-  }
-}
-
-function requireEnum(value, options, name) {
-  if (!Object.values(options).includes(value)) {
-    throw new TypeError(`${name} must be one of: ${Object.values(options).join(', ')}`);
-  }
-}
 
 module.exports = { TaskList, TaskStatus, createTask, createTaskList };

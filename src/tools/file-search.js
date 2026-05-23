@@ -4,7 +4,7 @@ const {
   DEFAULT_MAX_FILE_BYTES,
   requireString,
   readPositiveInteger,
-  resolveWithinRoot,
+  resolveWithinRootSafe,
   toWorkspacePath,
   statPath,
 } = require('./utils');
@@ -49,7 +49,7 @@ function createSearchTool() {
           break;
         }
 
-        const resolvedPath = resolveWithinRoot(context.root, file.path);
+        const resolvedPath = await resolveWithinRootSafe(context.root, file.path);
         const stats = await statPath(resolvedPath);
 
         if (!stats.isFile() || stats.size > maxFileBytes) {
@@ -85,7 +85,7 @@ function createSearchTool() {
 
       return {
         query,
-        path: toWorkspacePath(context.root, resolveWithinRoot(context.root, searchPath)),
+        path: toWorkspacePath(context.root, await resolveWithinRootSafe(context.root, searchPath)),
         glob,
         regex: useRegex,
         caseSensitive,
@@ -97,7 +97,7 @@ function createSearchTool() {
 }
 
 async function collectSearchFiles(options) {
-  const resolvedPath = resolveWithinRoot(options.root, options.searchPath);
+  const resolvedPath = await resolveWithinRootSafe(options.root, options.searchPath);
   const stats = await statPath(resolvedPath);
 
   if (stats.isFile()) {
@@ -122,10 +122,10 @@ async function collectSearchFiles(options) {
 
 function createLineMatcher(query, options) {
   if (!options.useRegex) {
-    const needle = options.caseSensitive ? query : query.toLocaleLowerCase();
+    const needle = options.caseSensitive ? query : query.toLowerCase();
 
     return (line) => {
-      const haystack = options.caseSensitive ? line : line.toLocaleLowerCase();
+      const haystack = options.caseSensitive ? line : line.toLowerCase();
       return haystack.indexOf(needle);
     };
   }

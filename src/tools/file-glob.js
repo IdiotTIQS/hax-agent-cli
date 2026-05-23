@@ -8,7 +8,7 @@ const {
   readPositiveInteger,
   normalizeSlashes,
   escapeRegExp,
-  resolveWithinRoot,
+  resolveWithinRootSafe,
   toWorkspacePath,
   statPath,
 } = require('./utils');
@@ -41,7 +41,7 @@ function createGlobTool() {
 
       return {
         pattern,
-        cwd: toWorkspacePath(context.root, resolveWithinRoot(context.root, cwd)),
+        cwd: toWorkspacePath(context.root, await resolveWithinRootSafe(context.root, cwd)),
         matches: matches.items,
         truncated: matches.truncated,
       };
@@ -50,7 +50,7 @@ function createGlobTool() {
 }
 
 async function collectGlobMatches(options) {
-  const cwdPath = resolveWithinRoot(options.root, options.cwd);
+  const cwdPath = await resolveWithinRootSafe(options.root, options.cwd);
   const stats = await statPath(cwdPath);
 
   if (!stats.isDirectory()) {

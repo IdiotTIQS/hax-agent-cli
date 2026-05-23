@@ -1,0 +1,5 @@
+---multi---
+Add JSDoc comments to the src/batch.js file, documenting each parameter and return value.
+Write a unit test for the parseBatchInput function that covers the multi-turn marker edge cases.
+Refactor the readAllInput function to support an optional timeout parameter that rejects the promise after N milliseconds.
+Explain the difference between the ---multi--- and @@@multi@@@ markers and when to use each one.

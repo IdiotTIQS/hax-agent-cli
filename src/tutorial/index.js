@@ -1,0 +1,18 @@
+'use strict';
+
+const TUTORIALS = require('./tutorials');
+const { TutorialEngine } = require('./engine');
+const { TutorialProgress } = require('./progress');
+
+module.exports = {
+  GETTING_STARTED: TUTORIALS.GETTING_STARTED,
+  SLASH_COMMANDS: TUTORIALS.SLASH_COMMANDS,
+  AGENT_TEAMS: TUTORIALS.AGENT_TEAMS,
+  PLUGIN_BASICS: TUTORIALS.PLUGIN_BASICS,
+  SKILL_BASICS: TUTORIALS.SKILL_BASICS,
+  MEMORY_SYSTEM: TUTORIALS.MEMORY_SYSTEM,
+  BATCH_MODE: TUTORIALS.BATCH_MODE,
+  CONFIGURATION: TUTORIALS.CONFIGURATION,
+  TutorialEngine,
+  TutorialProgress,
+};

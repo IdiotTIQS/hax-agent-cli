@@ -31,6 +31,16 @@ const SLASH_COMMANDS = [
   { name: 'copy', descriptionKey: 'cmd.copy', description: 'Copy last AI response to clipboard', aliases: [] },
   { name: 'rename', descriptionKey: 'cmd.rename', description: 'Name the current session', aliases: ['name'], argHint: '<name>' },
   { name: 'status', descriptionKey: 'cmd.status', description: 'Show session summary (model, cost, tokens, git)', aliases: [] },
+  { name: 'undo', descriptionKey: 'cmd.undo', description: 'Undo the last file operation', aliases: ['u'] },
+  { name: 'redo', descriptionKey: 'cmd.redo', description: 'Redo the last undone file operation', aliases: [] },
+  { name: 'export', descriptionKey: 'cmd.export', description: 'Export session transcript (md, json, text)', aliases: [], argHint: '[md|json|text]' },
+  { name: 'health', descriptionKey: 'cmd.health', description: 'Show project health dashboard', aliases: [] },
+  { name: 'metrics', descriptionKey: 'cmd.metrics', description: 'Show token usage and cost metrics', aliases: [] },
+  { name: 'audit', descriptionKey: 'cmd.audit', description: 'Show security audit status', aliases: [] },
+  { name: 'plugin', descriptionKey: 'cmd.plugin', description: 'Manage plugins (list, install, search, etc.)', aliases: ['plugins'], argHint: '[list|search|install|update|uninstall|info|enable|disable]' },
+  { name: 'personality', descriptionKey: 'cmd.personality', description: 'Set agent personality, response style, and behavior modifiers', aliases: ['persona'], argHint: '[status|set|style|mode|reset] [name]' },
+  { name: 'analytics', descriptionKey: 'cmd.analytics', description: 'Show conversation analytics and stats', aliases: ['stats'], argHint: '[tools|predict|anomalies]' },
+  { name: 'report', descriptionKey: 'cmd.report', description: 'Generate session report', aliases: ['rpt'], argHint: '[weekly|export <md|json|text>]' },
 ];
 
 const SKILLS_SUBCOMMANDS = ['list', 'usage'];
@@ -38,9 +48,11 @@ const PERMISSIONS_SUBCOMMANDS = ['status', 'mode', 'reset'];
 const MEMORY_SUBCOMMANDS = ['list', 'read', 'write', 'delete', 'search'];
 const CONTEXT_SUBCOMMANDS = ['status', 'window', 'reserve', 'chars-per-token', 'auto', 'on', 'off'];
 const TEAM_SUBCOMMANDS = [
-  'help', 'agents', 'list', 'new', 'create', 'spawn', 'add-agent',
-  'task', 'add-task', 'run', 'status', 'show', 'send', 'inbox',
+  'help', 'agents', 'list', 'new', 'create', 'plan',
+  'spawn', 'add-agent', 'task', 'add-task', 'run',
+  'status', 'show', 'send', 'inbox',
 ];
+const PERSONALITY_SUBCOMMANDS = ['status', 'show', 'set', 'style', 'mode', 'reset'];
 
 // Shared mutable state (theme and vim toggle)
 let themeEnabled = true;
@@ -58,6 +70,7 @@ module.exports = {
   MEMORY_SUBCOMMANDS,
   CONTEXT_SUBCOMMANDS,
   TEAM_SUBCOMMANDS,
+  PERSONALITY_SUBCOMMANDS,
   isThemeEnabled,
   isVimMode,
   setThemeEnabled,

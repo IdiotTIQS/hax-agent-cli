@@ -196,6 +196,7 @@ class Session {
     this.startTime = Date.now();
     this.modifiedFiles = new Set();
     this.goal = null;
+    this.pluginRegistry = options.pluginRegistry || null;
   }
 
   getElapsedTime() {

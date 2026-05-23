@@ -1,3 +1,7 @@
+'use strict';
+
+const { requireString } = require('./runtime/utils');
+
 const TaskStatus = Object.freeze({
   pending: 'pending',
   inProgress: 'in_progress',
@@ -433,11 +437,6 @@ function normalizeError(error) {
   return error;
 }
 
-function requireString(value, name) {
-  if (typeof value !== 'string' || value.trim() === '') {
-    throw new Error(`${name} must be a non-empty string`);
-  }
-}
 
 module.exports = {
   AgentRegistry,

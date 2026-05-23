@@ -1,3 +1,7 @@
+'use strict';
+
+const { requireString } = require('./utils');
+
 class CommandRegistry {
   constructor(commands = []) {
     this.commands = new Map();
@@ -55,10 +59,5 @@ function createCommandRegistry(commands) {
   return new CommandRegistry(commands);
 }
 
-function requireString(value, name) {
-  if (typeof value !== 'string' || value.trim() === '') {
-    throw new TypeError(`${name} must be a non-empty string`);
-  }
-}
 
 module.exports = { CommandRegistry, createCommand, createCommandRegistry };

@@ -1,6 +1,7 @@
 const { loadAgentDefinitions } = require('../teams/agents');
 const { createTeamRuntime } = require('../teams/runtime');
 const { createLocalToolRegistry } = require('../tools');
+const { generateTeamPlan } = require('../teams/planner');
 const {
   formatAgentList,
   formatMessages,
@@ -97,6 +98,35 @@ async function executeTeamCommand(runtime, subCommand, args, context = {}) {
       const messages = runtime.drainMessages(options.agent || options._[0] || 'lead');
       return formatMessages(messages);
     }
+    case 'plan': {
+      const goalText = args.join(' ').trim();
+      if (!goalText) {
+        throw new Error(
+          'Usage: /team plan "<goal description>"\n\n' +
+          'Provide a natural-language description of what you want the team to accomplish.\n' +
+          'Example: /team plan "build a web scraper that monitors prices"',
+        );
+      }
+      const planResult = await generateTeamPlan({
+        goal: goalText,
+        provider: context.session?.provider,
+        settings: context.settings,
+        projectRoot: context.settings?.projectRoot || process.cwd(),
+      });
+      return [
+        `Team plan generated (source: ${planResult.source})`,
+        '',
+        'Review the plan below. To create this team, run:',
+        '',
+        formatTeamConfirmCommand(planResult.plan),
+        '',
+        '--- Plan preview ---',
+        '',
+        planResult.planText,
+        '',
+        '--- End preview ---',
+      ].join('\n');
+    }
     default:
       throw new Error(`Unknown team command: ${subCommand}.\n${formatTeamUsage()}`);
   }
@@ -110,6 +140,7 @@ function formatTeamUsage() {
     '  team agents                         List available agent types',
     '  team list                           List saved teams',
     '  team new <name> --mission <text>     Create a team state file',
+    '  team plan "<goal>"                  Generate a team plan from a goal description',
     '  team spawn <agent-type> [name]       Add a teammate to a team',
     '  team task <title> --owner <agent>    Add a task to the team board',
     '  team run --team <name>               Run ready tasks with teammates',
@@ -145,7 +176,15 @@ function parseMembersOption(value) {
   }).filter((member) => member.agentType);
 }
 
+function formatTeamConfirmCommand(plan) {
+  const memberFlags = plan.members
+    .map((m) => `--member ${m.agentType}:${m.name}`)
+    .join(' ');
+  return `/team create ${plan.name} --mission "${plan.mission}" ${memberFlags}`;
+}
+
 module.exports = {
   createCliTeamRuntime,
   executeTeamCommand,
+  formatTeamConfirmCommand,
 };

@@ -4,6 +4,7 @@ const { ToolExecutionError } = require('./error');
 const {
   DEFAULT_FILE_OP_TIMEOUT_MS,
   requireString,
+  resolveWithinRoot,
   toWorkspacePath,
   withTimeout,
 } = require('./utils');
@@ -36,13 +37,13 @@ function createFileEditTool() {
 
       if (oldStr === newStr) {
         return {
-          path: toWorkspacePath(context.root, path.resolve(context.root, filePath)),
+          path: toWorkspacePath(context.root, resolveWithinRoot(context.root, filePath)),
           changed: false,
           message: 'oldStr and newStr are identical, no changes needed.',
         };
       }
 
-      const resolvedPath = path.resolve(context.root, filePath);
+      const resolvedPath = resolveWithinRoot(context.root, filePath);
       const content = await withTimeout(fs.readFile(resolvedPath, { encoding }), DEFAULT_FILE_OP_TIMEOUT_MS, `read ${filePath}`);
 
       const firstIndex = content.indexOf(oldStr);
@@ -57,16 +58,24 @@ function createFileEditTool() {
         throw new ToolExecutionError('AMBIGUOUS_TEXT', `The exact text appears multiple times in ${filePath}. Make oldStr more specific to uniquely identify the location.`);
       }
 
+      const oldLines = oldStr.split(/\r?\n/).length;
+      const newLines = newStr.split(/\r?\n/).length;
       const updatedContent = content.replace(oldStr, newStr);
 
       const diff = generateDiff(oldStr, newStr);
 
       if (!dryRun) {
         await withTimeout(fs.writeFile(resolvedPath, updatedContent, { encoding }), DEFAULT_FILE_OP_TIMEOUT_MS, `write ${filePath}`);
+        if (context.undoStack) {
+          context.undoStack.push({
+            toolName: 'file.edit',
+            filePath: resolvedPath,
+            originalContent: content,
+            newContent: updatedContent,
+            description: `Edit ${path.basename(filePath)} (${oldLines}→${newLines} lines)`,
+          });
+        }
       }
-
-      const oldLines = oldStr.split(/\r?\n/).length;
-      const newLines = newStr.split(/\r?\n/).length;
 
       return {
         path: toWorkspacePath(context.root, resolvedPath),

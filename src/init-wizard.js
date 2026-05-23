@@ -1,3 +1,5 @@
+'use strict';
+
 const readline = require('node:readline');
 const { updateUserSettings } = require('./config');
 const { DEFAULT_LOCALE, createTranslator, listLocales, normalizeLocale } = require('./i18n');

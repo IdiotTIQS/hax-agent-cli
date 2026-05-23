@@ -13,7 +13,7 @@
     "desktop:build": "vite build --config desktop/renderer/vite.config.js",
     "auth:team": "node src/cli.js team auth-refactor",
     "lint": "node scripts/lint.js",
-    "test": "node --test test/*.test.js",
+    "test": "node --test \"test/**/*.test.js\" test/*.test.js",
     "test:desktop": "npm run desktop:build && node --test test/desktop-*.test.js test/desktop-smoke.smoke.js",
     "prepublishOnly": "npm test"
   },

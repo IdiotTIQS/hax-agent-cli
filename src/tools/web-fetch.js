@@ -29,6 +29,7 @@ const DEFAULT_HEADERS = {
 function createWebFetchTool() {
   const DEFAULT_TIMEOUT_MS = 30_000;
   const DEFAULT_MAX_BODY_BYTES = 2 * 1024 * 1024;
+  const MAX_REDIRECTS = 10;
 
   return {
     name: "web.fetch",
@@ -56,7 +57,10 @@ function createWebFetchTool() {
       let lastError;
       for (let attempt = 0; attempt <= maxRetries; attempt++) {
         try {
-          const { body, truncated: bodyTruncated, status } = await fetchUrl({ parsedUrl, method, maxBodyBytes, timeoutMs });
+          const { body, truncated: bodyTruncated, status } = await fetchUrl({
+            parsedUrl, method, maxBodyBytes, timeoutMs,
+            redirectChain: [parsedUrl.href], maxRedirects: MAX_REDIRECTS,
+          });
           const plainText = htmlToPlainText(body);
           return {
             url: parsedUrl.href, status, contentType: "text/html",
@@ -85,7 +89,12 @@ function parseAndValidateUrl(urlString) {
   catch (e) { throw new ToolExecutionError("INVALID_URL", `Invalid URL: ${e.message}`); }
 }
 
-async function fetchUrl({ parsedUrl, method, maxBodyBytes, timeoutMs }) {
+async function fetchUrl({ parsedUrl, method, maxBodyBytes, timeoutMs, redirectChain = [], maxRedirects = 10 }) {
+  // Block direct requests to private hosts (first-hop check)
+  if (redirectChain.length === 0 && isPrivateOrLocalHost(parsedUrl.hostname)) {
+    throw new ToolExecutionError("PRIVATE_REDIRECT_BLOCKED", `Request to private/local host blocked: ${parsedUrl.href}`);
+  }
+
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -96,7 +105,10 @@ async function fetchUrl({ parsedUrl, method, maxBodyBytes, timeoutMs }) {
     if (response.status >= 300 && response.status < 400) {
       const loc = response.headers.get("location");
       if (!loc) throw new ToolExecutionError("HTTP_ERROR", `HTTP ${response.status}: redirect without location`);
-      return handleRedirect(loc, method, maxBodyBytes, timeoutMs, parsedUrl, timeoutId);
+      return handleRedirect({
+        location: loc, method, maxBodyBytes, timeoutMs, baseUrl: parsedUrl,
+        redirectChain, maxRedirects, timeoutId,
+      });
     }
     if (!response.ok) {
       const err = new ToolExecutionError("HTTP_ERROR", `HTTP ${response.status}: ${response.statusText || "Error"}`);
@@ -135,14 +147,33 @@ async function fetchUrl({ parsedUrl, method, maxBodyBytes, timeoutMs }) {
   } finally { clearTimeout(timeoutId); }
 }
 
-async function handleRedirect(location, method, maxBodyBytes, timeoutMs, originalUrl, originalTimeoutId) {
-  clearTimeout(originalTimeoutId);
+async function handleRedirect({ location, method, maxBodyBytes, timeoutMs, baseUrl, redirectChain, maxRedirects, timeoutId }) {
+  clearTimeout(timeoutId);
+
+  if (redirectChain.length >= maxRedirects) {
+    throw new ToolExecutionError("PRIVATE_REDIRECT_BLOCKED",
+      `Too many redirects (${redirectChain.length}). Last URL: ${redirectChain[redirectChain.length - 1]}`);
+  }
+
   let redirectUrl;
-  try { redirectUrl = new URL(location, originalUrl); }
+  try { redirectUrl = new URL(location, baseUrl); }
   catch { throw new ToolExecutionError("INVALID_REDIRECT", `Invalid redirect URL: ${location}`); }
-  if (!isPrivateOrLocalHost(originalUrl.hostname) && isPrivateOrLocalHost(redirectUrl.hostname))
+
+  // Block if the redirect target is a private/local host
+  if (isPrivateOrLocalHost(redirectUrl.hostname)) {
     throw new ToolExecutionError("PRIVATE_REDIRECT_BLOCKED", `Redirect to private/local blocked: ${redirectUrl.href}`);
-  return fetchUrl({ parsedUrl: redirectUrl, method, maxBodyBytes, timeoutMs });
+  }
+
+  // Block redirect loops (same URL already in chain)
+  if (redirectChain.includes(redirectUrl.href)) {
+    throw new ToolExecutionError("PRIVATE_REDIRECT_BLOCKED", `Redirect loop detected: ${redirectUrl.href}`);
+  }
+
+  const nextChain = [...redirectChain, redirectUrl.href];
+  return fetchUrl({
+    parsedUrl: redirectUrl, method, maxBodyBytes, timeoutMs,
+    redirectChain: nextChain, maxRedirects,
+  });
 }
 
 function htmlToPlainText(html) {

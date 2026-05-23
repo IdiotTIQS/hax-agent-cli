@@ -2,6 +2,17 @@ const path = require('node:path');
 const { PermissionManager } = require('../permissions');
 const { ToolExecutionError } = require('./error');
 const { assertPlainObject, isNonEmptyString, serializeToolResult } = require('./utils');
+const { withTimeout, withMetrics, getMetrics } = require('../tool-decorators');
+const { validate } = require('../schema-validator');
+
+// Optional observability integration — gracefully degrades if the module is missing.
+let _getObsMetrics = null;
+try {
+  const obs = require("../infrastructure/observability-setup");
+  _getObsMetrics = obs.getMetrics;
+} catch (_) {
+  // observability-setup not available — metrics become no-ops.
+}
 const { createReadFileTool } = require('./file-read');
 const { createWriteFileTool } = require('./file-write');
 const { createGlobTool } = require('./file-glob');
@@ -24,6 +35,12 @@ class ToolRegistry {
     this._singleCallCache = new Map();
     this.permissionManager = options.permissionManager || new PermissionManager();
     this.approvalCallback = options.approvalCallback || null;
+    this.undoStack = options.undoStack || null;
+    this.pluginRegistry = options.pluginRegistry || null;
+    this._enableMetrics = options.enableMetrics !== false;
+    this._defaultTimeoutMs = Number.isSafeInteger(options.defaultTimeoutMs) && options.defaultTimeoutMs > 0
+      ? options.defaultTimeoutMs
+      : 30_000;
   }
 
   register(tool) {
@@ -43,11 +60,22 @@ class ToolRegistry {
       throw new ToolExecutionError('DUPLICATE_TOOL', `Tool "${tool.name}" is already registered.`);
     }
 
+    let executeFn = tool.execute;
+
+    if (this._enableMetrics) {
+      executeFn = withMetrics(executeFn, tool.name);
+    }
+
+    const timeoutMs = (tool.inputSchema && Number.isSafeInteger(tool.inputSchema.timeoutMs) && tool.inputSchema.timeoutMs > 0)
+      ? tool.inputSchema.timeoutMs
+      : this._defaultTimeoutMs;
+    executeFn = withTimeout(executeFn, timeoutMs);
+
     this.tools.set(tool.name, {
       name: tool.name,
       description: tool.description || '',
       inputSchema: tool.inputSchema || null,
-      execute: tool.execute,
+      execute: executeFn,
     });
 
     return this;
@@ -102,6 +130,18 @@ class ToolRegistry {
         throw new ToolExecutionError('TOOL_NOT_FOUND', `Tool "${name}" is not registered.`);
       }
 
+      // Validate args against the tool's inputSchema if present
+      if (tool.inputSchema) {
+        try {
+          validate(tool.inputSchema, args);
+        } catch (err) {
+          throw new ToolExecutionError(
+            'INVALID_ARGUMENT',
+            `Validation failed for tool "${name}": ${err.message}`,
+          );
+        }
+      }
+
       const permissionResult = await this.permissionManager.checkPermission(
         name, args, this.approvalCallback,
       );
@@ -114,30 +154,83 @@ class ToolRegistry {
         );
       }
 
+      // Fire beforeToolCall plugin hooks
+      if (this.pluginRegistry) {
+        await this.pluginRegistry.runHook('beforeToolCall', { toolName: name, args, session: context.session });
+      }
+
       const data = await tool.execute(args, {
         ...context,
         root: this.root,
         registry: this,
+        undoStack: this.undoStack,
       });
 
       if (SINGLE_CALL_TOOLS.has(name)) {
         this._singleCallCache.set(name, { data, timestamp: Date.now() });
       }
 
+      // Fire afterToolCall plugin hooks
+      if (this.pluginRegistry) {
+        await this.pluginRegistry.runHook('afterToolCall', { toolName: name, args, result: data, session: context.session });
+      }
+
+      const durationMs = Date.now() - startedAt;
+
+      // Record observability metrics (optional).
+      try {
+        const obsMetrics = _getObsMetrics ? _getObsMetrics() : null;
+        if (obsMetrics) {
+          obsMetrics.get("tool.executions")?.inc();
+          obsMetrics.get("tool.duration_ms")?.observe(durationMs);
+        }
+      } catch (_) { /* no-op */ }
+
       return serializeToolResult({
         toolName: name,
         ok: true,
         data,
-        durationMs: Date.now() - startedAt,
+        durationMs,
       });
     } catch (error) {
+      if (this.pluginRegistry) {
+        this.pluginRegistry.runHook('onError', { error, toolName: name, session: context.session }).catch(() => {});
+      }
+
+      const durationMs = Date.now() - startedAt;
+
+      // Record observability error + duration metrics (optional).
+      try {
+        const obsMetrics = _getObsMetrics ? _getObsMetrics() : null;
+        if (obsMetrics) {
+          obsMetrics.get("tool.executions")?.inc();
+          obsMetrics.get("tool.errors")?.inc();
+          obsMetrics.get("tool.duration_ms")?.observe(durationMs);
+        }
+      } catch (_) { /* no-op */ }
+
       return serializeToolResult({
         toolName: name,
         ok: false,
         error,
-        durationMs: Date.now() - startedAt,
+        durationMs,
       });
     }
+  }
+
+  /**
+   * Return per-tool metrics collected by withMetrics decorators.
+   * @returns {Record<string, { count: number, totalDurationMs: number, errorCount: number, avgDurationMs: number | null }>}
+   */
+  getStats() {
+    if (!this._enableMetrics) {
+      return {};
+    }
+    const stats = {};
+    for (const toolName of this.tools.keys()) {
+      stats[toolName] = getMetrics(toolName);
+    }
+    return stats;
   }
 }
 
@@ -145,6 +238,10 @@ function createLocalToolRegistry(options = {}) {
   const registry = new ToolRegistry({
     root: options.root,
     permissionManager: options.permissionManager,
+    undoStack: options.undoStack,
+    pluginRegistry: options.pluginRegistry,
+    enableMetrics: options.enableMetrics,
+    defaultTimeoutMs: options.defaultTimeoutMs,
   });
   const shellPolicy = normalizeShellPolicy(options.shellPolicy);
 

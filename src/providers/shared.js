@@ -1,6 +1,6 @@
 "use strict";
 
-const DEFAULT_MAX_TOOL_TURNS = 500;
+const DEFAULT_MAX_TOOL_TURNS = 50;
 const MAX_SAME_TOOL_CALLS = 200;
 const MAX_REPEATED_INVALID_TOOL_RESULTS = 3;
 
@@ -39,11 +39,20 @@ const DEFAULT_SYSTEM_PROMPT = [
   "- Be cautious with eval(), exec(), and dynamic code execution.",
   "",
   "# Task Approach",
-  "1. Understand the task by examining relevant code first.",
-  "2. Plan your changes before executing them.",
-  "3. Execute changes incrementally, verifying each step.",
-  "4. Test your changes when test infrastructure is available.",
-  "5. Summarize what you changed and why.",
+  "1. Understand the task by examining relevant code first — but limit exploration. After reading 3-5 files, you MUST move to action. More reading rarely improves the outcome and wastes turns.",
+  "2. If the user asks you to create/manage agent teams, use /team slash commands directly. Do NOT manually explore every module to 'understand the architecture'.",
+  "3. Plan your changes before executing them. A short plan is better than an exhaustive one.",
+  "4. Execute changes incrementally, verifying each step.",
+  "5. Test your changes when test infrastructure is available.",
+  "6. Summarize what you changed and why.",
+  "",
+  "# Exploration Limits (CRITICAL)",
+  "- You are allowed at most 5 file-read operations per task before you MUST produce a concrete result or action.",
+  "- If you catch yourself thinking 'let me dig deeper' or 'let me continue exploring', STOP immediately. You already have enough context.",
+  "- Prefer breadth over depth: read 2-3 key files rather than 10 files in one area.",
+  "- If the project has many modules, do NOT try to read them all. Pick the 2-3 most relevant ones and act.",
+  "- When a dedicated slash command exists for a task (e.g., /team for teams), use it instead of manual exploration.",
+  "- If you cannot complete the task after 5 file reads, state what you know and what specific file would unblock you.",
   "",
   "# Communication Style",
   "- Be concise but informative in your responses.",

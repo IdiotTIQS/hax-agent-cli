@@ -5,7 +5,7 @@ const {
   DEFAULT_FILE_OP_TIMEOUT_MS,
   requireString,
   readPositiveInteger,
-  resolveWithinRoot,
+  resolveWithinRootSafe,
   toWorkspacePath,
   statPath,
   withTimeout,
@@ -37,7 +37,7 @@ function createReadFileTool() {
         throw new ToolExecutionError('INVALID_ENCODING', `Unsupported file encoding: ${encoding}`);
       }
 
-      const resolvedPath = resolveWithinRoot(context.root, filePath);
+      const resolvedPath = await resolveWithinRootSafe(context.root, filePath);
       const stats = await withTimeout(statPath(resolvedPath), DEFAULT_FILE_OP_TIMEOUT_MS, `stat ${filePath}`);
 
       if (!stats.isFile()) {

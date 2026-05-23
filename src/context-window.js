@@ -64,9 +64,10 @@ function selectMessagesWithinBudget(messages, budgetTokens, settings = {}) {
 
   const latestMessage = messages[messages.length - 1];
   const latestTokens = estimateMessageTokens(latestMessage, settings);
-  const selected = latestTokens > budgetTokens
-    ? [truncateMessageToBudget(latestMessage, budgetTokens, settings)]
-    : [latestMessage];
+
+  // Collect earlier messages that fit, walking backward.
+  // older accumulates newest-first among the "older" slice.
+  const older = [];
   let usedTokens = Math.min(latestTokens, budgetTokens);
 
   for (let index = messages.length - 2; index >= 0; index -= 1) {
@@ -77,11 +78,17 @@ function selectMessagesWithinBudget(messages, budgetTokens, settings = {}) {
       continue;
     }
 
-    selected.unshift(message);
+    older.push(message);
     usedTokens += tokens;
   }
 
-  return selected;
+  // older is newest-first; reverse it to oldest-first and prepend latest.
+  older.reverse();
+  older.push(latestTokens > budgetTokens
+    ? truncateMessageToBudget(latestMessage, budgetTokens, settings)
+    : latestMessage);
+
+  return older;
 }
 
 function truncateMessageToBudget(message, budgetTokens, settings = {}) {
@@ -146,59 +153,31 @@ function resolveContextWindowTokens(settings = {}, model) {
   return inferModelContextWindowTokens(model || settings.agent?.model);
 }
 
+// Pre-compiled regex-to-tokens mapping for inferModelContextWindowTokens.
+// Ordered from most specific to most general so the first match wins.
+const MODEL_WINDOW_MAP = [
+  [/qwen(?:3\.[56])?-(?:plus|flash)|qwen3-coder-plus|qwen-deep-research/, 1_000_000],
+  [/minimax-(?:text-01|m1)/, 1_000_000],
+  [/gpt-5\.5|gpt-5\.4(?!.*(?:mini|nano))/, 1_050_000],
+  [/deepseek-(?:v4|chat|reasoner)/, 1_000_000],
+  [/kimi-k2(?:\.5|-0905|-turbo|-thinking)|moonshot-v1-256k|qwen3-(?:max|coder-next)|doubao-(?:seed-code|seed-2|seed-1-[68])|hunyuan-(?:turbos|a13b|hy3)/, 262_144],
+  [/glm-(?:5|4\.7)|minimax-m2(?:\.5|\b)|minimax-m2\.1|baichuan4|baichuan-4|yi-.*(?:200k|long)/, 200_000],
+  [/glm-4\.5|moonshot-v1-128k|kimi-k2-0711|yi-|hunyuan-(?:large|turbo)|doubao-pro-128k|doubao-.*128k/, 128_000],
+  [/moonshot-v1-32k|doubao-(?:1[-.]5|pro|lite).*32k|doubao-.*32k/, 32_768],
+  [/moonshot-v1-8k/, 8_192],
+  [/claude-(?:opus-4-[67]|sonnet-4-6)|anthropic\.claude-(?:opus-4-[67]|sonnet-4-6)|gemini-(?:3|2\.5|2\.0|1\.5)|gpt-4\.1/, 1_000_000],
+  [/gpt-5(?:\.[123])?(?:-|$)|gpt-5\.\d+-codex|gpt-5\.4-(?:mini|nano)|codex/, 400_000],
+  [/deepseek-(?:v3|r1)|gpt-4o/, 128_000],
+  [/claude|sonnet|opus|haiku|o[134](?:-|$)|o\d-mini/, 200_000],
+];
+
 function inferModelContextWindowTokens(model) {
   const key = String(model || "").toLowerCase();
 
-  if (/qwen(?:3\.[56])?-(?:plus|flash)|qwen3-coder-plus|qwen-deep-research/.test(key)) {
-    return 1_000_000;
-  }
-
-  if (/minimax-(?:text-01|m1)/.test(key)) {
-    return 1_000_000;
-  }
-
-  if (/gpt-5\.5|gpt-5\.4(?!.*(?:mini|nano))/.test(key)) {
-    return 1_050_000;
-  }
-
-  if (/deepseek-(?:v4|chat|reasoner)/.test(key)) {
-    return 1_000_000;
-  }
-
-  if (/kimi-k2(?:\.5|-0905|-turbo|-thinking)|moonshot-v1-256k|qwen3-(?:max|coder-next)|doubao-(?:seed-code|seed-2|seed-1-[68])|hunyuan-(?:turbos|a13b|hy3)/.test(key)) {
-    return 262_144;
-  }
-
-  if (/glm-(?:5|4\.7)|minimax-m2(?:\.5|\b)|minimax-m2\.1|baichuan4|baichuan-4|yi-.*(?:200k|long)/.test(key)) {
-    return 200_000;
-  }
-
-  if (/glm-4\.5|moonshot-v1-128k|kimi-k2-0711|yi-|hunyuan-(?:large|turbo)|doubao-pro-128k|doubao-.*128k/.test(key)) {
-    return 128_000;
-  }
-
-  if (/moonshot-v1-32k|doubao-(?:1[-.]5|pro|lite).*32k|doubao-.*32k/.test(key)) {
-    return 32_768;
-  }
-
-  if (/moonshot-v1-8k/.test(key)) {
-    return 8_192;
-  }
-
-  if (/claude-(?:opus-4-[67]|sonnet-4-6)|anthropic\.claude-(?:opus-4-[67]|sonnet-4-6)|gemini-(?:3|2\.5|2\.0|1\.5)|gpt-4\.1/.test(key)) {
-    return 1_000_000;
-  }
-
-  if (/gpt-5(?:\.[123])?(?:-|$)|gpt-5\.\d+-codex|gpt-5\.4-(?:mini|nano)|codex/.test(key)) {
-    return 400_000;
-  }
-
-  if (/deepseek-(?:v3|r1)|gpt-4o/.test(key)) {
-    return 128_000;
-  }
-
-  if (/claude|sonnet|opus|haiku|o[134](?:-|$)|o\d-mini/.test(key)) {
-    return 200_000;
+  for (const [pattern, tokens] of MODEL_WINDOW_MAP) {
+    if (pattern.test(key)) {
+      return tokens;
+    }
   }
 
   return DEFAULT_CONTEXT_WINDOW_TOKENS;

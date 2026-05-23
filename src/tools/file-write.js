@@ -6,7 +6,7 @@ const {
   DEFAULT_FILE_OP_TIMEOUT_MS,
   requireString,
   readPositiveInteger,
-  resolveWithinRoot,
+  resolveWithinRootSafe,
   toWorkspacePath,
   statPath,
   withTimeout,
@@ -51,8 +51,8 @@ function createWriteFileTool() {
         });
       }
 
-      const resolvedPath = resolveWithinRoot(context.root, filePath);
-      const parentPath = resolveWithinRoot(context.root, path.dirname(filePath));
+      const resolvedPath = await resolveWithinRootSafe(context.root, filePath);
+      const parentPath = await resolveWithinRootSafe(context.root, path.dirname(filePath));
       const previousContent = await withTimeout(readExistingFileContent(resolvedPath, encoding), DEFAULT_FILE_OP_TIMEOUT_MS, `read ${filePath}`);
 
       if (createParentDirectories) {
@@ -69,6 +69,16 @@ function createWriteFileTool() {
         encoding,
         flag: overwrite ? 'w' : 'wx',
       }), DEFAULT_FILE_OP_TIMEOUT_MS, `write ${filePath}`);
+
+      if (context.undoStack) {
+        context.undoStack.push({
+          toolName: 'file.write',
+          filePath: resolvedPath,
+          originalContent: previousContent || '',
+          newContent: content,
+          description: `${previousContent !== null ? 'Overwrite' : 'Create'} ${path.basename(filePath)}`,
+        });
+      }
 
       return {
         path: toWorkspacePath(context.root, resolvedPath),

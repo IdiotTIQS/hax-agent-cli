@@ -1,6 +1,8 @@
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
+'use strict';
+
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 
 const DEFAULT_SETTINGS = Object.freeze({
   agent: {
@@ -334,19 +336,6 @@ function parseBooleanEnv(env, name) {
   }
 
   throw new Error(`${name} must be a boolean value`);
-}
-
-function parseListEnv(env, name) {
-  const value = env[name];
-
-  if (value === undefined || value === '') {
-    return undefined;
-  }
-
-  return String(value)
-    .split(',')
-    .map((item) => item.trim())
-    .filter(Boolean);
 }
 
 module.exports = {

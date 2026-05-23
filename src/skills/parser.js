@@ -1,5 +1,7 @@
-const fs = require('fs');
-const path = require('path');
+'use strict';
+
+const fs = require('node:fs');
+const path = require('node:path');
 
 function parseFrontmatter(content) {
   const match = content.match(/^---\s*\n([\s\S]*?)\n---\s*\n?([\s\S]*)$/);
@@ -77,6 +79,10 @@ function parseArgumentNames(argumentsField) {
   return [];
 }
 
+function escapeRegex(str) {
+  return str.replace(/[|\\{}()[\]^$+?.]/g, '\\$&');
+}
+
 function substituteArguments(content, args, argumentNames) {
   if (!args || !argumentNames || argumentNames.length === 0) {
     return content;
@@ -87,7 +93,7 @@ function substituteArguments(content, args, argumentNames) {
   for (let i = 0; i < argumentNames.length; i++) {
     const argName = argumentNames[i];
     const argValue = args[i] || '';
-    result = result.replace(new RegExp(`\\$${argName}`, 'g'), argValue);
+    result = result.replace(new RegExp(`\\$${escapeRegex(argName)}`, 'g'), argValue);
   }
 
   return result;

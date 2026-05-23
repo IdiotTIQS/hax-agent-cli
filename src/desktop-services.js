@@ -96,7 +96,7 @@ function searchWorkspaceContent(projectRoot, options = {}) {
     return { projectRoot: root, query, matches, scannedFiles, truncated: false };
   }
 
-  const needle = caseSensitive ? query : query.toLocaleLowerCase();
+  const needle = caseSensitive ? query : query.toLowerCase();
 
   function walk(directory) {
     if (matches.length >= maxResults || scannedFiles >= maxFiles) {
@@ -144,7 +144,7 @@ function searchWorkspaceContent(projectRoot, options = {}) {
       const lines = content.split(/\r?\n/);
       for (let index = 0; index < lines.length; index += 1) {
         const line = lines[index];
-        const haystack = caseSensitive ? line : line.toLocaleLowerCase();
+        const haystack = caseSensitive ? line : line.toLowerCase();
         const column = haystack.indexOf(needle);
         if (column === -1) continue;
 

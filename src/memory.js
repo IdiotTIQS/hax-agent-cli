@@ -1,6 +1,8 @@
-const crypto = require('crypto');
-const fs = require('fs');
-const path = require('path');
+'use strict';
+
+const crypto = require('node:crypto');
+const fs = require('node:fs');
+const path = require('node:path');
 const { defaultMemoryDirectory, defaultSessionDirectory } = require('./config');
 
 const SESSION_META_TYPE = 'session.meta';
@@ -93,11 +95,15 @@ function listSessions(options = {}) {
 }
 
 function writeMemory(name, content, options = {}) {
+  const namespace = typeof options.namespace === 'string' ? options.namespace.trim() : 'default';
+  const tags = Array.isArray(options.tags) ? [...new Set(options.tags.filter(t => typeof t === 'string'))] : [];
   const filePath = getMemoryPath(name, options);
   const existing = readMemory(name, options);
   const now = new Date().toISOString();
   const record = {
     name,
+    namespace: existing?.namespace || namespace,
+    tags: existing?.tags || tags,
     createdAt: existing?.createdAt || now,
     updatedAt: now,
     content,
@@ -121,15 +127,35 @@ function readMemory(name, options = {}) {
 
 function listMemories(options = {}) {
   const storage = createStorage(options);
+  const filterNamespace = typeof options.namespace === 'string' ? options.namespace.trim() : null;
 
   if (!fs.existsSync(storage.memoryDirectory)) {
     return [];
   }
 
-  return fs.readdirSync(storage.memoryDirectory)
-    .filter((fileName) => fileName.endsWith('.json'))
-    .map((fileName) => readJsonFile(path.join(storage.memoryDirectory, fileName)))
-    .sort((left, right) => String(right.updatedAt || '').localeCompare(String(left.updatedAt || '')));
+  const results = [];
+
+  function collectFromDir(dir) {
+    if (!fs.existsSync(dir)) return;
+    const entries = fs.readdirSync(dir, { withFileTypes: true });
+    for (const entry of entries) {
+      const fullPath = path.join(dir, entry.name);
+      if (entry.isDirectory() && !filterNamespace) {
+        collectFromDir(fullPath);
+      } else if (entry.isFile() && entry.name.endsWith('.json')) {
+        results.push(readJsonFile(fullPath));
+      }
+    }
+  }
+
+  if (filterNamespace) {
+    const nsDir = path.join(storage.memoryDirectory, toFileSafeName(filterNamespace, 'namespace'));
+    collectFromDir(nsDir);
+  } else {
+    collectFromDir(storage.memoryDirectory);
+  }
+
+  return results.sort((left, right) => String(right.updatedAt || '').localeCompare(String(left.updatedAt || '')));
 }
 
 function deleteMemory(name, options = {}) {
@@ -146,11 +172,44 @@ function deleteMemory(name, options = {}) {
 function searchMemories(query, options = {}) {
   if (!query || typeof query !== 'string' || !query.trim()) return [];
   const q = query.trim().toLowerCase();
-  const all = listMemories(options);
-  return all.filter((mem) =>
-    (mem.name && mem.name.toLowerCase().includes(q)) ||
-    (mem.content && mem.content.toLowerCase().includes(q))
-  );
+  const filterNamespace = typeof options.namespace === 'string' ? options.namespace.trim() : null;
+  const filterTag = typeof options.tag === 'string' ? options.tag.trim().toLowerCase() : null;
+  let all = listMemories(options);
+
+  if (filterNamespace) {
+    all = all.filter((mem) => (mem.namespace || 'default') === filterNamespace);
+  }
+  if (filterTag) {
+    all = all.filter((mem) => (mem.tags || []).some((t) => t.toLowerCase() === filterTag));
+  }
+
+  const wordBoundary = new RegExp(`\\b${escapeRegex(q)}\\b`, 'i');
+  const scored = all.map((mem) => {
+    let score = 0;
+    if (mem.name && mem.name.toLowerCase().includes(q)) {
+      score += 30;
+      if (wordBoundary.test(mem.name)) score += 20;
+    }
+    if ((mem.tags || []).some((t) => t.toLowerCase().includes(q))) {
+      score += 25;
+    }
+    if ((mem.namespace || 'default').toLowerCase().includes(q)) {
+      score += 20;
+    }
+    if (mem.content && mem.content.toLowerCase().includes(q)) {
+      score += 10;
+      if (wordBoundary.test(mem.content)) score += 10;
+    }
+    return { ...mem, score };
+  });
+
+  return scored
+    .filter((m) => m.score > 0)
+    .sort((a, b) => b.score - a.score);
+}
+
+function escapeRegex(str) {
+  return str.replace(/[|\\{}()[\]^$+?.]/g, '\\$&');
 }
 
 function clearSessions(options = {}) {
@@ -187,8 +246,14 @@ function getSessionTranscriptPath(sessionId, options = {}) {
 
 function getMemoryPath(name, options = {}) {
   const storage = createStorage(options);
+  const namespace = typeof options.namespace === 'string' && options.namespace !== 'default'
+    ? options.namespace.trim()
+    : null;
+  const baseDir = namespace
+    ? path.join(storage.memoryDirectory, toFileSafeName(namespace, 'namespace'))
+    : storage.memoryDirectory;
 
-  return path.join(storage.memoryDirectory, `${toFileSafeName(name, 'memory name')}.json`);
+  return path.join(baseDir, `${toFileSafeName(name, 'memory name')}.json`);
 }
 
 function resolveStoragePath(projectRoot, configuredPath) {

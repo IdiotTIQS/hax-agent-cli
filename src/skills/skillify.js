@@ -1,5 +1,5 @@
-const fs = require('fs');
-const path = require('path');
+const fs = require('node:fs');
+const path = require('node:path');
 const { getUserSkillsDir, getProjectSkillsDir } = require('./loader');
 
 const SKILLIFY_PROMPT = `# Skillify {{userDescriptionBlock}}
