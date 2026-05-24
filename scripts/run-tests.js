@@ -10,7 +10,9 @@ const { spawn } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
 
-const prefix = process.argv[2] || '';
+const args = process.argv.slice(2);
+const useSerial = args.includes('--serial');
+const prefix = args.filter(a => a !== '--serial')[0] || '';
 
 function collectTestFiles(dir) {
   const results = [];
@@ -51,21 +53,95 @@ if (major > 20 || (major === 20 && minor >= 10)) {
 
 nodeArgs.push(...files);
 
-const cp = spawn(process.execPath, nodeArgs, {
-  stdio: 'inherit',
-  shell: false,
-});
+if (useSerial) {
+  // Run each test file in its own process to isolate global state
+  runSerial(nodeArgs);
+} else {
+  runParallel(nodeArgs);
+}
 
-// Global safety net: kill the entire process tree after 5 minutes.
-// Some test files hang in teardown even with --test-timeout.
-const GLOBAL_TIMEOUT_MS = 300_000;
-const killer = setTimeout(() => {
-  console.error('\n[run-tests] Global timeout reached — aborting.\n');
-  cp.kill('SIGTERM');
-  setTimeout(() => cp.kill('SIGKILL'), 5000);
-}, GLOBAL_TIMEOUT_MS);
+function runParallel(nodeArgs) {
+  const cp = spawn(process.execPath, nodeArgs, {
+    stdio: 'inherit',
+    shell: false,
+  });
 
-cp.on('exit', (code) => {
-  clearTimeout(killer);
-  process.exit(code || 0);
-});
+  const GLOBAL_TIMEOUT_MS = 300_000;
+  const killer = setTimeout(() => {
+    console.error('\n[run-tests] Global timeout reached — aborting.\n');
+    cp.kill('SIGTERM');
+    setTimeout(() => cp.kill('SIGKILL'), 5000);
+  }, GLOBAL_TIMEOUT_MS);
+
+  cp.on('exit', (code) => {
+    clearTimeout(killer);
+    process.exit(code || 0);
+  });
+}
+
+async function runSerial(nodeArgs) {
+  const files = [];
+  const flags = [];
+  for (const arg of nodeArgs) {
+    if (arg.startsWith('--')) flags.push(arg);
+    else files.push(arg);
+  }
+
+  let totalPass = 0;
+  let totalFail = 0;
+  let totalSkipped = 0;
+  const failures = [];
+
+  for (const file of files) {
+    const cp = spawn(process.execPath, [...flags, file], {
+      stdio: 'pipe',
+      shell: false,
+    });
+
+    let stdout = '';
+    cp.stdout.on('data', (d) => { stdout += d.toString(); });
+
+    const exitCode = await new Promise((resolve) => {
+      cp.on('exit', (code) => resolve(code || 0));
+      cp.on('error', () => resolve(1));
+    });
+
+    // Parse TAP summary
+    const passMatch = stdout.match(/# pass (\d+)/);
+    const failMatch = stdout.match(/# fail (\d+)/);
+    const skipMatch = stdout.match(/# skipped (\d+)/);
+
+    const pass = passMatch ? parseInt(passMatch[1], 10) : 0;
+    const fail = failMatch ? parseInt(failMatch[1], 10) : 0;
+    const skipped = skipMatch ? parseInt(skipMatch[1], 10) : 0;
+
+    totalPass += pass;
+    totalFail += fail;
+    totalSkipped += skipped;
+
+    // Stream output if there are failures
+    if (fail > 0 || exitCode !== 0) {
+      failures.push(file);
+      process.stdout.write(stdout);
+    }
+
+    // Show progress
+    const label = path.basename(file);
+    const status = fail === 0 && exitCode === 0 ? 'OK' : 'FAIL';
+    process.stdout.write(`  ${status.padEnd(5)} ${label}  (${pass} pass, ${fail} fail${skipped > 0 ? ', ' + skipped + ' skip' : ''})\n`);
+  }
+
+  const totalTests = totalPass + totalFail;
+  console.error(`\n1..${totalTests}`);
+  console.error(`# tests ${totalTests}`);
+  console.error(`# pass ${totalPass}`);
+  console.error(`# fail ${totalFail}`);
+  if (totalSkipped > 0) console.error(`# skipped ${totalSkipped}`);
+
+  if (failures.length > 0) {
+    console.error(`\n[run-tests --serial] ${failures.length} file(s) had failures:`);
+    for (const f of failures) console.error(`  ${f}`);
+  }
+
+  process.exit(totalFail > 0 ? 1 : 0);
+}

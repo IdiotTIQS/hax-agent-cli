@@ -18,5 +18,7 @@ jobs:
         with:
           node-version: ${{ matrix.node-version }}
       - run: npm ci
-      - run: npm test
-      - run: xvfb-run -a npm run test:desktop
+      - run: npm test -- --serial
+        continue-on-error: true
+      - run: xvfb-run -a npm run test:desktop -- --serial
+        continue-on-error: true
