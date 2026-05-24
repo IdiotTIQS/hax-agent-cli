@@ -249,7 +249,7 @@ function createTerminalInput({ rl, screen, session, history, callbacks }) {
 
     // Short paste: auto-process silently, no badge or confirmation needed.
     if (lineCount < 3 || content.length < 200) {
-      lineQueue = lineQueue.then(() => callbacks.onProcessLine(content, { pasted: true }));
+      lineQueue = lineQueue.then(() => callbacks.onProcessLine(content, { pasted: false }));
       callbacks.prompt();
       return;
     }
