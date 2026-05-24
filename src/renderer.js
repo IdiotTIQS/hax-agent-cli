@@ -523,9 +523,32 @@ function toToolLabel(name) {
     .join(' ');
 }
 
+// Field names that are likely to contain sensitive values
+const SENSITIVE_KEY_PATTERNS = [
+  /key/i, /token/i, /secret/i, /password/i, /passwd/i,
+  /credential/i, /auth/i, /env/i, /api[_-]?key/i, /access[_-]?key/i,
+  /private[_-]?key/i, /certificate/i, /authorization/i,
+];
+
+// Patterns that indicate a value is a secret even if the key isn't flagged
+const SENSITIVE_VALUE_PATTERNS = [
+  /^sk-[A-Za-z0-9_-]{20,}$/,
+  /^AIza[A-Za-z0-9_-]{30,}$/,
+  /^gh[pousr]_[A-Za-z0-9_-]{20,}$/,
+  /^[A-Za-z0-9+/]{40,}={0,2}$/,
+  /^[0-9a-fA-F]{40,}$/,
+];
+
 function isDisplayableInput(key, value) {
-  return !/key|token|secret|password|credential|auth|env/i.test(key) &&
-    (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean');
+  const isKeySensitive = SENSITIVE_KEY_PATTERNS.some((pattern) => pattern.test(key));
+  if (isKeySensitive) return false;
+
+  if (typeof value === 'string' && value.length > 20) {
+    const isValueSensitive = SENSITIVE_VALUE_PATTERNS.some((pattern) => pattern.test(value));
+    if (isValueSensitive) return false;
+  }
+
+  return (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean');
 }
 
 function formatProviderError(error, provider) {

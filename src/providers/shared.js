@@ -317,8 +317,9 @@ function shouldHoldPotentialToolPreamble(text, toolRegistry) {
   return isToolPreambleText(value) || [
     /^(?:let me|i'?ll|i will|i am going to|i'm going to)\b/i,
     /^(?:to|in order to)\b/i,
-    /^(?:好|好的|好嘞|行|行的|OK|ok)[，,。\s]*/i,
-    /^(?:我|让我|我来|我将|我会|先|继续|进一步|直接|马上|这就|立刻|立即)/,
+    // Only match Chinese openers when followed by tool-action words shortly after
+    /^(?:好[的了嘞吧啊哦]|行[的了吧]|OK|ok)[，,。\s]{0,8}(?:我|让我|我来|先|让我来|这就|马上).{0,20}(?:检查|查看|读取|了解|分析|探索|浏览|确认|获取|写|创建|生成|建|搭建|做|动手)/,
+    /^(?:我|让我|我来|我将|我会|先|继续|进一步|直接|马上|这就|立刻|立即).{0,12}(?:检查|查看|读取|了解|分析|探索|浏览|确认|获取|写|创建|生成|建|搭建)/,
   ].some((pattern) => pattern.test(value));
 }
 

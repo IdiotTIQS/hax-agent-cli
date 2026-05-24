@@ -56,7 +56,8 @@ class ToolRegistry {
       throw new ToolExecutionError('INVALID_TOOL_EXECUTOR', `Tool "${tool.name}" must provide an execute function.`);
     }
 
-    if (this.tools.has(tool.name)) {
+    const key = tool.name.toLowerCase();
+    if (this.tools.has(key)) {
       throw new ToolExecutionError('DUPLICATE_TOOL', `Tool "${tool.name}" is already registered.`);
     }
 
@@ -71,7 +72,7 @@ class ToolRegistry {
       : this._defaultTimeoutMs;
     executeFn = withTimeout(executeFn, timeoutMs);
 
-    this.tools.set(tool.name, {
+    this.tools.set(key, {
       name: tool.name,
       description: tool.description || '',
       inputSchema: tool.inputSchema || null,
@@ -111,7 +112,7 @@ class ToolRegistry {
         throw new ToolExecutionError('INVALID_TOOL_NAME', 'Tool name must be a non-empty string.');
       }
 
-      if (SINGLE_CALL_TOOLS.has(name) && this.hasSingleCallResult(name)) {
+      if (SINGLE_CALL_TOOLS.has(name.toLowerCase()) && this.hasSingleCallResult(name)) {
         const cachedResult = this._singleCallCache.get(name).data;
         const serialized = serializeToolResult({
           toolName: name,
@@ -124,7 +125,7 @@ class ToolRegistry {
       }
 
       assertPlainObject(args, 'Tool arguments');
-      const tool = this.tools.get(name);
+      const tool = this.tools.get(name.toLowerCase());
 
       if (!tool) {
         throw new ToolExecutionError('TOOL_NOT_FOUND', `Tool "${name}" is not registered.`);

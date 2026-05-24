@@ -327,6 +327,7 @@ function _buildBuiltinTools(root, settings) {
     { fn: './tools/file-readdir', create: 'createReadDirectoryTool' },
     { fn: './tools/file-delete',  create: 'createDeleteFileTool' },
     { fn: './tools/stock-quote',  create: 'createStockQuoteTool' },
+    { fn: './tools/skill',        create: 'createSkillTool' },
   ];
 
   for (const { fn, create } of toolDefs) {

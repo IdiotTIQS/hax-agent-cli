@@ -99,15 +99,15 @@ When users ask you to perform tasks, check if any of the available skills match.
 When users reference a "slash command" or "/<something>" (e.g., "/commit", "/review-pr"), they are referring to a skill.
 
 How to invoke:
-- Use the skill name with a leading slash, optionally with arguments
+- Call the **Skill** tool with the skill name (no leading slash) and optional args string
 - Examples:
-  - \`/pdf\` - invoke the pdf skill
-  - \`/code-review src/index.js\` - invoke with arguments
-  - \`/review-pr 123\` - invoke with arguments
+  - Skill({ name: "pdf" }) — invoke the pdf skill
+  - Skill({ name: "code-review", args: "src/index.js" }) — invoke with arguments
+  - Skill({ name: "review-pr", args: "123" }) — invoke with arguments
 
 Important:
-- When a skill matches the user's request, this is a BLOCKING REQUIREMENT: invoke the relevant skill BEFORE generating any other response about the task
-- NEVER mention a skill without actually invoking it
+- When a skill matches the user's request, this is a BLOCKING REQUIREMENT: invoke the relevant Skill tool BEFORE generating any other response about the task
+- NEVER mention a skill without actually calling the Skill tool
 - Do not invoke a skill that is already running
 - Do not use this for built-in CLI commands (like /help, /clear, etc.)
 </system-reminder>`;

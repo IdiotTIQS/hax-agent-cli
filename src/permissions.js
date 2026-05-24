@@ -94,6 +94,11 @@ function getWebFetchPermission(url) {
     return PermissionLevel.ASK;
   }
 
+  // Only allow http/https protocols to be auto-approved
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    return PermissionLevel.ASK;
+  }
+
   if (isPrivateOrLocalHost(parsed.hostname)) {
     return PermissionLevel.ASK;
   }

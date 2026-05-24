@@ -190,74 +190,81 @@ class AgentEngine {
   }
 
   async *_runUserMessage(content, options = {}) {
-    const session = this.session;
-    const explicitSkill = findExplicitSkill(content, session, this.projectRoot);
+    try {
+      const session = this.session;
+      const explicitSkill = findExplicitSkill(content, session, this.projectRoot);
 
-    if (explicitSkill) {
-      recordSkillUsage(explicitSkill.skill.name);
-      yield* this._runSkill(explicitSkill.skill, explicitSkill.args, {
-        ...options,
-        invokedBy: "slash",
-      });
-      return;
-    }
+      if (explicitSkill) {
+        recordSkillUsage(explicitSkill.skill.name);
+        yield* this._runSkill(explicitSkill.skill, explicitSkill.args, {
+          ...options,
+          invokedBy: "slash",
+        });
+        return;
+      }
 
-    const skills = getSkillsForSession(this.projectRoot, session.messages);
-    const intentMatchedSkill = options.disableIntentMatching
-      ? null
-      : matchSkillByIntent(content, skills);
+      const skills = getSkillsForSession(this.projectRoot, session.messages);
+      const intentMatchedSkill = options.disableIntentMatching
+        ? null
+        : matchSkillByIntent(content, skills);
 
-    if (intentMatchedSkill) {
-      recordSkillUsage(intentMatchedSkill.name);
-      yield createEvent(AgentEventType.skillMatched, {
-        skill: serializeSkill(intentMatchedSkill),
-        invokedBy: "intent",
-      }, session);
-      yield* this._runSkill(intentMatchedSkill, [], {
-        ...options,
-        invokedBy: "intent",
-      });
-      return;
-    }
+      if (intentMatchedSkill) {
+        recordSkillUsage(intentMatchedSkill.name);
+        yield createEvent(AgentEventType.skillMatched, {
+          skill: serializeSkill(intentMatchedSkill),
+          invokedBy: "intent",
+        }, session);
+        yield* this._runSkill(intentMatchedSkill, [], {
+          ...options,
+          invokedBy: "intent",
+        });
+        return;
+      }
 
-    let completion = null;
-    for await (const event of this._runProviderTurn({
-      content,
-      userMessage: { role: "user", content },
-      system: buildSkillSystemPrompt(skills),
-      persistTranscript: options.persistTranscript !== false,
-      interruptionTestEnabled: this.env.HAX_AGENT_TEST_INTERRUPT_AFTER_TEXT === "1",
-    })) {
-      if (event.type === AgentEventType.completed) completion = event;
-      yield event;
-    }
-
-    if (!shouldContinueGoal(session, completion?.assistantMessage?.content)) {
-      return;
-    }
-
-    const maxContinuations = getGoalContinuationLimit(session);
-    for (let index = 0; index < maxContinuations; index += 1) {
-      const continuationContent = [
-        "[goal continuation]",
-        `Active goal: ${session.goal.text}`,
-        "Continue working toward the active goal. Use tools and verification where useful. If the goal is complete, state the evidence and end with GOAL_STATUS: complete.",
-      ].join("\n");
-
-      let continuationCompletion = null;
+      let completion = null;
       for await (const event of this._runProviderTurn({
-        content: continuationContent,
-        userMessage: { role: "user", content: continuationContent, internal: true },
+        content,
+        userMessage: { role: "user", content },
         system: buildSkillSystemPrompt(skills),
-        persistTranscript: false,
-        interruptionTestEnabled: false,
+        persistTranscript: options.persistTranscript !== false,
+        interruptionTestEnabled: this.env.HAX_AGENT_TEST_INTERRUPT_AFTER_TEXT === "1",
       })) {
-        if (event.type === AgentEventType.completed) continuationCompletion = event;
+        if (event.type === AgentEventType.completed) completion = event;
         yield event;
       }
 
-      if (!shouldContinueGoal(session, continuationCompletion?.assistantMessage?.content)) {
+      if (!shouldContinueGoal(session, completion?.assistantMessage?.content)) {
         return;
+      }
+
+      const maxContinuations = getGoalContinuationLimit(session);
+      for (let index = 0; index < maxContinuations; index += 1) {
+        const continuationContent = [
+          "[goal continuation]",
+          `Active goal: ${session.goal.text}`,
+          "Continue working toward the active goal. Use tools and verification where useful. If the goal is complete, state the evidence and end with GOAL_STATUS: complete.",
+        ].join("\n");
+
+        let continuationCompletion = null;
+        for await (const event of this._runProviderTurn({
+          content: continuationContent,
+          userMessage: { role: "user", content: continuationContent, internal: true },
+          system: buildSkillSystemPrompt(skills),
+          persistTranscript: false,
+          interruptionTestEnabled: false,
+        })) {
+          if (event.type === AgentEventType.completed) continuationCompletion = event;
+          yield event;
+        }
+
+        if (!shouldContinueGoal(session, continuationCompletion?.assistantMessage?.content)) {
+          return;
+        }
+      }
+    } catch (err) {
+      yield { type: 'error', message: err.message || String(err), recoverable: false };
+      if (typeof debug === 'function') {
+        debug('agent', `_runUserMessage error: ${err.stack || err.message}`);
       }
     }
   }
@@ -294,200 +301,214 @@ class AgentEngine {
   }
 
   async *_runProviderTurn(options) {
-    const session = this.session;
-    const userMessage = options.userMessage;
-    const abortController = new AbortController();
-    let assistantText = "";
-    let terminalProviderIssue = null;
-    const turnInputTokens = session.costTracker.inputTokens;
-    const turnOutputTokens = session.costTracker.outputTokens;
-
-    session.toolRegistry.resetSingleCallTracking();
-
-    // === CONTEXT PIPELINE: pre-turn compaction & budget check ===
-    this._contextManager?.preTurn(session, { content: options.content });
-
-    session.messages.push(userMessage);
-    session.isStreaming = true;
-    session.responseInterrupted = false;
-    session.responseAbortController = abortController;
-    session.responseRenderer = null;
-
-    // Increment agent.turns counter (observability).
     try {
-      const metrics = _getMetrics ? _getMetrics() : null;
-      if (metrics) {
-        metrics.get("agent.turns")?.inc();
-      }
-    } catch (_) { /* no-op */ }
+      const session = this.session;
+      const userMessage = options.userMessage;
+      const abortController = new AbortController();
+      let assistantText = "";
+      let terminalProviderIssue = null;
+      const turnInputTokens = session.costTracker.inputTokens;
+      const turnOutputTokens = session.costTracker.outputTokens;
 
-    // Reset per-turn tool-span stack.
-    this._toolSpanStack = [];
+      session.toolRegistry.resetSingleCallTracking();
 
-    const promptContext = await buildTurnSystemPrompt({
-      baseSystem: options.system,
-      settings: session.settings,
-      session,
-      projectRoot: this.projectRoot,
-      query: options.content,
-    });
-    const contextWindow = prepareContextWindow({
-      messages: session.messages,
-      system: promptContext.system,
-      settings: session.settings,
-      model: session.provider?.model,
-      outputTokens: options.maxTokens || session.provider?.maxTokens,
-    });
-    // Persist stats so the status line can display a context-usage meter
-    session.contextStats = contextWindow.stats;
+      // === CONTEXT PIPELINE: pre-turn compaction & budget check ===
+      this._contextManager?.preTurn(session, { content: options.content });
 
-    yield createEvent(AgentEventType.started, {
-      userMessage,
-      skill: serializeSkill(options.skill),
-      context: {
-        ...contextWindow.stats,
-        fileContext: promptContext.fileContext.stats,
-      },
-    }, session);
+      session.messages.push(userMessage);
+      session.isStreaming = true;
+      session.responseInterrupted = false;
+      session.responseAbortController = abortController;
+      session.responseRenderer = null;
 
-    this.eventBus.emit('agent:turn_start', {
-      sessionId: session.id,
-      content: options.content,
-      skill: options.skill ? options.skill.name : null,
-    });
-
-    try {
-      const maxToolTurns = session.settings?.agent?.maxTurns
-        || session.settings?.agent?.maxToolTurns
-        || 25;
-      for await (const chunk of session.provider.stream({
-        messages: contextWindow.messages,
-        toolRegistry: session.toolRegistry,
-        signal: abortController.signal,
-        system: contextWindow.system,
-        context: contextWindow.stats,
-        maxToolTurns,
-      })) {
-        if (session.responseInterrupted) break;
-
-        const event = this._applyProviderChunk(chunk, {
-          assistantText,
-          turnInputTokens,
-          turnOutputTokens,
-        });
-
-        if (chunk.type === "text") {
-          assistantText += chunk.delta;
+      // Increment agent.turns counter (observability).
+      try {
+        const metrics = _getMetrics ? _getMetrics() : null;
+        if (metrics) {
+          metrics.get("agent.turns")?.inc();
         }
+      } catch (_) { /* no-op */ }
 
-        if (chunk.type === "tool_limit" && isTerminalToolLimitReason(chunk.reason)) {
-          terminalProviderIssue = {
-            reason: chunk.reason,
-            maxToolTurns: chunk.maxToolTurns,
-          };
+      // Reset per-turn tool-span stack.
+      this._toolSpanStack = [];
+
+      const promptContext = await buildTurnSystemPrompt({
+        baseSystem: options.system,
+        settings: session.settings,
+        session,
+        projectRoot: this.projectRoot,
+        query: options.content,
+      });
+      const contextWindow = prepareContextWindow({
+        messages: session.messages,
+        system: promptContext.system,
+        settings: session.settings,
+        model: session.provider?.model,
+        outputTokens: options.maxTokens || session.provider?.maxTokens,
+      });
+      // Persist stats so the status line can display a context-usage meter
+      session.contextStats = contextWindow.stats;
+
+      yield createEvent(AgentEventType.started, {
+        userMessage,
+        skill: serializeSkill(options.skill),
+        context: {
+          ...contextWindow.stats,
+          fileContext: promptContext.fileContext.stats,
+        },
+      }, session);
+
+      this.eventBus.emit('agent:turn_start', {
+        sessionId: session.id,
+        content: options.content,
+        skill: options.skill ? options.skill.name : null,
+      });
+
+      try {
+        const maxToolTurns = session.settings?.agent?.maxTurns
+          || session.settings?.agent?.maxToolTurns
+          || 25;
+        for await (const chunk of session.provider.stream({
+          messages: contextWindow.messages,
+          toolRegistry: session.toolRegistry,
+          signal: abortController.signal,
+          system: contextWindow.system,
+          context: contextWindow.stats,
+          maxToolTurns,
+        })) {
+          if (session.responseInterrupted) break;
+
+          const event = this._applyProviderChunk(chunk, {
+            assistantText,
+            turnInputTokens,
+            turnOutputTokens,
+          });
+
+          if (chunk.type === "text") {
+            assistantText += chunk.delta;
+          }
+
+          if (chunk.type === "tool_limit" && isTerminalToolLimitReason(chunk.reason)) {
+            terminalProviderIssue = {
+              reason: chunk.reason,
+              maxToolTurns: chunk.maxToolTurns,
+            };
+          }
+
+          if (event) {
+            yield event;
+          }
+
+          if (chunk.type === "text" && options.interruptionTestEnabled) {
+            session.responseInterrupted = true;
+            yield createEvent(AgentEventType.interrupted, {
+              reason: "test_interrupt_after_text",
+            }, session);
+            this.eventBus.emit('agent:interrupt', {
+              sessionId: session.id,
+              reason: "test_interrupt_after_text",
+            });
+            break;
+          }
         }
-
-        if (event) {
-          yield event;
-        }
-
-        if (chunk.type === "text" && options.interruptionTestEnabled) {
-          session.responseInterrupted = true;
+      } catch (error) {
+        if (session.responseInterrupted || error?.name === "AbortError") {
+          session.messages.pop();
           yield createEvent(AgentEventType.interrupted, {
-            reason: "test_interrupt_after_text",
+            reason: error?.name === "AbortError" ? "abort" : "interrupt",
           }, session);
           this.eventBus.emit('agent:interrupt', {
             sessionId: session.id,
-            reason: "test_interrupt_after_text",
+            reason: error?.name === "AbortError" ? "abort" : "interrupt",
           });
-          break;
+          this._contextManager?.postTurn(session, { status: 'interrupted' });
+          return;
         }
-      }
-    } catch (error) {
-      if (session.responseInterrupted || error?.name === "AbortError") {
+
         session.messages.pop();
-        yield createEvent(AgentEventType.interrupted, {
-          reason: error?.name === "AbortError" ? "abort" : "interrupt",
+        yield createEvent(AgentEventType.failed, {
+          error: serializeError(error),
+          provider: serializeProvider(session.provider),
         }, session);
-        this.eventBus.emit('agent:interrupt', {
+        this.eventBus.emit('agent:error', {
           sessionId: session.id,
-          reason: error?.name === "AbortError" ? "abort" : "interrupt",
+          error: error?.message || String(error),
+          provider: serializeProvider(session.provider),
         });
+        this._contextManager?.postTurn(session, { status: 'error' });
+        return;
+      } finally {
+        session.isStreaming = false;
+        session.responseAbortController = null;
+        session.responseRenderer = null;
+      }
+
+      if (session.responseInterrupted) {
+        session.messages.pop();
         this._contextManager?.postTurn(session, { status: 'interrupted' });
         return;
       }
 
-      session.messages.pop();
-      yield createEvent(AgentEventType.failed, {
-        error: serializeError(error),
-        provider: serializeProvider(session.provider),
-      }, session);
-      this.eventBus.emit('agent:error', {
-        sessionId: session.id,
-        error: error?.message || String(error),
-        provider: serializeProvider(session.provider),
-      });
-      this._contextManager?.postTurn(session, { status: 'error' });
-      return;
-    } finally {
-      session.isStreaming = false;
-      session.responseAbortController = null;
-      session.responseRenderer = null;
-    }
+      const turnUsage = {
+        inputTokens: session.costTracker.inputTokens - turnInputTokens,
+        outputTokens: session.costTracker.outputTokens - turnOutputTokens,
+      };
 
-    if (session.responseInterrupted) {
-      session.messages.pop();
-      this._contextManager?.postTurn(session, { status: 'interrupted' });
-      return;
-    }
+      if (terminalProviderIssue) {
+        session.messages.pop();
+        yield createEvent(AgentEventType.failed, {
+          error: serializeProviderIssue(terminalProviderIssue),
+          partialAssistantMessage: { role: "assistant", content: assistantText },
+          usage: turnUsage,
+        }, session);
+        this.eventBus.emit('agent:error', {
+          sessionId: session.id,
+          error: terminalProviderIssue.reason || 'tool_limit',
+          terminal: true,
+        });
+        this._contextManager?.postTurn(session, {
+          status: 'error',
+          usage: turnUsage,
+        });
+        return;
+      }
 
-    const turnUsage = {
-      inputTokens: session.costTracker.inputTokens - turnInputTokens,
-      outputTokens: session.costTracker.outputTokens - turnOutputTokens,
-    };
+      const assistantMessage = { role: "assistant", content: assistantText };
 
-    if (terminalProviderIssue) {
-      session.messages.pop();
-      yield createEvent(AgentEventType.failed, {
-        error: serializeProviderIssue(terminalProviderIssue),
-        partialAssistantMessage: { role: "assistant", content: assistantText },
+      session.messages.push(assistantMessage);
+
+      if (options.persistTranscript) {
+        appendTranscriptEntry(session.id, userMessage, session.settings);
+        appendTranscriptEntry(session.id, assistantMessage, session.settings);
+      }
+
+      yield createEvent(AgentEventType.completed, {
+        assistantMessage,
         usage: turnUsage,
       }, session);
-      this.eventBus.emit('agent:error', {
+
+      this.eventBus.emit('agent:turn_end', {
         sessionId: session.id,
-        error: terminalProviderIssue.reason || 'tool_limit',
-        terminal: true,
+        usage: turnUsage,
       });
+
       this._contextManager?.postTurn(session, {
-        status: 'error',
+        status: 'completed',
         usage: turnUsage,
       });
-      return;
+    } catch (err) {
+      this.isStreaming = false;
+      if (this._responseAbortController) {
+        this._responseAbortController.abort();
+      }
+      if (this._renderer) {
+        this._renderer.fail(err.message || String(err));
+      }
+      yield { type: 'failed', error: err.message || String(err) };
+      if (typeof debug === 'function') {
+        debug('agent', `_runProviderTurn error: ${err.stack || err.message}`);
+      }
     }
-
-    const assistantMessage = { role: "assistant", content: assistantText };
-
-    session.messages.push(assistantMessage);
-
-    if (options.persistTranscript) {
-      appendTranscriptEntry(session.id, userMessage, session.settings);
-      appendTranscriptEntry(session.id, assistantMessage, session.settings);
-    }
-
-    yield createEvent(AgentEventType.completed, {
-      assistantMessage,
-      usage: turnUsage,
-    }, session);
-
-    this.eventBus.emit('agent:turn_end', {
-      sessionId: session.id,
-      usage: turnUsage,
-    });
-
-    this._contextManager?.postTurn(session, {
-      status: 'completed',
-      usage: turnUsage,
-    });
   }
 
   _applyProviderChunk(chunk, state) {
