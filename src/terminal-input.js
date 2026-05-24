@@ -189,9 +189,12 @@ function createTerminalInput({ rl, screen, session, history, callbacks }) {
 
   // ── Paste helpers ────────────────────────────────────────────────────
 
+  let prePasteLine = '';
+
   function startBracketedPaste() {
     bracketedPasteActive = true;
     bracketedPasteLines = [];
+    prePasteLine = rl.line;
     rl.line = '';
     rl.cursor = 0;
     rl.output.muted = true;
@@ -205,8 +208,15 @@ function createTerminalInput({ rl, screen, session, history, callbacks }) {
     if (rl.line) {
       bracketedPasteLines.push(rl.line);
     }
+    // Prepend any text that was in the input line before pasting
+    if (prePasteLine && bracketedPasteLines.length > 0) {
+      bracketedPasteLines[0] = prePasteLine + bracketedPasteLines[0];
+    } else if (prePasteLine && bracketedPasteLines.length === 0) {
+      bracketedPasteLines.push(prePasteLine);
+    }
     const input = bracketedPasteLines.join('\n');
     bracketedPasteLines = [];
+    prePasteLine = '';
     rl.line = '';
     rl.cursor = 0;
 
