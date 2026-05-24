@@ -328,6 +328,7 @@ function _buildBuiltinTools(root, settings) {
     { fn: './tools/file-delete',  create: 'createDeleteFileTool' },
     { fn: './tools/stock-quote',  create: 'createStockQuoteTool' },
     { fn: './tools/skill',        create: 'createSkillTool' },
+    { fn: './tools/cli-test',     create: 'createCliTestTool' },
   ];
 
   for (const { fn, create } of toolDefs) {
