@@ -1,0 +1,7 @@
+{
+  "name": "hax-agent-desktop",
+  "version": "1.5.3",
+  "description": "HaxAgent Desktop Application",
+  "main": "main/index.js",
+  "private": true
+}

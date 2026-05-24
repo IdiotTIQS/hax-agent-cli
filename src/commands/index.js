@@ -1102,6 +1102,25 @@ function showConfig({ screen, session }) {
   const reserve = Number(session.settings.context?.reserveOutputTokens) > 0 ? Number(session.settings.context.reserveOutputTokens) : 8192;
   screen.write(`  ${THEME.dim}Context:${ANSI.reset || ''}      ${session.settings.context?.enabled === false ? t('common.disabled') : `${formatContextTokens(contextWindow)} window · ${formatContextTokens(Math.max(1, contextWindow - reserve))} input budget`}\n`);
   screen.write('\n');
+
+  // Show config file paths and priority so users know where to edit
+  try {
+    const { resolveSettings } = require('../config');
+    const resolved = resolveSettings();
+    const loadedSources = resolved.sources.filter((s) => s.loaded);
+    if (loadedSources.length > 0) {
+      screen.write(`  ${THEME.heading}${t('config.sources')}${ANSI.reset || ''}\n`);
+      const labels = { user: t('config.sourceUser'), project: t('config.sourceProject'), explicit: t('config.sourceExplicit') };
+      for (const src of loadedSources) {
+        const label = labels[src.type] || src.type;
+        screen.write(`    ${THEME.dim}[${label}]${ANSI.reset || ''} ${src.path}\n`);
+      }
+      screen.write(`  ${THEME.dim}${t('config.priorityNote')}${ANSI.reset || ''}\n`);
+    } else {
+      screen.write(`  ${THEME.warning}${t('config.noConfigFile')}${ANSI.reset || ''}\n`);
+    }
+  } catch (_) { /* best-effort */ }
+  screen.write('\n');
 }
 
 function runDoctor({ screen, session }) {
