@@ -228,33 +228,11 @@ class GoogleProvider extends ChatProvider {
         lastToolName.current = toolName;
       }
 
-      const permissionResults = await Promise.all(
-        functionCalls.map(async (fc) => {
-          const toolName = toRegistryToolName(fc.name);
-          const level = getPermissionLevel(toolRegistry, toolName);
-          if (level === "allow") {
-            return null;
-          }
-          return { fc, toolName, level, toolInput: fc.args || {} };
-        })
-      );
-
-      const needsApproval = permissionResults.filter(Boolean);
-      if (needsApproval.length > 0) {
-        for (const { fc, toolName, level, toolInput } of needsApproval) {
-          const toolResult = {
-            type: "tool_result",
-            tool_use_id: fc.name,
-            toolName,
-            requiresApproval: true,
-            level,
-            input: toolInput,
-            description: fc.description,
-          };
-          yield toolResult;
-        }
-        return;
-      }
+      // Permission checks are intentionally NOT performed here.
+      // They are delegated to the tool execution layer (tools/index.js)
+      // for consistency across all providers (Anthropic, OpenAI, Google).
+      // Mid-stream permission checks in provider-specific code were removed
+      // to keep behaviour uniform and avoid duplicate checks.
 
       const toolResultParts = [];
       for (const fc of functionCalls) {
@@ -584,11 +562,13 @@ function createGoogleClient(apiKey, apiUrl) {
     throw new Error("No API key provided. Set GEMINI_API_KEY or GOOGLE_API_KEY environment variable, or use config set google.apiKey");
   }
 
-  // NOTE: The @google/generative-ai SDK transmits the API key as a URL query parameter
-  // (e.g. https://generativelanguage.googleapis.com/v1/models/...?key=YOUR_KEY).
-  // This means the key may appear in server logs, proxies, and network traces.
-  // For production deployments, consider using a proxy that rewrites the key into an
-  // Authorization header, or use the Google Cloud Vertex AI authentication instead.
+  console.warn(
+    "[HaxAgent] Google GenAI SDK transmits the API key as a URL query parameter " +
+    "(e.g. https://generativelanguage.googleapis.com/v1/models/...?key=YOUR_KEY). " +
+    "The key may appear in server logs, proxy records, and network traces. " +
+    "For production deployments, prefer a service account (GOOGLE_APPLICATION_CREDENTIALS) " +
+    "or Application Default Credentials (ADC) instead of an API key."
+  );
   return new GoogleGenerativeAI({ apiKey: resolvedApiKey });
 }
 

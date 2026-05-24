@@ -4,7 +4,7 @@ const { ToolExecutionError } = require('./error');
 const {
   DEFAULT_FILE_OP_TIMEOUT_MS,
   requireString,
-  resolveWithinRoot,
+  resolveWithinRootSafe,
   toWorkspacePath,
   withTimeout,
 } = require('./utils');
@@ -35,16 +35,24 @@ function createFileEditTool() {
         throw new ToolExecutionError('INVALID_ENCODING', `Unsupported file encoding: ${encoding}`);
       }
 
+      // 10 MB limit to prevent OOM on large files
+      const MAX_FILE_BYTES = 10 * 1024 * 1024;
+
       if (oldStr === newStr) {
+        const resolvedPath = await resolveWithinRootSafe(context.root, filePath);
         return {
-          path: toWorkspacePath(context.root, resolveWithinRoot(context.root, filePath)),
+          path: toWorkspacePath(context.root, resolvedPath),
           changed: false,
           message: 'oldStr and newStr are identical, no changes needed.',
         };
       }
 
-      const resolvedPath = resolveWithinRoot(context.root, filePath);
+      const resolvedPath = await resolveWithinRootSafe(context.root, filePath);
       const content = await withTimeout(fs.readFile(resolvedPath, { encoding }), DEFAULT_FILE_OP_TIMEOUT_MS, `read ${filePath}`);
+      const fileBytes = Buffer.byteLength(content, encoding);
+      if (fileBytes > MAX_FILE_BYTES) {
+        throw new ToolExecutionError('FILE_TOO_LARGE', `File exceeds ${MAX_FILE_BYTES / 1024 / 1024} MB limit (${(fileBytes / 1024 / 1024).toFixed(1)} MB)`);
+      }
 
       const firstIndex = content.indexOf(oldStr);
 

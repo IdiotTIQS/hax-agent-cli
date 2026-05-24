@@ -3,7 +3,7 @@
 const { THEME, ANSI, styled, stripAnsi } = require('./renderer');
 
 function createTerminalOutput({ screen, session, rl, readlineOutput }) {
-  const inputAreaRows = 2;
+  let inputAreaRows = 2;
   let inputAreaActive = false;
   let activePromptKind = 'main';
   const moveCursorUp = (rows) => (rows > 0 ? `\x1B[${rows}A` : '');

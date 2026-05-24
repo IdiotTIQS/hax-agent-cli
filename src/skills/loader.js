@@ -119,10 +119,15 @@ function getSkillsPath(source, dir) {
   }
 }
 
+function buildSessionSkillList(skills, ...prependSkills) {
+  return [...prependSkills, ...skills].filter((s) => !s.isHidden);
+}
+
 module.exports = {
   loadAllSkills,
   loadSkillsFromDir,
   getUserSkillsDir,
   getProjectSkillsDir,
   getSkillsPath,
+  buildSessionSkillList,
 };

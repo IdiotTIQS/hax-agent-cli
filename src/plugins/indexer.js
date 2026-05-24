@@ -80,9 +80,46 @@ class PluginIndex {
       throw new Error(`Plugin file not found: ${resolved}`);
     }
 
-    // Clear cache so we always get a fresh read
-    delete require.cache[require.resolve(resolved)];
-    const plugin = require(resolved);
+    // KNOWN RISK: The require() call below executes arbitrary JavaScript with
+    // full Node.js process privileges.  A malicious plugin can read/write
+    // files, access the network, and spawn sub-processes.  Proper sandboxing
+    // (e.g. Node.js worker_threads or vm.Module) is deferred to a major
+    // refactor — in the meantime, prefer reviewed plugins from trusted sources.
+    //
+    // We check for an optional "sandbox" property on the plugin or its
+    // package.json to surface whether the author claims the plugin is safe
+    // to run in a restricted environment.
+    let sandboxDeclared = false;
+    try {
+      const pkgPath = path.join(path.dirname(resolved), "package.json");
+      if (fs.existsSync(pkgPath)) {
+        const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
+        if (pkg.sandbox !== undefined) sandboxDeclared = true;
+      }
+    } catch (_) { /* best-effort */ }
+
+    let plugin;
+    try {
+      // Clear cache so we always get a fresh read
+      delete require.cache[require.resolve(resolved)];
+      plugin = require(resolved);
+    } catch (loadErr) {
+      console.error(`[PluginIndex] Failed to load plugin at "${resolved}": ${loadErr.message}`);
+      throw loadErr;
+    }
+
+    if (!sandboxDeclared && (!plugin || typeof plugin === "object")) {
+      // If the plugin object itself declares a sandbox field, trust that.
+      if (plugin && plugin.sandbox !== undefined) sandboxDeclared = true;
+    }
+
+    if (!sandboxDeclared) {
+      console.warn(
+        `[PluginIndex] Plugin "${plugin?.name || resolved}" runs with FULL Node.js privileges. ` +
+        `No "sandbox" field found in package.json or plugin manifest. ` +
+        `Only load plugins from trusted sources.`
+      );
+    }
 
     if (!plugin || typeof plugin !== "object") {
       throw new Error(`File does not export a valid plugin object: ${resolved}`);

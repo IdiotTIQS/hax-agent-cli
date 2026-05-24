@@ -176,11 +176,19 @@ function parseMembersOption(value) {
   }).filter((member) => member.agentType);
 }
 
+function escapeShellArg(value) {
+  const s = String(value ?? '');
+  if (s.includes('"')) {
+    return `"${s.replace(/"/g, '\\"')}"`;
+  }
+  return `"${s}"`;
+}
+
 function formatTeamConfirmCommand(plan) {
   const memberFlags = plan.members
-    .map((m) => `--member ${m.agentType}:${m.name}`)
+    .map((m) => `--member ${escapeShellArg(`${m.agentType}:${m.name}`)}`)
     .join(' ');
-  return `/team create ${plan.name} --mission "${plan.mission}" ${memberFlags}`;
+  return `/team create ${escapeShellArg(plan.name)} --mission ${escapeShellArg(plan.mission || '')} ${memberFlags}`;
 }
 
 module.exports = {

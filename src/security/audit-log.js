@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const fsp = require('node:fs/promises');
 const path = require('node:path');
 const { createHash } = require('node:crypto');
+const { redactSecrets } = require('./input-sanitizer');
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -91,6 +92,7 @@ function summarizeArgs(toolName, args) {
   if ((toolName === 'file.write' || toolName === 'file.edit') && typeof summary.content === 'string') {
     summary.contentLength = summary.content.length;
     summary.content = summary.content.slice(0, 200) + (summary.content.length > 200 ? '...[truncated]' : '');
+    summary.content = redactSecrets(summary.content);
   }
   return summary;
 }

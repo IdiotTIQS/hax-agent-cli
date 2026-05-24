@@ -416,7 +416,11 @@ function optimizeChunks(messages, maxChunkTokens, charsPerToken) {
         }
 
         endIdx = bestSplit - 1;
-        i = bestSplit;
+        if (bestSplit > i) {
+          i = bestSplit;
+        } else {
+          i = i + 1;
+        }
         break;
       }
 

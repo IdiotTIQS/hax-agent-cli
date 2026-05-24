@@ -1,6 +1,17 @@
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { parseFrontmatter: skillsParseFrontmatter } = require('../skills/parser');
+
+/**
+ * Parse YAML-style frontmatter from a markdown file.
+ * Delegates to the canonical skills/parser.js implementation and
+ * adapts the return field name (content -> body) for agent file conventions.
+ */
+function parseFrontmatter(content) {
+  const result = skillsParseFrontmatter(content);
+  return { frontmatter: result.frontmatter, body: result.content };
+}
 
 const BUILT_IN_AGENTS = Object.freeze([
   {
@@ -208,85 +219,6 @@ function normalizeAgentDefinition(input, defaults = {}) {
     filePath: input.filePath,
     source: input.source || defaults.source || 'custom',
   });
-}
-
-function parseFrontmatter(content) {
-  const normalized = String(content || '').replace(/^\uFEFF/, '');
-
-  if (!normalized.startsWith('---\n') && !normalized.startsWith('---\r\n')) {
-    return { frontmatter: {}, body: normalized };
-  }
-
-  const lines = normalized.split(/\r?\n/);
-  const frontmatterLines = [];
-  let endIndex = -1;
-
-  for (let index = 1; index < lines.length; index += 1) {
-    if (lines[index].trim() === '---') {
-      endIndex = index;
-      break;
-    }
-    frontmatterLines.push(lines[index]);
-  }
-
-  if (endIndex === -1) {
-    return { frontmatter: {}, body: normalized };
-  }
-
-  return {
-    frontmatter: parseFrontmatterLines(frontmatterLines),
-    body: lines.slice(endIndex + 1).join('\n'),
-  };
-}
-
-function parseFrontmatterLines(lines) {
-  const data = {};
-  let currentKey = null;
-
-  for (const line of lines) {
-    if (/^\s+-\s+/.test(line) && currentKey) {
-      const existing = Array.isArray(data[currentKey]) ? data[currentKey] : [];
-      existing.push(line.replace(/^\s+-\s+/, '').trim());
-      data[currentKey] = existing;
-      continue;
-    }
-
-    const match = /^([A-Za-z0-9_-]+):\s*(.*)$/.exec(line);
-    if (!match) {
-      continue;
-    }
-
-    currentKey = match[1];
-    data[currentKey] = parseFrontmatterValue(match[2]);
-  }
-
-  return data;
-}
-
-function parseFrontmatterValue(value) {
-  const trimmed = String(value || '').trim();
-
-  if (!trimmed) {
-    return '';
-  }
-
-  if ((trimmed.startsWith('"') && trimmed.endsWith('"')) || (trimmed.startsWith("'") && trimmed.endsWith("'"))) {
-    return trimmed.slice(1, -1);
-  }
-
-  if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
-    return trimmed.slice(1, -1).split(',').map((item) => item.trim().replace(/^['"]|['"]$/g, '')).filter(Boolean);
-  }
-
-  if (/^(true|false)$/i.test(trimmed)) {
-    return trimmed.toLowerCase() === 'true';
-  }
-
-  if (/^\d+$/.test(trimmed)) {
-    return Number(trimmed);
-  }
-
-  return trimmed;
 }
 
 function listMarkdownFiles(directoryPath) {

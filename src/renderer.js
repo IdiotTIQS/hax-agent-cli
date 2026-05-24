@@ -124,6 +124,15 @@ class ResponseRenderer {
     this.spinner.start('', 'Thinking');
   }
 
+  _flushLineBuffer() {
+    if (this.lineBuffer.length > 0) {
+      const rendered = this.markdown._renderInline(this.lineBuffer);
+      this.screen.write(`${rendered}\n`);
+      this.lineBuffer = '';
+    }
+    this.lineOpen = false;
+  }
+
   writeText(delta) {
     this.spinner.stop();
     if (!this.textStarted) {
@@ -165,12 +174,9 @@ class ResponseRenderer {
       this.screen.write(`  ${toolLine}\n`);
       return;
     }
+    this._flushLineBuffer();
     if (chunk.name === 'shell.run') {
       this.spinner.stop();
-      if (this.lineOpen) {
-        this.screen.write('\n');
-        this.lineOpen = false;
-      }
       this.screen.write(`  ${THEME.spinner}Running${ANSI.reset} ${toolLine}\n`);
       return;
     }
@@ -185,10 +191,7 @@ class ResponseRenderer {
       this.assistantStarted = true;
     }
 
-    if (this.lineOpen) {
-      this.screen.write('\n');
-      this.lineOpen = false;
-    }
+    this._flushLineBuffer();
 
     const modificationNotice = formatFileModificationNotice(chunk);
     if (modificationNotice) {
@@ -206,21 +209,14 @@ class ResponseRenderer {
 
   notice(message) {
     this.spinner.stop();
-    if (this.lineOpen) {
-      this.screen.write('\n');
-      this.lineOpen = false;
-    }
+    this._flushLineBuffer();
     this.screen.write(`${THEME.info}  ${message}${ANSI.reset}\n`);
   }
 
   complete(usage) {
     this.spinner.stop();
 
-    if (this.lineBuffer.length > 0) {
-      const rendered = this.markdown._renderInline(this.lineBuffer);
-      this.screen.write(`${rendered}\n`);
-      this.lineBuffer = '';
-    }
+    this._flushLineBuffer();
 
     const outputTokens = usage?.outputTokens || 0;
     const hasOutput = this.textStarted || this.toolCount > 0 || outputTokens > 0;
@@ -234,11 +230,6 @@ class ResponseRenderer {
       const inputTokens = usage?.inputTokens || 0;
       const tokenInfo = outputTokens > 0 ? ` ${THEME.dim}${inputTokens.toLocaleString()}→${outputTokens.toLocaleString()} tokens${ANSI.reset}` : '';
       this.screen.write(`${THEME.dim}  ${elapsed}s${tokenInfo}${ANSI.reset}\n`);
-    }
-
-    if (this.lineOpen) {
-      this.screen.write('\n');
-      this.lineOpen = false;
     }
 
     this.assistantStarted = false;
@@ -533,7 +524,7 @@ function toToolLabel(name) {
 }
 
 function isDisplayableInput(key, value) {
-  return !/key|token|secret|password|content|env/i.test(key) &&
+  return !/key|token|secret|password|credential|auth|env/i.test(key) &&
     (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean');
 }
 

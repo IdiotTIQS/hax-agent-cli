@@ -1002,10 +1002,7 @@ async function handleSessionsCommand(args, { screen, session }) {
   screen.write(`${THEME.border}──────────────────────────────────${ANSI.reset || ''}\n`);
 
   for (const s of sessions.slice(0, 20)) {
-    const entries = s.entries();
-    const userMessages = entries.filter(e => e.role === 'user');
-    const firstMsg = userMessages[0]?.content || '(empty)';
-    const preview = firstMsg.length > 50 ? firstMsg.slice(0, 47) + '...' : firstMsg;
+    const preview = formatSessionPreview(s, 50);
     const date = new Date(s.updatedAt).toLocaleDateString();
     screen.write(`  ${THEME.dim}${s.id.slice(0, 20)}${ANSI.reset || ''}  ${THEME.dim}${date}${ANSI.reset || ''}  ${preview}\n`);
   }
@@ -1059,12 +1056,27 @@ async function resumeSession(args, { screen, session }) {
 }
 
 function formatSessionOption(session) {
+  const preview = formatSessionPreview(session, 48);
+  const date = new Date(session.updatedAt).toLocaleString();
+  return `${session.id.slice(0, 12)}  ${date}  ${preview}`;
+}
+
+/**
+ * Format a session's first user message as a truncated preview string.
+ * Default maxLen of 50 covers the most common case (sessions listing).
+ *
+ * @param {{ entries(): Array, updatedAt: number }} session
+ * @param {number} [maxLen=50]
+ * @returns {string}
+ */
+function formatSessionPreview(session, maxLen = 50) {
   const entries = session.entries();
   const userMessages = entries.filter(e => e.role === 'user');
   const firstMsg = userMessages[0]?.content || '(empty)';
-  const preview = firstMsg.length > 48 ? firstMsg.slice(0, 45) + '...' : firstMsg;
-  const date = new Date(session.updatedAt).toLocaleString();
-  return `${session.id.slice(0, 12)}  ${date}  ${preview}`;
+  if (firstMsg.length > maxLen) {
+    return firstMsg.slice(0, maxLen - 3) + '...';
+  }
+  return firstMsg;
 }
 
 function resolveTranscriptMessageLimit(settings = {}) {
@@ -1410,4 +1422,6 @@ module.exports = {
   getSlashCommandSuggestion,
   getSubcommandSuggestion,
   listCommandHandlerNames,
+  formatSessionPreview,
+  resolveTranscriptMessageLimit,
 };

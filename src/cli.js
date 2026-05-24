@@ -6,7 +6,7 @@ const { spawn } = require('node:child_process');
 const { EventBus } = require('./events/bus');
 const { createProvider } = require('./providers');
 const { loadSettings } = require('./config');
-const { handleChatMessage, renderBanner, handleSlashCommand } = require('./commands');
+const { handleChatMessage, renderBanner, handleSlashCommand, formatSessionPreview, resolveTranscriptMessageLimit } = require('./commands');
 const { suggestCommand } = require('./command-suggestions');
 const { createLocalToolRegistry } = require('./tools');
 const { UndoStack } = require('./undo-stack');
@@ -29,7 +29,7 @@ function resolveSettings() {
   return settings;
 }
 const { PermissionManager } = require('./permissions');
-const { Session } = require('./session');
+const { Session, CostTracker } = require('./session');
 const { THEME, ANSI, TerminalScreen, MarkdownRenderer, stripAnsi, styled } = require('./renderer');
 const { checkForUpdate, performUpdate, restartProcess, wasRestarted } = require('./updater');
 const { runInitWizard, shouldRunFirstRunInit } = require('./init-wizard');
@@ -203,7 +203,8 @@ function runInitCommand(args) {
     promptToStart: args.includes('--confirm'),
     quickMode: args.includes('--quick'),
   }).catch((err) => {
-    console.error(`Failed to initialize: ${err.message}`);
+    const errMsg = err instanceof Error ? err.message : String(err);
+    console.error(`Failed to initialize: ${errMsg}`);
     process.exit(1);
   });
 }
@@ -214,7 +215,7 @@ function runModelsCommand(args) {
   const { printModels } = require('./commands');
 
   printModels(provider, { write: (s) => process.stdout.write(stripAnsi(s)) })
-    .catch((err) => { console.error(`Failed to list models: ${err.message}`); process.exit(1); });
+    .catch((err) => { const errMsg = err instanceof Error ? err.message : String(err); console.error(`Failed to list models: ${errMsg}`); process.exit(1); });
 }
 
 function runAgentsCommand() {
@@ -349,7 +350,8 @@ async function runResumeCommand(args) {
       createTranslator,
     }));
   } catch (err) {
-    console.error(`Failed to resume session: ${err.message}`);
+    const errMsg = err instanceof Error ? err.message : String(err);
+    console.error(`Failed to resume session: ${errMsg}`);
     process.exit(1);
   }
 
@@ -357,11 +359,6 @@ async function runResumeCommand(args) {
   session.id = targetSession.id;
 
   runShell([], session);
-}
-
-function resolveTranscriptMessageLimit(settings = {}) {
-  const limit = Number(settings.prompts?.maxTranscriptMessages);
-  return Number.isFinite(limit) && limit > 0 ? limit : Infinity;
 }
 
 function createReadlineOutput(output = process.stdout) {
@@ -404,10 +401,7 @@ function runSessionsCommand(args) {
   }
 
   for (const s of sessions.slice(0, 50)) {
-    const entries = s.entries();
-    const userMessages = entries.filter((e) => e.role === 'user');
-    const firstMsg = userMessages[0]?.content || '(empty)';
-    const preview = firstMsg.length > 80 ? firstMsg.slice(0, 77) + '...' : firstMsg;
+    const preview = formatSessionPreview(s, 80);
     const date = new Date(s.updatedAt).toLocaleDateString();
     console.log(`${s.id.slice(0, 20)}  ${date}  ${preview}`);
   }
@@ -507,6 +501,10 @@ async function runShell(args, explicitSession) {
   rl.setPrompt(screen.isTTY() ? terminalOutput.inputLinePrompt() : mainPrompt());
 
   screen.activate();
+
+  if (settings.ui?.autoClearScreen) {
+    screen.clear();
+  }
 
   // Input handling (keypress, vim mode, reverse search, tab complete)
   // is managed by the terminal-input module — see createTerminalInput below.
@@ -691,7 +689,7 @@ async function runShell(args, explicitSession) {
         const clearedCount = session.messages.length;
         session.messages = [];
         session.id = require('./memory').createSessionId();
-        session.costTracker = new (require('./session').CostTracker)();
+        session.costTracker = new CostTracker();
         screen.clear();
         renderBanner(screen, session);
         screen.write(styled(THEME.success, t('shell.contextCleared', { count: clearedCount })) + '\n');

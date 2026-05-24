@@ -1,5 +1,6 @@
-const { loadAllSkills } = require('./loader');
+const { loadAllSkills, buildSessionSkillList } = require('./loader');
 const { createSkillifySkill } = require('./skillify');
+const { createListSkillsSkill } = require('./list-skills');
 
 const SKILL_BUDGET_CHARS = 8000;
 const MAX_DESC_LENGTH = 250;
@@ -172,7 +173,8 @@ function extractTriggerPhrases(whenToUseText) {
 function getSkillsForSession(projectRoot, messages) {
   const skills = loadAllSkills(projectRoot || process.cwd());
   const skillify = createSkillifySkill(messages);
-  return [skillify, ...skills].filter((s) => !s.isHidden);
+  const listSkills = createListSkillsSkill();
+  return buildSessionSkillList(skills, skillify, listSkills);
 }
 
 module.exports = {

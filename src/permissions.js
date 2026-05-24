@@ -5,6 +5,10 @@ const PermissionLevel = Object.freeze({
 });
 const { createTranslator } = require('./i18n');
 const nodePath = require('node:path');
+const { isPrivateHost } = require('./security/input-sanitizer');
+
+// Re-export for backward compatibility with callers using the old name
+const isPrivateOrLocalHost = isPrivateHost;
 
 const TOOL_PERMISSIONS = {
   'file.read': PermissionLevel.AUTO,
@@ -95,32 +99,6 @@ function getWebFetchPermission(url) {
   }
 
   return PermissionLevel.AUTO;
-}
-
-function isPrivateOrLocalHost(hostname) {
-  const host = String(hostname || '').trim().toLowerCase().replace(/^\[|\]$/g, '');
-
-  if (!host) return true;
-  if (host === 'localhost' || host.endsWith('.localhost')) return true;
-
-  if (host === '::1' || host === '0:0:0:0:0:0:0:1') return true;
-  if (host.startsWith('fc') || host.startsWith('fd') || host.startsWith('fe80:')) return true;
-
-  const ipv4 = host.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
-  if (!ipv4) return false;
-
-  const octets = ipv4.slice(1).map(Number);
-  if (octets.some((part) => part < 0 || part > 255)) return true;
-
-  const [first, second] = octets;
-  return (
-    first === 10 ||
-    first === 127 ||
-    first === 0 ||
-    (first === 169 && second === 254) ||
-    (first === 172 && second >= 16 && second <= 31) ||
-    (first === 192 && second === 168)
-  );
 }
 
 function formatToolDescription(toolName, toolArgs, locale) {

@@ -102,7 +102,12 @@ class AgentEngine {
     }
 
     this.session = options.session;
-    this.env = options.env || process.env;
+    // Only store env vars that the engine actually references.
+    // Storing full process.env risks leaking secrets if serialized or logged.
+    const rawEnv = options.env || process.env;
+    this.env = {
+      HAX_AGENT_TEST_INTERRUPT_AFTER_TEXT: rawEnv.HAX_AGENT_TEST_INTERRUPT_AFTER_TEXT,
+    };
     this.projectRoot = options.projectRoot || options.session.settings?.projectRoot || process.cwd();
     this.eventBus = options.eventBus || (this.session && this.session.eventBus) || new EventBus();
     this.inputPipeline = options.inputPipeline || null;

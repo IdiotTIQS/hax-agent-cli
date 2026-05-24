@@ -5,10 +5,13 @@
  * Each preset is a partial settings object that can be merged with user config.
  */
 
+const { mergeSettings } = require('./config');
+
 const PRESETS = Object.freeze({
   /** Fast, lightweight coding sessions with minimal overhead */
   coding: {
     agent: {
+      maxTurns: 25,
       maxToolTurns: 25,
     },
     context: {
@@ -23,6 +26,7 @@ const PRESETS = Object.freeze({
   /** Long-running autonomous agent tasks */
   autonomous: {
     agent: {
+      maxTurns: 100,
       maxToolTurns: 100,
     },
     permissions: {
@@ -40,6 +44,7 @@ const PRESETS = Object.freeze({
   /** Safe, read-only code review and analysis */
   review: {
     agent: {
+      maxTurns: 10,
       maxToolTurns: 10,
     },
     tools: {
@@ -53,6 +58,7 @@ const PRESETS = Object.freeze({
   /** Quick Q&A without file modifications */
   chat: {
     agent: {
+      maxTurns: 5,
       maxToolTurns: 5,
     },
     tools: {
@@ -80,6 +86,7 @@ const PRESETS = Object.freeze({
   /** Learning/education mode with explanations */
   learn: {
     agent: {
+      maxTurns: 15,
       maxToolTurns: 15,
       systemPrompt: 'Explain your reasoning step by step. Be thorough and educational.',
     },
@@ -122,29 +129,12 @@ function listPresets() {
 
 /**
  * Merge a preset into existing settings. Preset values take precedence.
+ * Uses the canonical mergeSettings from config.js instead of a local deep-merge.
  */
 function applyPreset(settings, presetName) {
   const preset = getPreset(presetName);
   if (!preset) return settings;
-
-  // Deep merge: settings is the base, preset overrides
-  return deepMerge({}, settings, preset);
-}
-
-function deepMerge(target, ...sources) {
-  for (const source of sources) {
-    if (!source || typeof source !== 'object') continue;
-    for (const key of Object.keys(source)) {
-      const srcVal = source[key];
-      const tgtVal = target[key];
-      if (srcVal && typeof srcVal === 'object' && !Array.isArray(srcVal) && srcVal !== null) {
-        target[key] = deepMerge(tgtVal && typeof tgtVal === 'object' && !Array.isArray(tgtVal) ? tgtVal : {}, srcVal);
-      } else {
-        target[key] = srcVal;
-      }
-    }
-  }
-  return target;
+  return mergeSettings(settings, preset);
 }
 
 module.exports = { PRESETS, getPreset, listPresets, applyPreset };

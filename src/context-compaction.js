@@ -13,6 +13,9 @@ const DEFAULT_PRESERVE_COUNT = 20;
  */
 const MINIMUM_PRESERVE_COUNT = 2;
 
+/** Maximum total characters allowed in the compaction prompt's history section. */
+const MAX_COMPACTION_CHARS = 50000;
+
 /**
  * Split a message list into two zones.
  *
@@ -75,7 +78,7 @@ function buildCompactionPrompt(summaryMessages, maxTokens) {
       ? ` Keep the summary under approximately ${maxTokens} tokens.`
       : "";
 
-  const historyLines = messages.map((msg, i) => {
+  let historyLines = messages.map((msg, i) => {
     const role = (msg && msg.role) ? msg.role : "unknown";
     const content = (msg && msg.content !== undefined && msg.content !== null)
       ? String(msg.content)
@@ -83,17 +86,33 @@ function buildCompactionPrompt(summaryMessages, maxTokens) {
     return `[${i + 1}] ${role}: ${content}`;
   });
 
-  return [
+  // Enforce a size limit to avoid blowing up the compaction prompt.
+  let totalChars = 0;
+  let omittedCount = 0;
+  const limited = [];
+  // Walk from newest (most relevant) backward so truncation drops oldest first.
+  for (let i = historyLines.length - 1; i >= 0; i -= 1) {
+    const lineLen = historyLines[i].length + 1; // +1 for newline
+    if (totalChars + lineLen > MAX_COMPACTION_CHARS) {
+      omittedCount = i + 1;
+      break;
+    }
+    totalChars += lineLen;
+    limited.unshift(historyLines[i]);
+  }
+  historyLines = limited;
+
+  const preamble = [
     `Summarize the following conversation history (${count} messages) into a concise but comprehensive summary.`,
     "Include key decisions, facts, code changes, files modified, and any important context.",
     "Focus on information that will be useful to continue the conversation without losing context.",
     tokenHint,
+    omittedCount > 0 ? `(${omittedCount} older summaries omitted due to size)` : "",
     "",
     "Conversation history:",
-    ...historyLines,
-    "",
-    "Summary:",
-  ].filter(Boolean).join("\n");
+  ];
+
+  return [...preamble, ...historyLines, "", "Summary:"].filter(Boolean).join("\n");
 }
 
 /**

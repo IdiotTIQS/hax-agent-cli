@@ -71,6 +71,9 @@ function createProvider(config = {}, env = process.env) {
     toolTrace: config.toolTrace === true || env.HAX_AGENT_MOCK_TOOL_TRACE === '1',
   });
 
+  // Mark apiKey non-enumerable so it won't appear in JSON.stringify or console.log.
+  Object.defineProperty(provider, 'apiKey', { enumerable: false });
+
   if (config.enableResilience) {
     return wrapWithResilience(provider, config);
   }
@@ -332,6 +335,14 @@ function isTransientError(err) {
 
 // ---- configuration resolution ----
 
+/**
+ * Resolve the API key for a given provider.
+ *
+ * WARNING: The returned value is a raw, sensitive API key.  Callers MUST NOT
+ * log, serialize, or transmit it unnecessarily.  The `apiKey` property on the
+ * provider instance is marked non-enumerable so it won't appear in
+ * JSON.stringify or console.log output.
+ */
 function resolveApiKey(config, env, providerName) {
   if (config.apiKey) return config.apiKey;
   if (providerName === "openai" || providerName === "gpt") return env.OPENAI_API_KEY;

@@ -4,6 +4,7 @@ const https = require("node:https");
 const http = require("node:http");
 const { ToolExecutionError } = require("./error");
 const { requireString, readPositiveInteger } = require("./utils");
+const { isPrivateOrLocalHost } = require("../permissions");
 
 const DEFAULT_TIMEOUT_MS = 10_000;
 
@@ -41,12 +42,13 @@ function createStockQuoteTool() {
         return await fetchSinaChinese(resolvedSymbol, timeoutMs);
       }
       if (/^\d{6}$/.test(resolvedSymbol)) {
-        // Try Shanghai first, fall back to Shenzhen
+        // Shenzhen codes start with 0 or 3; Shanghai codes with 6
+        const primaryExchange = /^[03]/.test(resolvedSymbol) ? "sz" : "sh";
+        const secondaryExchange = primaryExchange === "sz" ? "sh" : "sz";
         try {
-          return await fetchSinaChinese(`sh${resolvedSymbol}`, timeoutMs);
-        } catch (shErr) {
-          // sh failed, try sz
-          return await fetchSinaChinese(`sz${resolvedSymbol}`, timeoutMs);
+          return await fetchSinaChinese(`${primaryExchange}${resolvedSymbol}`, timeoutMs);
+        } catch (_primaryErr) {
+          return await fetchSinaChinese(`${secondaryExchange}${resolvedSymbol}`, timeoutMs);
         }
       }
       if (resolvedSymbol.startsWith("^") || /^[A-Z]{1,5}$/.test(resolvedSymbol)) {
@@ -60,6 +62,14 @@ function createStockQuoteTool() {
 async function fetchSinaChinese(code, timeoutMs) {
   return new Promise((resolve, reject) => {
     const url = `https://hq.sinajs.cn/list=${encodeURIComponent(code)}`;
+    // SSRF guard: validate the target host before making the request
+    try {
+      const parsed = new URL(url);
+      if (isPrivateOrLocalHost(parsed.hostname)) {
+        reject(new ToolExecutionError("STOCK_SSRF_BLOCKED", `Request to private/local host blocked: ${parsed.hostname}`));
+        return;
+      }
+    } catch (_) { /* URL parse failure is acceptable for hardcoded host */ }
     const req = https.get(url, {
       headers: { Referer: "https://finance.sina.com.cn" },
       timeout: timeoutMs,
@@ -116,6 +126,14 @@ async function fetchYahooUS(symbol, timeoutMs) {
     const encodedSymbol = encodeURIComponent(symbol);
     const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodedSymbol}?interval=1d&range=1d`;
 
+    // SSRF guard: validate the target host before making the request
+    try {
+      const parsed = new URL(url);
+      if (isPrivateOrLocalHost(parsed.hostname)) {
+        reject(new ToolExecutionError("STOCK_SSRF_BLOCKED", `Request to private/local host blocked: ${parsed.hostname}`));
+        return;
+      }
+    } catch (_) { /* URL parse failure is acceptable for hardcoded host */ }
     const req = https.get(url, { timeout: timeoutMs }, (res) => {
       let data = "";
       res.on("data", (chunk) => { data += chunk; });

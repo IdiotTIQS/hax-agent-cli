@@ -11,6 +11,7 @@ const DEFAULT_SETTINGS = Object.freeze({
     apiKey: undefined,
     apiUrl: undefined,
     maxTurns: 20,
+    maxToolTurns: 50,
     temperature: 0.2,
   },
   memory: {
@@ -33,6 +34,8 @@ const DEFAULT_SETTINGS = Object.freeze({
     windowTokens: undefined,
     reserveOutputTokens: 8192,
     charsPerToken: 4,
+    autoCompact: false,
+    autoCompactThresholdTokens: 0.8,
   },
   instructions: {
     custom: undefined,
@@ -56,6 +59,7 @@ const DEFAULT_SETTINGS = Object.freeze({
   },
   ui: {
     locale: 'en',
+    autoClearScreen: false,
   },
   tools: {
     shell: {
@@ -182,6 +186,7 @@ function readEnvOverrides(env = process.env) {
   setIfDefined(overrides, ['agent', 'apiKey'], env.ANTHROPIC_API_KEY || env.OPENAI_API_KEY || env.GOOGLE_API_KEY);
   setIfDefined(overrides, ['agent', 'apiUrl'], env.HAX_AGENT_API_URL || env.ANTHROPIC_BASE_URL || env.OPENAI_BASE_URL || env.GOOGLE_BASE_URL);
   setIfDefined(overrides, ['agent', 'maxTurns'], parseNumberEnv(env, 'HAX_AGENT_MAX_TURNS'));
+  setIfDefined(overrides, ['agent', 'maxToolTurns'], parseNumberEnv(env, 'HAX_AGENT_MAX_TOOL_TURNS'));
   setIfDefined(overrides, ['agent', 'temperature'], parseNumberEnv(env, 'HAX_AGENT_TEMPERATURE'));
   setIfDefined(overrides, ['memory', 'enabled'], parseBooleanEnv(env, 'HAX_AGENT_MEMORY_ENABLED'));
   setIfDefined(overrides, ['memory', 'directory'], env.HAX_AGENT_MEMORY_DIR);

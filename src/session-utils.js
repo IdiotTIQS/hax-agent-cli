@@ -3,6 +3,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
+const { escapeRegExp } = require('./tools/utils');
 const {
   listSessions,
   readTranscript,
@@ -390,7 +391,7 @@ function searchSessions(query, options = {}) {
       } else if (contentLower.includes(q)) {
         score += 20;
         // Bonus for word-boundary matches
-        if (new RegExp(`\\b${escapeRegex(q)}\\b`, 'i').test(content)) {
+        if (new RegExp(`\\b${escapeRegExp(q)}\\b`, 'i').test(content)) {
           score += 10;
         }
       }
@@ -477,14 +478,6 @@ function pruneSessions(criteria = {}, options = {}) {
     kept: keep.length,
     deletedIds,
   };
-}
-
-// ---------------------------------------------------------------------------
-// escapeRegex (local helper)
-// ---------------------------------------------------------------------------
-
-function escapeRegex(str) {
-  return str.replace(/[|\\{}()[\]^$+?.]/g, '\\$&');
 }
 
 // ---------------------------------------------------------------------------

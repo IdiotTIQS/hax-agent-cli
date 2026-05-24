@@ -4,6 +4,7 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const { defaultMemoryDirectory, defaultSessionDirectory } = require('./config');
+const { escapeRegExp } = require('./tools/utils');
 
 const SESSION_META_TYPE = 'session.meta';
 
@@ -241,7 +242,7 @@ function searchMemories(query, options = {}) {
     all = all.filter((mem) => (mem.tags || []).some((t) => t.toLowerCase() === filterTag));
   }
 
-  const wordBoundary = new RegExp(`\\b${escapeRegex(q)}\\b`, 'i');
+  const wordBoundary = new RegExp(`\\b${escapeRegExp(q)}\\b`, 'i');
   const scored = all.map((mem) => {
     let score = 0;
     if (mem.name && mem.name.toLowerCase().includes(q)) {
@@ -264,10 +265,6 @@ function searchMemories(query, options = {}) {
   return scored
     .filter((m) => m.score > 0)
     .sort((a, b) => b.score - a.score);
-}
-
-function escapeRegex(str) {
-  return str.replace(/[|\\{}()[\]^$+?.]/g, '\\$&');
 }
 
 function clearSessions(options = {}) {

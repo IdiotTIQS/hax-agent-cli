@@ -134,7 +134,8 @@ test("isDisplayableInput: filters out sensitive key names", () => {
   assert.equal(isDisplayableInput("token", "value"), false);
   assert.equal(isDisplayableInput("secret", "value"), false);
   assert.equal(isDisplayableInput("password", "value"), false);
-  assert.equal(isDisplayableInput("CONTENT", "value"), false);
+  // "content" is a tool arg (not a secret) and should be displayable
+  assert.equal(isDisplayableInput("content", "some file contents"), true);
   assert.equal(isDisplayableInput("env", "value"), false);
 });
 

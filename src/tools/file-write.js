@@ -53,7 +53,10 @@ function createWriteFileTool() {
 
       const resolvedPath = await resolveWithinRootSafe(context.root, filePath);
       const parentPath = await resolveWithinRootSafe(context.root, path.dirname(filePath));
-      const previousContent = await withTimeout(readExistingFileContent(resolvedPath, encoding), DEFAULT_FILE_OP_TIMEOUT_MS, `read ${filePath}`);
+      let previousContent = null;
+      if (context.undoStack) {
+        previousContent = await withTimeout(readExistingFileContent(resolvedPath, encoding), DEFAULT_FILE_OP_TIMEOUT_MS, `read ${filePath}`);
+      }
 
       if (createParentDirectories) {
         await withTimeout(fs.mkdir(parentPath, { recursive: true }), DEFAULT_FILE_OP_TIMEOUT_MS, `mkdir ${path.dirname(filePath)}`);
