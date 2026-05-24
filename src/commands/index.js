@@ -280,7 +280,7 @@ const COMMAND_HANDLERS = Object.freeze({
   context: (args, context) => handleContextCommand(args, context),
   sessions: (args, context) => handleSessionsCommand(args, context),
   resume: (args, context) => resumeSession(args, context),
-  config: (_args, context) => showConfig(context),
+  config: (args, context) => showConfig(context, args),
   doctor: (_args, context) => runDoctor(context),
   theme: (_args, context) => toggleTheme(context),
   vim: (_args, context) => toggleVim(context),
@@ -1084,9 +1084,33 @@ function resolveTranscriptMessageLimit(settings = {}) {
   return Number.isFinite(limit) && limit > 0 ? limit : Infinity;
 }
 
-function showConfig({ screen, session }) {
+function showConfig({ screen, session }, args = []) {
   const t = getTranslator(session);
   const locale = normalizeLocale(session.settings.ui?.locale);
+
+  // /config reload — re-read settings from disk and update the running session
+  if (args[0] === 'reload') {
+    try {
+      const { resolveSettings } = require('../config');
+      const fresh = resolveSettings();
+      session.settings = fresh.settings;
+
+      // Update provider if model/provider changed
+      if (fresh.settings.agent) {
+        const { createProvider } = require('../providers');
+        const newProvider = createProvider(fresh.settings.agent, process.env);
+        if (newProvider) {
+          session.provider = newProvider;
+        }
+      }
+
+      screen.write(`${THEME.success}${t('config.reloaded')}${ANSI.reset || ''}\n`);
+      // Show the fresh config
+    } catch (err) {
+      screen.write(`${THEME.error}${t('config.reloadFailed', { error: err.message })}${ANSI.reset || ''}\n`);
+      return;
+    }
+  }
   screen.write(`\n${THEME.heading}${t('config.title')}${ANSI.reset || ''}\n`);
   screen.write(`${THEME.border}──────────────────────────────────${ANSI.reset || ''}\n`);
   screen.write(`  ${THEME.dim}${t('config.provider')}${ANSI.reset || ''}     ${session.provider.name}\n`);
@@ -1119,6 +1143,7 @@ function showConfig({ screen, session }) {
     } else {
       screen.write(`  ${THEME.warning}${t('config.noConfigFile')}${ANSI.reset || ''}\n`);
     }
+    screen.write(`  ${THEME.dim}${t('config.reloadHint')}${ANSI.reset || ''}\n`);
   } catch (_) { /* best-effort */ }
   screen.write('\n');
 }
