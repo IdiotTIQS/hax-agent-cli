@@ -247,9 +247,12 @@ function createTerminalInput({ rl, screen, session, history, callbacks }) {
     const content = String(input || '');
     const lineCount = content.split(/\r?\n/).length;
 
-    // Short paste: auto-process silently, no badge or confirmation needed.
+    // Short paste: put text into the input line so it's visible before sending.
+    // This prevents auto-send when the pasted text has a trailing newline.
     if (lineCount < 3 || content.length < 200) {
-      lineQueue = lineQueue.then(() => callbacks.onProcessLine(content, { pasted: false }));
+      const trimmed = content.replace(/[\r\n]+$/, '');
+      rl.line = trimmed;
+      rl.cursor = trimmed.length;
       callbacks.prompt();
       return;
     }
