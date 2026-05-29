@@ -32,6 +32,9 @@ class MarkdownRenderer {
     this.columns = columns;
   }
 
+  _isTableRow(l) { return l && /^\|.*\|$/.test(l.trim()); }
+  _isTableSep(l) { return l && /^\|[\s\-:|]+\|$/.test(l.trim()); }
+
   render(text) {
     if (!text) return '';
     const lines = text.split('\n');
@@ -79,6 +82,21 @@ class MarkdownRenderer {
 
       if (line.match(/^---+$/)) {
         output.push(this._renderHr());
+        continue;
+      }
+
+      // Table detection: header | sep | data...
+      if (this._isTableRow(line) && i + 2 < lines.length && this._isTableSep(lines[i + 1]) && this._isTableRow(lines[i + 2])) {
+        const header = line;
+        const sep = lines[i + 1];
+        const dataRows = [];
+        i += 2; // skip to first data row
+        dataRows.push(lines[i]);
+        while (i + 1 < lines.length && this._isTableRow(lines[i + 1])) {
+          i++;
+          dataRows.push(lines[i]);
+        }
+        output.push(this._renderTable(header, dataRows));
         continue;
       }
 
@@ -140,6 +158,36 @@ class MarkdownRenderer {
   _renderHr() {
     const width = Math.min(this.columns - 2, 60);
     return `${THEME.hr}${'─'.repeat(width)}${ANSI.reset}`;
+  }
+
+  _renderTable(header, dataRows) {
+    const parse = r => r.trim().replace(/^\||\|$/g, '').split('|').map(c => c.trim());
+    const hdr = parse(header);
+    const rows = dataRows.map(parse);
+    const allRows = [hdr, ...rows];
+
+    const colWidths = hdr.map((_, ci) =>
+      Math.min(40, Math.max(3, ...allRows.map(r => r[ci] ? r[ci].length : 0)))
+    );
+    const pad = (text, w) => text + ' '.repeat(Math.max(0, w - text.length));
+    const border = THEME.border || THEME.dim;
+
+    const result = [];
+    // Top border
+    result.push(border + '┌' + colWidths.map(w => '─'.repeat(w + 2)).join('┬') + '┐' + ANSI.reset);
+    // Header row
+    const hdrCells = hdr.map((c, ci) => THEME.bold + pad(c, colWidths[ci]) + ANSI.reset);
+    result.push(border + '│ ' + ANSI.reset + hdrCells.join(' ' + border + '│ ' + ANSI.reset) + ' ' + border + '│' + ANSI.reset);
+    // Separator
+    result.push(border + '├' + colWidths.map(w => '─'.repeat(w + 2)).join('┼') + '┤' + ANSI.reset);
+    // Data rows
+    for (const row of rows) {
+      const cells = row.map((c, ci) => pad(c, colWidths[ci]));
+      result.push(border + '│ ' + ANSI.reset + cells.join(' ' + border + '│ ' + ANSI.reset) + ' ' + border + '│' + ANSI.reset);
+    }
+    // Bottom
+    result.push(border + '└' + colWidths.map(w => '─'.repeat(w + 2)).join('┴') + '┘' + ANSI.reset);
+    return result.join('\n');
   }
 
   _renderInline(text) {

@@ -147,17 +147,13 @@ class ResponseRenderer {
     this.lineBuffer += delta;
 
     var parts = this.lineBuffer.split('\n');
-    // Render complete lines through full markdown
+    // Only write COMPLETE lines (ending with \n) — avoid partial-line duplication
     for (var i = 0; i < parts.length - 1; i++) {
       var rendered = this.markdown.render(parts[i]);
       this.screen.write(rendered + '\n');
     }
-    var partial = parts[parts.length - 1];
-    if (partial.length > 0) {
-      // Partial line: inline formatting only
-      this.screen.write(this.markdown._renderInline(partial));
-    }
-    this.lineBuffer = '';
+    // Keep the incomplete last segment for the next delta
+    this.lineBuffer = parts[parts.length - 1];
     this.lineOpen = true;
   }
 
