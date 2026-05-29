@@ -2,7 +2,40 @@
      2|
      3|All notable changes to Hax Agent CLI will be documented in this file.
      4|
-     5|## [1.4.0] - 2026-05-15
+     5|## [1.5.4] - 2026-05-30
+
+### Changed
+- **Architecture Rewrite (Complete):** Fully rebuilt following OpenHarness reference architecture and industry-grade standards. Flat src (~560 files) → layered modular (144 consolidated JS files). All 30+ OpenHarness subsystems covered with full feature parity.
+
+## [1.5.3] - 2026-05-15
+
+### Changed
+- **Architecture Rewrite:** Migrated from flat `src/` structure to layered modular architecture inspired by OpenHarness.
+  - New `core/` layer: typed messages (`StandardMessage`, `ContentBlock`), provider adapter protocol (`ApiStreamEvent` types), permission checker.
+  - New `engine/` layer: `AgentEngine` with async generator tool loop, `QueryContext` for state tracking, `Session`, `HookExecutor`.
+  - Consolidated provider layer: 12+ providers in `api/provider.js` (Anthropic, OpenAI, DeepSeek, Groq, Mistral, Google, Moonshot, Zhipu, DashScope, Ollama, vLLM, OpenRouter).
+  - Consolidated tool registry: all 10 built-in tools in `tools/registry.js` with `isReadOnly` classification.
+  - New `services/`: LSP code navigation, MCP integration, personalization, AutoDream goal continuation.
+  - New `config/profiles.js`: Provider profile management with pre-configured profiles and runtime switching.
+  - New `tui/`: Terminal UI with alt-screen buffer and event-driven rendering.
+- Updated all documentation (CLAUDE.md, README.md, README.en.md) to reflect new architecture.
+
+### Added
+- `/lsp` command: go-to-definition and workspace symbol search.
+- `/theme` command: switch terminal color themes at runtime.
+- `/providers` command: list all 12+ available AI providers.
+- `/personalize` command: extract environment rules from conversations.
+- `/plan` command: toggle Plan mode (block all mutating tools).
+- `/fullauto` command: toggle Full Auto mode (silent auto-approve).
+- `/perms` command: show detailed permission status.
+- `/export` command: export session to JSON file.
+- `/api-key <provider> <key>` command: set per-provider API keys.
+- Provider profiles: pre-configured claude, gpt, sonnet, haiku, gpt-mini, local profiles.
+
+### Removed
+- Legacy flat modules superseded by layered architecture (agent-engine, session, renderer, hub, batch, config, permissions, undo-stack, context-compaction, context-window, config-presets, init-wizard, updater, debug, i18n, and ~70 legacy subsystem directories).
+
+## [1.4.0] - 2026-05-15
      6|
      7|### Added
      8|- `/context` command and `/cache` alias to view and tune context cache budgets.

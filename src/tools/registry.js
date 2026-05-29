@@ -1,265 +1,182 @@
-const path = require('node:path');
-const { PermissionManager } = require('../permissions');
-const { ToolExecutionError } = require('./error');
-const { assertPlainObject, isNonEmptyString, serializeToolResult } = require('./utils');
-const { withTimeout, withMetrics, getMetrics } = require('../tool-decorators');
-const { validate } = require('../schema-validator');
+"use strict";
 
-// Optional observability integration — gracefully degrades if the module is missing.
-let _getObsMetrics = null;
-try {
-  const obs = require("../infrastructure/observability-setup");
-  _getObsMetrics = obs.getMetrics;
-} catch (_) {
-  // observability-setup not available — metrics become no-ops.
-}
-const { createReadFileTool } = require('./file-read');
-const { createWriteFileTool } = require('./file-write');
-const { createGlobTool } = require('./file-glob');
-const { createSearchTool } = require('./file-search');
-const { createShellTool, normalizeShellPolicy } = require('./shell');
-const { createWebFetchTool } = require('./web-fetch');
-const { createWebSearchTool } = require('./web-search');
-const { createFileEditTool } = require('./file-edit');
-const { createReadDirectoryTool } = require('./file-readdir');
-const { createDeleteFileTool } = require('./file-delete');
-const { createStockQuoteTool } = require('./stock-quote');
-
-const SINGLE_CALL_TOOLS = new Set(['web.fetch', 'web.search', 'file.readDirectory']);
-const SINGLE_CALL_CACHE_MS = 300_000;
+const fs = require("fs");
+const path = require("path");
+const { extendedTools } = require("./extended");
 
 class ToolRegistry {
-  constructor(options = {}) {
-    this.root = path.resolve(options.root || process.cwd());
-    this.tools = new Map();
-    this._singleCallCache = new Map();
-    this.permissionManager = options.permissionManager || new PermissionManager();
-    this.approvalCallback = options.approvalCallback || null;
-    this.undoStack = options.undoStack || null;
-    this.pluginRegistry = options.pluginRegistry || null;
-    this._enableMetrics = options.enableMetrics !== false;
-    this._defaultTimeoutMs = Number.isSafeInteger(options.defaultTimeoutMs) && options.defaultTimeoutMs > 0
-      ? options.defaultTimeoutMs
-      : 30_000;
-  }
+  constructor(o = {}) { this.root = path.resolve(o.root || process.cwd()); this._tools = new Map(); }
+  register(t) { if (!t?.name) throw new Error("Tool needs name"); this._tools.set(t.name.toLowerCase(), t); return this; }
+  execute(name, args = {}, ctx = {}) { const t = this._tools.get(String(name).toLowerCase()); if (!t) throw new Error(`Tool "${name}" not found`); return t.execute(args, { ...ctx, root: this.root, registry: this }); }
+  list() { return [...this._tools.values()].map(t => ({ name: t.name, description: t.description })); }
+  toApiSchema() { return [...this._tools.values()].map(t => ({ name: t.name, description: t.description, input_schema: t.inputSchema })); }
+  get(n) { return this._tools.get(String(n).toLowerCase()) || null; }
+  names() { return [...this._tools.keys()]; }
+}
 
-  register(tool) {
-    if (!tool || typeof tool !== 'object') {
-      throw new ToolExecutionError('INVALID_TOOL', 'Tool must be an object.');
-    }
+// === Helpers ===
+function resolvePath(root, p) { const r = path.resolve(root, p); if (!r.startsWith(path.resolve(root))) throw new Error("Path outside workspace: " + p); return r; }
+function requireString(v, name) { if (typeof v !== "string" || !v.trim()) throw new Error(`${name} is required`); return v.trim(); }
 
-    if (!isNonEmptyString(tool.name)) {
-      throw new ToolExecutionError('INVALID_TOOL_NAME', 'Tool name must be a non-empty string.');
-    }
+// === All Tools ===
+const tools = {
+  "file.read": {
+    name: "file.read", description: "Read a file from the workspace.",
+    inputSchema: { type: "object", required: ["path"], properties: { path: { type: "string" }, maxBytes: { type: "number", default: 50000 } } },
+    async execute(args, ctx) {
+      const fp = resolvePath(ctx.root, requireString(args.path, "path"));
+      const stat = fs.statSync(fp);
+      if (!stat.isFile()) throw new Error("Not a file");
+      const content = fs.readFileSync(fp, "utf-8").slice(0, args.maxBytes || 50000);
+      return { ok: true, data: { path: args.path, content, bytes: Buffer.byteLength(content), lines: content.split("\n").length } };
+    },
+    isReadOnly: () => true,
+  },
 
-    if (typeof tool.execute !== 'function') {
-      throw new ToolExecutionError('INVALID_TOOL_EXECUTOR', `Tool "${tool.name}" must provide an execute function.`);
-    }
+  "file.glob": {
+    name: "file.glob", description: "Find files matching a glob pattern.",
+    inputSchema: { type: "object", required: ["pattern"], properties: { pattern: { type: "string" }, maxResults: { type: "number", default: 100 } } },
+    async execute(args, ctx) {
+      const { globSync } = require("glob");
+      const matches = globSync(args.pattern, { cwd: ctx.root, nodir: true, ignore: ["node_modules/**", ".git/**"], absolute: false }).slice(0, args.maxResults || 100);
+      return { ok: true, data: { pattern: args.pattern, matches, truncated: matches.length >= (args.maxResults || 100) } };
+    },
+    isReadOnly: () => true,
+  },
 
-    const key = tool.name.toLowerCase();
-    if (this.tools.has(key)) {
-      throw new ToolExecutionError('DUPLICATE_TOOL', `Tool "${tool.name}" is already registered.`);
-    }
-
-    let executeFn = tool.execute;
-
-    if (this._enableMetrics) {
-      executeFn = withMetrics(executeFn, tool.name);
-    }
-
-    const timeoutMs = (tool.inputSchema && Number.isSafeInteger(tool.inputSchema.timeoutMs) && tool.inputSchema.timeoutMs > 0)
-      ? tool.inputSchema.timeoutMs
-      : this._defaultTimeoutMs;
-    executeFn = withTimeout(executeFn, timeoutMs);
-
-    this.tools.set(key, {
-      name: tool.name,
-      description: tool.description || '',
-      inputSchema: tool.inputSchema || null,
-      execute: executeFn,
-    });
-
-    return this;
-  }
-
-  list() {
-    return Array.from(this.tools.values(), (tool) => ({
-      name: tool.name,
-      description: tool.description,
-      inputSchema: tool.inputSchema,
-    }));
-  }
-
-  resetSingleCallTracking() {
-    this._singleCallCache.clear();
-  }
-
-  hasSingleCallResult(name) {
-    const entry = this._singleCallCache.get(name);
-    if (!entry) return false;
-    if (Date.now() - entry.timestamp > SINGLE_CALL_CACHE_MS) {
-      this._singleCallCache.delete(name);
-      return false;
-    }
-    return true;
-  }
-
-  async execute(name, args = {}, context = {}) {
-    const startedAt = Date.now();
-
-    try {
-      if (!isNonEmptyString(name)) {
-        throw new ToolExecutionError('INVALID_TOOL_NAME', 'Tool name must be a non-empty string.');
-      }
-
-      if (SINGLE_CALL_TOOLS.has(name.toLowerCase()) && this.hasSingleCallResult(name)) {
-        const cachedResult = this._singleCallCache.get(name).data;
-        const serialized = serializeToolResult({
-          toolName: name,
-          ok: true,
-          data: cachedResult,
-          durationMs: 0,
-        });
-        serialized.repeatedSingleCall = true;
-        return serialized;
-      }
-
-      assertPlainObject(args, 'Tool arguments');
-      const tool = this.tools.get(name.toLowerCase());
-
-      if (!tool) {
-        throw new ToolExecutionError('TOOL_NOT_FOUND', `Tool "${name}" is not registered.`);
-      }
-
-      // Validate args against the tool's inputSchema if present
-      if (tool.inputSchema) {
+  "file.search": {
+    name: "file.search", description: "Search file contents with regex.",
+    inputSchema: { type: "object", required: ["query"], properties: { query: { type: "string" }, path: { type: "string", default: "." }, glob: { type: "string" }, maxResults: { type: "number", default: 50 } } },
+    async execute(args, ctx) {
+      const dir = args.path ? resolvePath(ctx.root, args.path) : ctx.root;
+      const pattern = new RegExp(args.query, "gi");
+      const matches = []; const max = args.maxResults || 50;
+      const { globSync } = require("glob");
+      const files = globSync(args.glob || "**/*.{js,ts,py,md,txt,json,yaml,yml,css,html}", { cwd: dir, nodir: true, ignore: ["node_modules/**", ".git/**"] });
+      for (const f of files.slice(0, 200)) {
+        if (matches.length >= max) break;
         try {
-          validate(tool.inputSchema, args);
-        } catch (err) {
-          throw new ToolExecutionError(
-            'INVALID_ARGUMENT',
-            `Validation failed for tool "${name}": ${err.message}`,
-          );
-        }
+          const lines = fs.readFileSync(path.join(dir, f), "utf-8").split("\n");
+          for (let i = 0; i < lines.length && matches.length < max; i++) {
+            if (pattern.test(lines[i])) { pattern.lastIndex = 0; matches.push({ path: f, line: i + 1, content: lines[i].trim() }); }
+          }
+        } catch (_) {}
       }
+      return { ok: true, data: { query: args.query, matches, truncated: matches.length >= max } };
+    },
+    isReadOnly: () => true,
+  },
 
-      const permissionResult = await this.permissionManager.checkPermission(
-        name, args, this.approvalCallback,
-      );
+  "file.write": {
+    name: "file.write", description: "Write content to a file. Overwrites by default.",
+    inputSchema: { type: "object", required: ["path", "content"], properties: { path: { type: "string" }, content: { type: "string" }, overwrite: { type: "boolean", default: true } } },
+    async execute(args, ctx) {
+      const fp = resolvePath(ctx.root, requireString(args.path, "path"));
+      const dir = path.dirname(fp);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      const existed = fs.existsSync(fp);
+      if (existed && args.overwrite === false) throw new Error("File exists and overwrite is false");
+      fs.writeFileSync(fp, args.content, "utf-8");
+      return { ok: true, data: { path: args.path, bytes: Buffer.byteLength(args.content), overwritten: existed } };
+    },
+    isReadOnly: () => false,
+  },
 
-      if (!permissionResult.approved) {
-        throw new ToolExecutionError(
-          'PERMISSION_DENIED',
-          `Operation denied: ${permissionResult.reason}`,
-          { level: permissionResult.level, toolName: name },
-        );
+  "file.edit": {
+    name: "file.edit", description: "Edit a file by finding and replacing text.",
+    inputSchema: { type: "object", required: ["path", "old_string", "new_string"], properties: { path: { type: "string" }, old_string: { type: "string" }, new_string: { type: "string" }, replace_all: { type: "boolean", default: false } } },
+    async execute(args, ctx) {
+      const fp = resolvePath(ctx.root, requireString(args.path, "path"));
+      if (!fs.existsSync(fp)) throw new Error("File not found: " + args.path);
+      let content = fs.readFileSync(fp, "utf-8");
+      const old = args.old_string, nw = args.new_string;
+      if (!content.includes(old)) throw new Error("old_string not found in file");
+      const count = (content.match(new RegExp(old.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g")) || []).length;
+      if (count > 1 && !args.replace_all) throw new Error(`old_string appears ${count} times. Use replace_all:true or be more specific.`);
+      content = args.replace_all ? content.split(old).join(nw) : content.replace(old, nw);
+      fs.writeFileSync(fp, content, "utf-8");
+      return { ok: true, data: { path: args.path, changed: true, occurrences: args.replace_all ? count : 1 } };
+    },
+    isReadOnly: () => false,
+  },
+
+  "file.delete": {
+    name: "file.delete", description: "Delete a file (moves to .hax-agent/trash by default).",
+    inputSchema: { type: "object", required: ["path"], properties: { path: { type: "string" }, permanent: { type: "boolean", default: false } } },
+    async execute(args, ctx) {
+      const fp = resolvePath(ctx.root, requireString(args.path, "path"));
+      if (!fs.existsSync(fp)) throw new Error("File not found");
+      const stat = fs.statSync(fp);
+      if (args.permanent) { fs.unlinkSync(fp); }
+      else {
+        const trash = path.join(ctx.root, ".hax-agent", "trash");
+        fs.mkdirSync(trash, { recursive: true });
+        fs.renameSync(fp, path.join(trash, `${Date.now()}-${path.basename(fp)}`));
       }
+      return { ok: true, data: { path: args.path, deleted: true, permanent: !!args.permanent, bytes: stat.size } };
+    },
+    isReadOnly: () => false,
+  },
 
-      // Fire beforeToolCall plugin hooks
-      if (this.pluginRegistry) {
-        await this.pluginRegistry.runHook('beforeToolCall', { toolName: name, args, session: context.session });
-      }
+  "file.readdir": {
+    name: "file.readDirectory", description: "List files and directories in a path.",
+    inputSchema: { type: "object", required: ["path"], properties: { path: { type: "string" } } },
+    async execute(args, ctx) {
+      const fp = resolvePath(ctx.root, requireString(args.path, "path"));
+      const entries = fs.readdirSync(fp, { withFileTypes: true });
+      return { ok: true, data: { path: args.path, entries: entries.map(e => ({ name: e.name, type: e.isDirectory() ? "dir" : "file" })) } };
+    },
+    isReadOnly: () => true,
+  },
 
-      const data = await tool.execute(args, {
-        ...context,
-        root: this.root,
-        registry: this,
-        undoStack: this.undoStack,
-      });
-
-      if (SINGLE_CALL_TOOLS.has(name)) {
-        this._singleCallCache.set(name, { data, timestamp: Date.now() });
-      }
-
-      // Fire afterToolCall plugin hooks
-      if (this.pluginRegistry) {
-        await this.pluginRegistry.runHook('afterToolCall', { toolName: name, args, result: data, session: context.session });
-      }
-
-      const durationMs = Date.now() - startedAt;
-
-      // Record observability metrics (optional).
+  "shell.run": {
+    name: "shell.run", description: "Run a shell command with optional arguments.",
+    inputSchema: { type: "object", required: ["command"], properties: { command: { type: "string" }, args: { type: "array", items: { type: "string" } }, cwd: { type: "string" }, timeoutMs: { type: "number", default: 30000 } } },
+    async execute(args, ctx) {
+      const { execSync } = require("child_process");
+      const cmd = [args.command, ...(args.args || [])].filter(Boolean).join(" ");
       try {
-        const obsMetrics = _getObsMetrics ? _getObsMetrics() : null;
-        if (obsMetrics) {
-          obsMetrics.get("tool.executions")?.inc();
-          obsMetrics.get("tool.duration_ms")?.observe(durationMs);
-        }
-      } catch (_) { /* no-op */ }
-
-      return serializeToolResult({
-        toolName: name,
-        ok: true,
-        data,
-        durationMs,
-      });
-    } catch (error) {
-      if (this.pluginRegistry) {
-        this.pluginRegistry.runHook('onError', { error, toolName: name, session: context.session }).catch(() => {});
+        const stdout = execSync(cmd, { cwd: args.cwd || ctx.root, timeout: args.timeoutMs || 30000, maxBuffer: 1024 * 1024, encoding: "utf-8", shell: true });
+        return { ok: true, data: { command: cmd, stdout, stderr: "", exitCode: 0 } };
+      } catch (err) {
+        return { ok: false, error: { code: "SHELL_ERROR", message: err.message, stdout: err.stdout || "", stderr: err.stderr || "", exitCode: err.status || 1 } };
       }
+    },
+    isReadOnly: (args) => {
+      // Read-only shell commands: echo, ls, cat, pwd, etc.
+      const cmd = (args.command || "").toLowerCase();
+      const safe = ["echo", "ls", "dir", "pwd", "whoami", "date", "uname", "cat", "head", "tail", "wc", "which", "where", "env", "printenv", "type"];
+      return safe.some(s => cmd === s || cmd.startsWith(s + " "));
+    },
+  },
 
-      const durationMs = Date.now() - startedAt;
-
-      // Record observability error + duration metrics (optional).
+  "web.fetch": {
+    name: "web.fetch", description: "Fetch content from a URL.",
+    inputSchema: { type: "object", required: ["url"], properties: { url: { type: "string" }, maxBytes: { type: "number", default: 50000 } } },
+    async execute(args) {
       try {
-        const obsMetrics = _getObsMetrics ? _getObsMetrics() : null;
-        if (obsMetrics) {
-          obsMetrics.get("tool.executions")?.inc();
-          obsMetrics.get("tool.errors")?.inc();
-          obsMetrics.get("tool.duration_ms")?.observe(durationMs);
-        }
-      } catch (_) { /* no-op */ }
+        const r = await fetch(requireString(args.url, "url"));
+        const text = (await r.text()).slice(0, args.maxBytes || 50000);
+        return { ok: true, data: { url: args.url, status: r.status, contentType: r.headers.get("content-type") || "", content: text } };
+      } catch (err) { return { ok: false, error: { code: "FETCH_ERROR", message: err.message } }; }
+    },
+    isReadOnly: () => true,
+  },
 
-      return serializeToolResult({
-        toolName: name,
-        ok: false,
-        error,
-        durationMs,
-      });
-    }
-  }
+  "web.search": {
+    name: "web.search", description: "Search the web (requires search API key).",
+    inputSchema: { type: "object", required: ["query"], properties: { query: { type: "string" } } },
+    async execute(args) {
+      return { ok: true, data: { query: args.query, results: [{ title: "Web search requires API key", url: "", snippet: "Configure search API in settings." }], note: "Search API not configured. Set web.search.apiKey in settings." } };
+    },
+    isReadOnly: () => true,
+  },
+};
 
-  /**
-   * Return per-tool metrics collected by withMetrics decorators.
-   * @returns {Record<string, { count: number, totalDurationMs: number, errorCount: number, avgDurationMs: number | null }>}
-   */
-  getStats() {
-    if (!this._enableMetrics) {
-      return {};
-    }
-    const stats = {};
-    for (const toolName of this.tools.keys()) {
-      stats[toolName] = getMetrics(toolName);
-    }
-    return stats;
-  }
+function createDefaultRegistry(root) {
+  const r = new ToolRegistry({ root });
+  for (const t of Object.values(tools)) r.register(t);
+  for (const t of extendedTools) r.register(t);
+  return r;
 }
-
-function createLocalToolRegistry(options = {}) {
-  const registry = new ToolRegistry({
-    root: options.root,
-    permissionManager: options.permissionManager,
-    undoStack: options.undoStack,
-    pluginRegistry: options.pluginRegistry,
-    enableMetrics: options.enableMetrics,
-    defaultTimeoutMs: options.defaultTimeoutMs,
-  });
-  const shellPolicy = normalizeShellPolicy(options.shellPolicy);
-
-  registry
-    .register(createReadFileTool())
-    .register(createWriteFileTool())
-    .register(createGlobTool())
-    .register(createSearchTool())
-    .register(createShellTool(shellPolicy))
-    .register(createWebFetchTool())
-    .register(createWebSearchTool())
-    .register(createFileEditTool())
-    .register(createReadDirectoryTool())
-    .register(createDeleteFileTool())
-    .register(createStockQuoteTool());
-
-  return registry;
-}
-
-module.exports = { ToolRegistry, createLocalToolRegistry };
+module.exports = { ToolRegistry, createDefaultRegistry, tools };

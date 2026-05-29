@@ -117,6 +117,14 @@ class ResponseRenderer {
     this.startTime = Date.now();
     this.outputTokens = 0;
     this.inputTokens = 0;
+    this._collapsed = null;
+    this._partialWritten = false;
+    this._fullText = '';
+  }
+
+  /** Render complete markdown text (called at end of turn) */
+  renderMarkdown(text) {
+    return this.markdown.render(text);
   }
 
   startWaiting() {
@@ -124,17 +132,9 @@ class ResponseRenderer {
     this.spinner.start('', 'Thinking');
   }
 
-  _flushLineBuffer() {
-    if (this.lineBuffer.length > 0) {
-      const rendered = this.markdown._renderInline(this.lineBuffer);
-      this.screen.write(`${rendered}\n`);
-      this.lineBuffer = '';
-    }
-    this.lineOpen = false;
-  }
-
   writeText(delta) {
     this.spinner.stop();
+    if (this._collapsed) this._flushCollapsed();
     if (!this.textStarted) {
       this.screen.write(`\n${THEME.assistantIndicator}Assistant${ANSI.reset}\n`);
       this.assistantStarted = true;
@@ -143,14 +143,21 @@ class ResponseRenderer {
     }
 
     this.textStarted = true;
+    this._fullText += delta;
     this.lineBuffer += delta;
 
-    const parts = this.lineBuffer.split('\n');
-    for (let i = 0; i < parts.length - 1; i++) {
-      const rendered = this.markdown._renderInline(parts[i]);
-      this.screen.write(`${rendered}\n`);
+    var parts = this.lineBuffer.split('\n');
+    // Render complete lines through full markdown
+    for (var i = 0; i < parts.length - 1; i++) {
+      var rendered = this.markdown.render(parts[i]);
+      this.screen.write(rendered + '\n');
     }
-    this.lineBuffer = parts[parts.length - 1];
+    var partial = parts[parts.length - 1];
+    if (partial.length > 0) {
+      // Partial line: inline formatting only
+      this.screen.write(this.markdown._renderInline(partial));
+    }
+    this.lineBuffer = '';
     this.lineOpen = true;
   }
 
@@ -167,56 +174,105 @@ class ResponseRenderer {
 
   startTool(chunk) {
     this.toolCount++;
+    // Flush previous collapsed batch if tool changed
+    if (this._collapsed && this._collapsed.name !== chunk.name) {
+      this._flushCollapsed();
+    }
     this.currentToolName = chunk.name;
     this.currentToolInput = chunk.input || {};
-    const toolLine = formatToolStart(chunk);
-    if (!this.spinner.isTTY) {
-      this.screen.write(`  ${toolLine}\n`);
-      return;
-    }
-    this._flushLineBuffer();
+    this._lastToolOk = null; // will be set by finishTool
+
     if (chunk.name === 'shell.run') {
+      if (this._collapsed) this._flushCollapsed();
+      const toolLine = formatToolStart(chunk);
       this.spinner.stop();
+      if (this.lineOpen) { this.screen.write('\n'); this.lineOpen = false; }
       this.screen.write(`  ${THEME.spinner}Running${ANSI.reset} ${toolLine}\n`);
       return;
     }
-    this.spinner.start(toolLine, 'Running');
+
+    // For non-shell tools: don't show start, just track for collapsing
+    if (!this._collapsed) {
+      this._collapsed = { name: chunk.name, count: 0, results: [] };
+    }
   }
 
   finishTool(chunk) {
     this.spinner.stop();
+    this._lastToolOk = !chunk.isError;
+
+    // Accumulate into collapsed batch
+    if (this._collapsed && this._collapsed.name === chunk.name) {
+      this._collapsed.count++;
+      this._collapsed.results.push(chunk);
+      return;
+    }
+
+    // Non-collapsible tool (shell.run etc.)
+    this._renderToolResult(chunk);
+  }
+
+  _flushCollapsed() {
+    if (!this._collapsed || this._collapsed.count === 0) { this._collapsed = null; return; }
+    var c = this._collapsed;
+    var name = c.name;
+    var okCount = c.results.filter(function(r) { return !r.isError; }).length;
+    var errCount = c.results.filter(function(r) { return r.isError; }).length;
 
     if (!this.assistantStarted) {
-      this.screen.write(`\n${THEME.assistantIndicator}Assistant${ANSI.reset}\n`);
+      this.screen.write('\n' + THEME.assistantIndicator + 'Assistant' + ANSI.reset + '\n');
       this.assistantStarted = true;
     }
+    if (this.lineOpen) { this.screen.write('\n'); this.lineOpen = false; }
 
-    this._flushLineBuffer();
-
-    const modificationNotice = formatFileModificationNotice(chunk);
-    if (modificationNotice) {
-      for (const line of modificationNotice) {
-        this.screen.write(`${line}\n`);
-      }
+    if (c.count === 1) {
+      this._renderToolResult(c.results[0]);
     } else {
-      this.screen.write(`${formatToolResult(chunk)}\n`);
+      var icon = errCount === 0 ? THEME.success + '  ✓' : THEME.warning + '  ✓';
+      this.screen.write(icon + ' ' + toToolLabel(name) + ANSI.reset + THEME.dim + ' x ' + c.count + ' calls' + ANSI.reset + '\n');
+      if (errCount > 0) {
+        this.screen.write('  ' + THEME.toolError + errCount + ' errors' + ANSI.reset + '\n');
+      }
     }
+    this._collapsed = null;
+  }
 
+  _renderToolResult(chunk) {
+    if (!this.assistantStarted) {
+      this.screen.write('\n' + THEME.assistantIndicator + 'Assistant' + ANSI.reset + '\n');
+      this.assistantStarted = true;
+    }
+    if (this.lineOpen) { this.screen.write('\n'); this.lineOpen = false; }
+    var notice = formatFileModificationNotice(chunk);
+    if (notice) {
+      for (var i = 0; i < notice.length; i++) this.screen.write(notice[i] + '\n');
+    } else {
+      this.screen.write(formatToolResult(chunk) + '\n');
+    }
     if (chunk.repeatedInvalid && chunk.showNotice) {
-      this.screen.write(`${THEME.warning}  Same invalid call failed twice; asking the model to choose different input.${ANSI.reset}\n`);
+      this.screen.write(THEME.warning + '  Same invalid call failed twice; asking the model to choose different input.' + ANSI.reset + '\n');
     }
   }
 
   notice(message) {
     this.spinner.stop();
-    this._flushLineBuffer();
+    if (this._collapsed) this._flushCollapsed();
+    if (this.lineOpen) {
+      this.screen.write('\n');
+      this.lineOpen = false;
+    }
     this.screen.write(`${THEME.info}  ${message}${ANSI.reset}\n`);
   }
 
   complete(usage) {
     this.spinner.stop();
+    if (this._collapsed) this._flushCollapsed();
 
-    this._flushLineBuffer();
+    if (this.lineBuffer.length > 0) {
+      const rendered = this.markdown._renderInline(this.lineBuffer);
+      this.screen.write(`${rendered}\n`);
+      this.lineBuffer = '';
+    }
 
     const outputTokens = usage?.outputTokens || 0;
     const hasOutput = this.textStarted || this.toolCount > 0 || outputTokens > 0;
@@ -232,12 +288,18 @@ class ResponseRenderer {
       this.screen.write(`${THEME.dim}  ${elapsed}s${tokenInfo}${ANSI.reset}\n`);
     }
 
+    if (this.lineOpen) {
+      this.screen.write('\n');
+      this.lineOpen = false;
+    }
+
     this.assistantStarted = false;
     this.textStarted = false;
   }
 
   fail(message) {
     this.spinner.stop();
+    if (this._collapsed) this._flushCollapsed();
     if (!this.assistantStarted) {
       this.screen.write(`\n${THEME.assistantIndicator}Assistant${ANSI.reset}\n`);
       this.assistantStarted = true;
@@ -253,6 +315,7 @@ class ResponseRenderer {
 
   interrupt() {
     this.spinner.stop();
+    if (this._collapsed) this._flushCollapsed();
     if (this.lineBuffer.length > 0) {
       this.screen.write(`${this.lineBuffer}\n`);
       this.lineBuffer = '';
@@ -322,7 +385,8 @@ function formatToolResult(chunk) {
 
   if (chunk.isError) {
     const code = chunk.errorCode && chunk.errorCode !== 'TOOL_ERROR' ? `${chunk.errorCode}: ` : '';
-    const message = chunk.error ? `${code}${chunk.error}` : `${code}tool failed`;
+    const errText = typeof chunk.error === "object" ? (chunk.error.message || chunk.error.code || JSON.stringify(chunk.error)) : String(chunk.error || "");
+    const message = chunk.error ? `${code}${errText}` : `${code}tool failed`;
     const path = chunk.input?.path;
     const pathDisplay = path ? `(${THEME.accent}${formatDisplayPath(path)}${ANSI.reset})` : '';
     return `  ${THEME.toolError}✗ ${name}${pathDisplay} failed${THEME.dim}${duration}${ANSI.reset}\n    ${THEME.dim}└─ ${message}${ANSI.reset}`;
@@ -523,32 +587,9 @@ function toToolLabel(name) {
     .join(' ');
 }
 
-// Field names that are likely to contain sensitive values
-const SENSITIVE_KEY_PATTERNS = [
-  /key/i, /token/i, /secret/i, /password/i, /passwd/i,
-  /credential/i, /auth/i, /env/i, /api[_-]?key/i, /access[_-]?key/i,
-  /private[_-]?key/i, /certificate/i, /authorization/i,
-];
-
-// Patterns that indicate a value is a secret even if the key isn't flagged
-const SENSITIVE_VALUE_PATTERNS = [
-  /^sk-[A-Za-z0-9_-]{20,}$/,
-  /^AIza[A-Za-z0-9_-]{30,}$/,
-  /^gh[pousr]_[A-Za-z0-9_-]{20,}$/,
-  /^[A-Za-z0-9+/]{40,}={0,2}$/,
-  /^[0-9a-fA-F]{40,}$/,
-];
-
 function isDisplayableInput(key, value) {
-  const isKeySensitive = SENSITIVE_KEY_PATTERNS.some((pattern) => pattern.test(key));
-  if (isKeySensitive) return false;
-
-  if (typeof value === 'string' && value.length > 20) {
-    const isValueSensitive = SENSITIVE_VALUE_PATTERNS.some((pattern) => pattern.test(value));
-    if (isValueSensitive) return false;
-  }
-
-  return (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean');
+  return !/key|token|secret|password|content|env/i.test(key) &&
+    (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean');
 }
 
 function formatProviderError(error, provider) {

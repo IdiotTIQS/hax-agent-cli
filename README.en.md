@@ -7,7 +7,7 @@
 [![PRs](https://img.shields.io/badge/PRs-welcome-brightgreen)](#development--contributing)
 [![npm](https://img.shields.io/npm/v/hax-agent-cli)](https://www.npmjs.com/package/hax-agent-cli)
 
-Hax Agent is an AI coding assistant for developers, with CLI as the primary entry point and an Electron + Vue desktop app alongside it. It supports three major AI providers — Anthropic, OpenAI, and Google — and features interactive chat, multi-provider switching, local file tools, session memory management, recent session recovery, and multi-agent team collaboration plan generation.
+Hax Agent is an AI coding assistant for developers, with CLI as the primary entry point and an Electron + Vue desktop app alongside it. It supports 12+ AI providers (Anthropic, OpenAI, DeepSeek, Groq, Mistral, Google, Moonshot, Zhipu, DashScope, Ollama, vLLM, OpenRouter), interactive chat, provider profile switching, local file tools, session memory management, LSP code navigation, terminal themes, and hook lifecycle extension.
 
 ---
 
@@ -24,7 +24,7 @@ Hax Agent is an AI coding assistant for developers, with CLI as the primary entr
 - [Local Tools](#local-tools)
 - [Architecture Overview](#architecture-overview)
 - [Sessions & Memory](#sessions--memory)
-- [Multi-Agent Team](#multi-agent-team)
+- [Provider Profiles](#provider-profiles)
 - [Development & Testing](#development--testing)
 - [License](#license)
 
@@ -34,14 +34,18 @@ Hax Agent is an AI coding assistant for developers, with CLI as the primary entr
 
 - **Interactive Agent Shell** — Enters chat mode by default, supporting continuous contextual conversations, slash commands, and streaming output.
 - **Desktop GUI** — Electron + Vue interface that keeps the CLI workflow intact while adding session lists, file tree browsing, a right-side status panel, and session recovery.
-- **Multi-Provider Support** — Built-in Anthropic (Claude), OpenAI (GPT), and Google (Gemini) providers with runtime switching.
+- **Multi-Provider Support** — Built-in 12+ providers: Anthropic (Claude), OpenAI (GPT), Google (Gemini), DeepSeek, Groq, Mistral, Moonshot, Zhipu, DashScope, Ollama, vLLM, OpenRouter.
+- **Provider Profiles** — Pre-configured profiles (claude, gpt, sonnet, haiku, gpt-mini, local) with custom profile support and one-command switching.
 - **Model Management** — View available models and switch models at runtime.
 - **Local Toolset** — File read/write, search, glob matching, and permission-gated shell command execution.
 - **Skills System** — Create, manage, and invoke reusable skills by packaging repetitive workflows into SKILL.md files.
+- **Hook Lifecycle** — 10 lifecycle hooks (session.start/end, pre/post.compact, pre/post.tool_use, etc.) for plugins and script extension.
+- **LSP Code Navigation** — Built-in `/lsp` command for go-to-definition and workspace symbol search.
+- **Terminal Themes** — Multiple color themes switchable via `/theme` command.
 - **Session Memory** — Automatically saves conversation transcripts; new sessions automatically load recent context.
-- **Layered Configuration** — Supports 5-level priority configuration merging (default → user → project → explicit → environment variables).
-- **Multi-Agent Team** — Built-in `auth-refactor` authentication refactoring team plan, supporting structured collaborative output.
+- **Layered Configuration** — Multi-level config merging with independent provider profile management.
 - **Cost Tracking** — Token usage and cost estimation statistics.
+- **Permission Management** — Four modes: normal (ask), yolo (auto-approve all), plan (block writes), fullauto (silent auto-approve).
 
 ---
 
@@ -49,7 +53,7 @@ Hax Agent is an AI coding assistant for developers, with CLI as the primary entr
 
 - **Node.js** >= 18
 - **npm** (or pnpm / yarn)
-- **API Key** (Anthropic / OpenAI / Google, at least one)
+- **API Key** (at least one provider)
 
 ---
 
@@ -75,13 +79,21 @@ hax-agent
 npm start
 ```
 
-On first launch in a real terminal, `hax-agent` opens the setup wizard if no settings file or provider environment variables exist. You can also run it manually:
+On first launch, configure your API keys:
 
-```bash
-hax-agent init
+```text
+/api-key anthropic sk-ant-xxxxxxxxxxxx
+/api-key openai sk-xxxxxxxxxxxx
 ```
 
-The wizard walks through provider selection, API key entry, optional API base URL, default model, permission mode, and session memory. Provider and permission choices support arrow keys and Enter.
+Or use pre-configured provider profiles:
+
+```text
+/provider claude        # Switch to Anthropic Claude
+/provider gpt           # Switch to OpenAI GPT
+/provider local         # Switch to local Ollama
+/provider list          # List all available profiles
+```
 
 ### 3. Configure Provider
 
@@ -90,10 +102,10 @@ Set up within the Shell at runtime:
 ```text
 /provider anthropic     # Switch to Anthropic
 /provider openai        # Switch to OpenAI
-/provider google        # Switch to Google
-/api-url https://api.anthropic.com
-/api-key sk-ant-xxxxxxxxxxxx
+/provider deepseek      # Switch to DeepSeek
 /model claude-sonnet-4-20250514
+/api-url https://api.anthropic.com
+/api-key anthropic sk-ant-xxxxxxxxxxxx
 ```
 
 Or pre-configure via environment variables (see [Configuration](#configuration)).
@@ -127,20 +139,11 @@ hax-agent chat
 hax-agent help
 hax-agent -v
 
-# Run setup wizard
-hax-agent init
-
 # List available models for the current provider
 hax-agent models
 
-# List built-in agent roles
-hax-agent agents
-
 # Run diagnostics (script-friendly)
 hax-agent doctor --json
-
-# Output the auth-refactor team plan
-hax-agent team auth-refactor
 
 # List and resume sessions
 hax-agent sessions
@@ -167,8 +170,7 @@ hax-agent               # Available from any directory
 | `npm run desktop:dev` | Start the Electron + Vue desktop app in development mode |
 | `npm run desktop:build` | Build the desktop frontend assets |
 | `npm run desktop:start` | Start the Electron desktop app directly |
-| `npm run auth:team` | Output the auth-refactor team plan |
-| `npm run lint` | Run syntax checks for JS/MJS files |
+| `npm run lint` | Run syntax checks for JS files |
 | `npm test` | Run the test suite |
 | `npm run test:desktop` | Build desktop and run desktop tests |
 
@@ -182,34 +184,38 @@ Type the following slash commands in the Shell:
 |---------|-------------|
 | `/help` | View all available commands |
 | `/exit` or `/quit` | Exit the Shell |
-| `/clear` or `/new` | Clear the current context and start a new session |
+| `/clear` | Clear the current context and start a new session |
 | `/compact` | Compact the current conversation to reduce context usage |
 | `/tools` | List available local tools |
-| `/skills [list|usage]` | List skills or view usage statistics |
-| `/skillify [description]` | Capture the current session as a reusable skill |
-| `/goal [--max n] <goal>` | Set a persistent goal until it completes, blocks, reaches the continuation limit, or `/goal clear` |
-| `/agents` | View built-in agent roles |
-| `/team [command]` | Manage agent teams, tasks, and messages |
+| `/skills` | List available skills |
+| `/goal [--max n] <goal>` | Set a persistent goal until complete, blocked, or `/goal clear` |
 | `/models` | List available models for the current provider |
-| `/model <id-or-number>` | Switch models |
-| `/provider <name>` | Switch AI provider (`anthropic`, `openai`, `google`) |
-| `/api-url <base-url>` | Set the API Base URL |
-| `/api-key <key>` | Set the API Key |
-| `/language <en|zh-CN|zh-TW|ru>` | Switch CLI language |
+| `/model <id>` | Switch models |
+| `/provider <name>` | Switch provider profile (`list` to see all) |
+| `/providers` | List all available AI providers |
+| `/api-url <base-url>` | Set or view the API Base URL |
+| `/api-key <provider> <key>` | Set API Key for a provider |
 | `/cost` | View token usage and cost for this session |
-| `/sessions` | List previous sessions |
-| `/resume [session-id]` | Resume a previous session |
-| `/rename <name>` | Name the current session |
-| `/status` | Show session summary (model, cost, tokens, git) |
-| `/context [subcommand]` | View or set context window / cache budget (alias `/cache`) |
+| `/status` | Show session summary (model, cost, tokens) |
+| `/context` | View context window usage |
 | `/config` | Show current configuration |
 | `/copy` | Copy last AI response to clipboard |
-| `/doctor [--json]` | Run diagnostics; `--json` prints machine-readable output |
-| `/theme` | Toggle terminal color theme |
-| `/vim` | Toggle Vim keybindings mode |
-| `/memory [list|read|write|delete]` | Manage persistent memory |
-| `/permissions [status|mode|reset]` | View or manage tool permissions |
-| `/update [install]` | Check for or install CLI updates |
+| `/export` | Export session to JSON file |
+| `/doctor` | Run diagnostics |
+| `/theme <name>` | Switch terminal color theme (`list` to see all) |
+| `/yolo` | Toggle YOLO mode (auto-approve all tools) |
+| `/plan` | Toggle Plan mode (block all mutating tools) |
+| `/fullauto` | Toggle Full Auto mode (silent auto-approve) |
+| `/perms` | Show permission status |
+| `/permissions [allow\|deny\|reset\|yolo\|normal] [tool]` | Manage tool permissions |
+| `/allow <tool>` | Always allow a tool |
+| `/deny <tool>` | Always deny a tool |
+| `/memory [search\|list]` | Manage persistent memories |
+| `/lsp def <symbol>` | Go to symbol definition |
+| `/lsp search <query>` | Search workspace symbols |
+| `/personalize` | Extract environment rules from conversation to rules.md |
+| `/init` | Initialize .hax-agent project directory |
+| `/version` | Show version info |
 
 ---
 
@@ -246,7 +252,7 @@ allowed-tools:
   - file.read
   - file.write
   - shell.run
-when_to_use: Describes when to automatically invoke this skill. Start with "Use when...", include trigger phrases and example messages.
+when_to_use: Describes when to automatically invoke this skill. Start with "Use when...".
 argument-hint: "[arg1] [arg2]"
 arguments:
   - arg1
@@ -269,11 +275,6 @@ Clearly state the goal of this workflow.
 What to do in this step. Be specific and actionable.
 
 **Success criteria**: Always include! This indicates the step is complete and you can move on.
-
-### 2. Another Step
-...
-
-**Human checkpoint**: When to pause and ask the user (especially for irreversible operations).
 ```
 
 ### Invoking Skills
@@ -283,96 +284,54 @@ In the Shell, simply type the skill name as a slash command:
 ```text
 /code-review                    # Invoke the code review skill
 /code-review src/index.js       # Invoke with arguments
-/skillify                       # Capture the current session as a skill
 /skills                         # List all available skills
-/skills usage                   # View skill usage statistics
 ```
-
-### Capturing a Session as a Skill
-
-Use the `/skillify` command to save a repetitive workflow from the current session as a reusable skill:
-
-```text
-/skillify                       # Create a skill interactively
-/skillify deploy workflow       # Describe the workflow to capture
-```
-
-The AI will analyze the session content, identify reusable steps, and guide you through creating the SKILL.md file.
-
-### Skill Usage Tracking
-
-The system automatically tracks each skill's usage frequency and last-used time, supporting intelligent sorting based on usage frequency and recency.
 
 ---
 
 ## Configuration
 
-### Configuration Priority (Low to High)
+### Configuration Priority
 
-1. **Default Configuration** — Built into `DEFAULT_SETTINGS` in `src/config.js`
+1. **Default Configuration** — Built into `src/config/settings.js`
 2. **User Configuration** — `~/.hax-agent/settings.json`
-3. **Project Configuration** — `./.hax-agent/settings.json`
-4. **Explicit Configuration** — JSON file path specified by the `HAX_AGENT_SETTINGS` environment variable
-5. **Environment Variable Overrides** — All environment variables listed below
+3. **Environment Variables** — All `HAX_AGENT_*` prefixed variables
 
-> ⚠️ It is recommended not to commit project configuration containing API keys to version control. Use environment variables or user configuration instead.
+> It is recommended not to commit configuration containing API keys to version control. Use environment variables or user configuration instead.
 
 ### Supported Providers
 
 | Provider | Aliases | Default Model | Environment Variables |
 |----------|---------|---------------|----------------------|
-| **Anthropic** | `anthropic`, `claude` | `claude-sonnet-4-20250514` | `ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL` |
-| **OpenAI** | `openai`, `gpt` | `gpt-4.1` | `OPENAI_API_KEY`, `OPENAI_BASE_URL` |
-| **Google** | `google`, `gemini` | `gemini-2.5-flash-preview-05-20` | `GOOGLE_API_KEY`, `GOOGLE_BASE_URL` |
+| **Anthropic** | `anthropic`, `claude` | `claude-sonnet-4-20250514` | `ANTHROPIC_API_KEY` |
+| **OpenAI** | `openai`, `gpt` | `gpt-4o` | `OPENAI_API_KEY` |
+| **DeepSeek** | `deepseek` | `deepseek-chat` | `DEEPSEEK_API_KEY` |
+| **Groq** | `groq` | `llama-3.3-70b-versatile` | `GROQ_API_KEY` |
+| **Mistral** | `mistral` | `mistral-large-latest` | `MISTRAL_API_KEY` |
+| **Google** | `google`, `gemini` | `gemini-2.5-pro` | `GOOGLE_API_KEY` |
+| **Moonshot** | `moonshot` | `moonshot-v1-8k` | `MOONSHOT_API_KEY` |
+| **Zhipu** | `zhipu` | `glm-4-plus` | `ZHIPUAI_API_KEY` |
+| **DashScope** | `dashscope` | `qwen-max` | `DASHSCOPE_API_KEY` |
+| **OpenRouter** | `openrouter` | `anthropic/claude-sonnet-4` | `OPENROUTER_API_KEY` |
+| **Ollama** | `ollama` | `llama3.2` | — (local) |
+| **vLLM** | `vllm` | — | — (local) |
 
-> 💡 **Custom Providers**: Set `apiUrl` to any Anthropic-compatible endpoint (e.g. `https://api.deepseek.com/anthropic`) to use third-party models like DeepSeek. Combine with `/model` to switch to the corresponding model ID.
-
-### Complete Environment Variables
+### Key Environment Variables
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `HAX_AGENT_PROVIDER` / `AI_PROVIDER` | Provider name (`mock`, `local`, `anthropic`, `claude`, `openai`, `gpt`, `google`, `gemini`) | `mock` |
+| `HAX_AGENT_PROVIDER` | Provider name | `anthropic` |
 | `ANTHROPIC_API_KEY` | Anthropic API Key | — |
 | `OPENAI_API_KEY` | OpenAI API Key | — |
+| `DEEPSEEK_API_KEY` | DeepSeek API Key | — |
+| `GROQ_API_KEY` | Groq API Key | — |
+| `MISTRAL_API_KEY` | Mistral API Key | — |
 | `GOOGLE_API_KEY` | Google API Key | — |
-| `HAX_AGENT_API_URL` / `ANTHROPIC_BASE_URL` / `OPENAI_BASE_URL` / `GOOGLE_BASE_URL` | API Base URL | — |
-| `HAX_AGENT_MODEL` | Model ID | `claude-sonnet-4-20250514` |
-| `HAX_AGENT_MAX_TURNS` | Maximum conversation turns | `20` |
-| `HAX_AGENT_TEMPERATURE` | Sampling temperature | `0.2` |
-| `HAX_AGENT_MAX_TOKENS` | Maximum generation tokens | — |
-| `HAX_AGENT_MOCK_RESPONSE` | Response text in mock mode | — |
-| `HAX_AGENT_MOCK_DELAY_MS` | Delay in milliseconds for mock mode | `0` |
-| `HAX_AGENT_MOCK_TOOL_TRACE` | Mock tool call trace (`1` to enable) | — |
-| `HAX_AGENT_MEMORY_ENABLED` | Enable memory | `true` |
-| `HAX_AGENT_MEMORY_DIR` | Memory directory | `memory` under the system app data directory |
-| `HAX_AGENT_MEMORY_MAX_ITEMS` | Maximum memory items | `20` |
-| `HAX_AGENT_SESSION_DIR` | Session directory | `sessions` under the system app data directory |
-| `HAX_AGENT_TRANSCRIPT_LIMIT` | Transcript save/read limit | `100` |
-| `HAX_AGENT_INCLUDE_SETTINGS` | Include settings in prompt | `true` |
-| `HAX_AGENT_INCLUDE_MEMORY` | Include memory in prompt | `true` |
-| `HAX_AGENT_INCLUDE_TRANSCRIPT` | Include recent conversation in prompt | `true` |
-| `HAX_AGENT_MAX_TRANSCRIPT_MESSAGES` | Maximum conversation messages in prompt | `20` |
-| `HAX_AGENT_CONTEXT_ENABLED` | Enable context window management | `true` |
-| `HAX_AGENT_CONTEXT_WINDOW_TOKENS` | Context window token budget | Inferred from the active model |
-| `HAX_AGENT_CONTEXT_RESERVE_OUTPUT_TOKENS` | Reserved output tokens | `8192` |
-| `HAX_AGENT_CONTEXT_CHARS_PER_TOKEN` | Character-to-token estimate | `4` |
-| `HAX_AGENT_FILE_CONTEXT_ENABLED` | Enable relevant file context recall | `true` |
-| `HAX_AGENT_FILE_CONTEXT_MAX_FILES` | Maximum recalled files per turn | `8` |
-| `HAX_AGENT_FILE_CONTEXT_MAX_INDEX_FILES` | Maximum files scanned for indexing | `2000` |
-| `HAX_AGENT_FILE_CONTEXT_MAX_FILE_SIZE` | Max file size for indexing | `512000` |
-| `HAX_AGENT_FILE_CONTEXT_MAX_BYTES_PER_FILE` | Max injected bytes per file | `32000` |
-| `HAX_AGENT_FILE_CONTEXT_MAX_TOTAL_BYTES` | Max total injected file bytes | `120000` |
-| `HAX_AGENT_PERMISSIONS_MODE` | Default permission mode (`normal`, `yolo`) | `normal` |
-| `HAX_AGENT_UPDATES_AUTO_INSTALL` | Auto-install CLI updates | `false` |
-| `HAX_AGENT_DESKTOP_WORKSPACE` | Default desktop workspace | — |
-| `HAX_AGENT_LOCALE` / `HAX_AGENT_LANGUAGE` | CLI language | `en` |
+| `HAX_AGENT_MODEL` | Model ID | — |
+| `HAX_AGENT_MAX_TURNS` | Maximum conversation turns | `25` |
+| `HAX_AGENT_API_URL` | API Base URL | — |
+| `HAX_AGENT_PERMISSIONS_MODE` | Default permission mode | `normal` |
 | `HAX_AGENT_SHELL_ENABLED` | Enable shell tool | `true` |
-| `HAX_AGENT_SHELL_TIMEOUT_MS` | Shell command timeout in milliseconds | `10000` |
-| `HAX_AGENT_SHELL_MAX_BUFFER` | Shell command max output bytes | `52428800` (50 MB) |
-| `HAX_AGENT_PROJECT_ROOT` | Project root directory (overrides `process.cwd()`) | — |
-| `HAX_AGENT_USER_SETTINGS` | User configuration path | `~/.hax-agent/settings.json` |
-| `HAX_AGENT_PROJECT_SETTINGS` | Project configuration path | `./.hax-agent/settings.json` |
-| `HAX_AGENT_SETTINGS` | Explicit configuration file path | — |
 
 ### Configuration File Example
 
@@ -381,32 +340,23 @@ The system automatically tracks each skill's usage frequency and last-used time,
   "agent": {
     "provider": "anthropic",
     "model": "claude-sonnet-4-20250514",
-    "apiKey": "sk-ant-xxxxxxxxxxxx",
-    "apiUrl": "https://api.anthropic.com",
-    "temperature": 0.2,
-    "maxTurns": 20
+    "maxTurns": 25
   },
-  "memory": {
-    "enabled": true,
-    "directory": ".hax-agent/memory",
-    "maxItems": 20
-  },
-  "sessions": {
-    "directory": ".hax-agent/sessions",
-    "transcriptLimit": 100
-  },
-  "prompts": {
-    "includeSettings": true,
-    "includeMemory": true,
-    "includeTranscript": true,
-    "maxTranscriptMessages": 20
+  "permissions": {
+    "mode": "normal"
   },
   "tools": {
     "shell": {
-      "enabled": true,
-      "timeoutMs": 10000,
-      "maxBuffer": 52428800
+      "enabled": true
     }
+  },
+  "ui": {
+    "locale": "en",
+    "autoClearScreen": true
+  },
+  "context": {
+    "compactionEnabled": false,
+    "compactionThreshold": 0.85
   }
 }
 ```
@@ -419,17 +369,16 @@ The Agent Shell includes a restricted tool registry, with all file operations co
 
 | Tool | Description | Security Restriction |
 |------|-------------|---------------------|
-| `file.read` | Read text files within the workspace, with pagination | Path restricted to workspace root |
+| `file.read` | Read text files within the workspace | Path restricted to workspace root |
 | `file.write` | Write text files within the workspace | Path restricted to workspace root |
-| `file.edit` | Precisely edit files with diff preview | Path restricted to workspace root |
+| `file.edit` | Precisely replace text in files | Path restricted to workspace root |
 | `file.delete` | Delete files (moves to trash by default) | Path restricted to workspace root |
 | `file.glob` | List files matching a glob pattern | Path restricted to workspace root |
 | `file.search` | Search for content in text files | Supports regex / case sensitivity config |
 | `file.readDirectory` | List directory contents | Path restricted to workspace root |
-| `shell.run` | Execute local commands | Permission prompt decides in non-yolo mode; enabled flag, timeout, and output limit still apply |
-| `web.fetch` | Fetch web pages and convert to plain text | Blocks internal/private addresses |
-| `web.search` | Search the web for information | DuckDuckGo + Bing fallback |
-| `stock.quote` | Get real-time stock/index quotes | A-shares, HK stocks, US stocks |
+| `shell.run` | Execute local commands | Permission prompt decides in non-yolo mode |
+| `web.fetch` | Fetch web pages and convert to plain text | URL fetching |
+| `web.search` | Search the web for information | Requires search API config |
 
 ---
 
@@ -439,130 +388,89 @@ The Agent Shell includes a restricted tool registry, with all file operations co
 src/
 ├── index.js                      # Module export entry
 ├── cli.js                        # CLI entry + interactive Shell
-├── config.js                     # Layered configuration loading & environment variable overrides
-├── context.js                    # Prompt context assembly
-├── context-window.js             # Token budget & context window management
-├── file-context.js               # Relevant file context recall
-├── memory.js                     # Session memory & persistent storage
-├── session.js                    # Session lifecycle & cost tracking
-├── agent-engine.js               # Agent engine: tool calling loop
-├── orchestration.js              # Agent orchestration logic
-├── desktop-services.js           # Desktop workspace, session, Git, and snapshot services
-├── renderer.js                   # Terminal rendering, Markdown, ANSI themes
-├── i18n/                         # Multi-language internationalization
-│   ├── index.js                  #   Module exports + translation factory
-│   ├── en.js                     #   English
-│   ├── zh-CN.js                  #   Simplified Chinese
-│   ├── zh-TW.js                  #   Traditional Chinese (extends zh-CN)
-│   └── ru.js                     #   Russian (extends en)
-├── init-wizard.js                # First-run initialization wizard
-├── updater.js                    # CLI self-update
-├── command-suggestions.js        # Command typo suggestions
-├── paste-utils.js                # Long-paste summaries and command-batch detection
-├── permissions.js                # Tool permission management
-├── debug.js                      # Debug logging
-│
-├── providers/                    # AI Provider abstraction layer
-│   ├── index.js                  #   Module exports
-│   ├── factory.js                #   Provider factory + registration mechanism
-│   ├── chat-provider.js          #   Base Provider abstract class
-│   ├── anthropic-provider.js     #   Anthropic (Claude) implementation
-│   ├── openai-provider.js        #   OpenAI (GPT) implementation
-│   ├── google-provider.js        #   Google (Gemini) implementation
-│   ├── mock-provider.js          #   Local mock implementation
-│   ├── messages.js               #   Message format normalization
-│   ├── shared.js                 #   Provider shared utilities
-│   └── tool-adapters.js          #   Provider tool-call format adapters
-│
-├── runtime/                      # Agent runtime
-│   ├── index.js                  #   Module exports
-│   ├── agents.js                 #   Agent role definitions
-│   ├── command-registry.js       #   Generic runtime command registry
-│   ├── composition.js            #   Agent composition logic
-│   ├── messages.js               #   Runtime message handling
-│   ├── sessions.js               #   Session lifecycle
-│   └── tasks.js                  #   Task definition & execution
-│
-├── teams/                        # Multi-agent teams
-│   ├── agents.js                 #   Agent role definitions
-│   ├── auth-refactor.js          #   Auth refactoring team plan
-│   ├── runtime.js                #   Team runtime
-│   └── tools.js                  #   Agent team tools
-│
-├── tools/                        # Local tool registry
-│   ├── index.js                  #   Tool registration entry
-│   ├── registry.js               #   Tool registry + sandbox execution
-│   ├── error.js                  #   Tool error types
-│   ├── error-codes.js            #   Standard error code constants (35)
-│   ├── utils.js                  #   Serialization & tool helpers
-│   ├── file-read.js              #   file.read — read files
-│   ├── file-write.js             #   file.write — write files
-│   ├── file-edit.js              #   file.edit — precise text editing
-│   ├── file-delete.js            #   file.delete — delete files
-│   ├── file-glob.js              #   file.glob — glob matching
-│   ├── file-search.js            #   file.search — content search
-│   ├── file-readdir.js           #   file.readDirectory — list directories
-│   ├── shell.js                  #   shell.run — command execution
-│   ├── web-fetch.js              #   web.fetch — web page fetching
-│   ├── web-search.js             #   web.search — internet search
-│   └── stock-quote.js            #   stock.quote — stock quotes
-│
-├── commands/                     # Slash command system
-│   ├── index.js                  #   Single command runtime and handler dispatch table
-│   ├── definitions.js            #   Command definitions
-│   ├── memory.js                 #   Memory command executor
-│   ├── team.js                   #   Team command executor
-│   └── autocomplete.js           #   Tab autocomplete
-│
-├── skills/                       # Skills system
-│   ├── index.js                  #   Module exports
-│   ├── loader.js                 #   Skill loader
-│   ├── parser.js                 #   SKILL.md parser
-│   ├── intent-matcher.js         #   Intent matching
-│   ├── skillify.js               #   Session-to-skill capture
-│   └── usage.js                  #   Usage statistics tracking
-│
-├── formatters/                   # Output formatting
-│   ├── agent-teams.js            #   Agent team output
-│   └── team-plan.js              #   Team plan formatting
-│
-└── utils/                        # General utilities
-    └── serialization.js          #   Provider serialization helpers
+├── api/
+│   ├── provider.js               # 12+ provider clients & registry
+│   └── retry.js                  # Retry logic with backoff
+├── commands/
+│   ├── registry.js               # ~30 slash commands
+│   └── extended-commands.js      # Extended command set
+├── config/
+│   ├── settings.js               # Settings load/save
+│   └── profiles.js               # Provider profile management
+├── core/                         # Foundation layer — typed protocols
+│   ├── api/
+│   │   ├── errors.js             # API error classification
+│   │   └── provider-adapter.js   # Provider adapter protocol & stream events
+│   ├── messages/
+│   │   └── types.js              # StandardMessage, ContentBlock types, stream events
+│   ├── memory/
+│   │   └── compaction.js         # Token estimation & compaction
+│   └── permissions/
+│       └── checker.js            # Permission checker
+├── engine/                       # Agent runtime
+│   ├── agent.js                  # AgentEngine, Session, HookExecutor
+│   └── query.js                  # QueryContext state tracking
+├── hooks/
+│   └── registry.js               # Hook registry
+├── memory/
+│   ├── compact.js                # Message micro-compaction
+│   └── store.js                  # Persistent memory store
+├── plugins/
+│   ├── installer.js              # Plugin installer
+│   ├── registry.js               # Plugin auto-discovery
+│   └── schema.js                 # Plugin manifest validation
+├── prompts/
+│   └── manager.js                # System prompt assembly
+├── services/                     # Auxiliary services
+│   ├── autodream.js              # Auto goal continuation
+│   ├── lsp.js                    # LSP code navigation
+│   ├── mcp.js                    # MCP server integration
+│   ├── memory-extract.js         # Memory extraction
+│   ├── personalization.js        # Rule extraction & rules.md
+│   └── session-memory.js         # Session memory
+├── shared/
+│   ├── themes.js                 # Terminal themes
+│   └── utils.js                  # ANSI codes & style utilities
+├── skills/
+│   └── registry.js               # Skill auto-discovery & loading
+├── tools/
+│   ├── registry.js               # 10 built-in tools
+│   ├── agent-tool.js             # Agent subprocess tool
+│   ├── extended.js               # Extended tool set
+│   ├── image-tools.js            # Image processing
+│   ├── mcp-tools.js              # MCP tool integration
+│   ├── plan-mode-tool.js         # Plan mode tool
+│   ├── send-message-tool.js      # Inter-agent messaging
+│   └── worktree-tool.js          # Git worktree management
+└── tui/
+    └── index.js                  # Terminal UI (alt-screen, event rendering, status bar)
 
 desktop/
 ├── main/                         # Electron main process
-├── preload/                      # Preload script
+├── preload/                      # Preload scripts
 └── renderer/                     # Vue desktop frontend
-    ├── src/
-    └── vite.config.js
 ```
 
 ### Core Module Responsibilities
 
 | Module | Responsibility |
 |--------|---------------|
-| `config.js` | Multi-source configuration merging, environment variable parsing, configuration persistence |
-| `context.js` | Assembles settings, memory, and conversation history into system prompts |
-| `context-window.js` | Token budget management and context window truncation |
-| `file-context.js` | Keyword-based relevant file recall injected into prompts |
-| `memory.js` | JSON/JSONL file storage, session transcript read/write, memory CRUD |
-| `agent-engine.js` | Agent main loop: send request → execute tools → collect results |
-| `session.js` | Session lifecycle, CostTracker token usage statistics |
-| `renderer.js` | ANSI themes, Markdown rendering, terminal output formatting |
-| `desktop-services.js` | Desktop workspace tree, search, session migration, Git, and settings snapshots |
-| `i18n/` | Multi-language support (EN, zh-CN, zh-TW, RU) |
-| `init-wizard.js` | Interactive setup wizard (provider, API key, permissions) |
-| `updater.js` | Version checking & self-update |
-| `command-suggestions.js` | Command typo suggestions |
-| `paste-utils.js` | Long-paste summaries, gray badges, and command-batch detection |
-| `permissions.js` | Tool permission level management & policy enforcement |
-| `providers/` | Provider abstraction with factory pattern, dynamic registration of new providers |
-| `runtime/` | Session management, agent role orchestration, task scheduling, command parsing |
-| `teams/` | Multi-agent team plan definitions, runtime, and communication tools |
-| `tools/` | Modular tool registry, path security validation, execution sandbox |
-| `commands/` | Single-track slash command definitions, handler dispatch, and autocomplete |
-| `skills/` | Skill parsing, loading, intent matching, and usage tracking |
-| `desktop/` | Electron main process, preload script, Vue desktop UI |
+| `api/provider.js` | Unified streaming provider clients, 12+ provider registry |
+| `core/api/provider-adapter.js` | Typed provider adapter protocol, stream event types, Anthropic/OpenAI adapters |
+| `core/messages/types.js` | StandardMessage class, ContentBlock discriminated union, token estimation, format conversion |
+| `core/permissions/checker.js` | Permission checker, four modes, sensitive path detection |
+| `engine/agent.js` | AgentEngine main loop, Session management, HookExecutor lifecycle dispatch |
+| `engine/query.js` | QueryContext: task focus, file tracking, skill tracking, work log |
+| `config/settings.js` | Config load/save from `~/.haxagent/settings.json` |
+| `config/profiles.js` | ProfileManager: built-in + custom provider profiles, runtime switching |
+| `commands/registry.js` | ~30 slash command registration and dispatch |
+| `tools/registry.js` | ToolRegistry: 10 built-in tools, isReadOnly classification, path sandboxing |
+| `tui/index.js` | Terminal UI: alt-screen buffer, event-driven rendering, approval prompts |
+| `skills/registry.js` | Skill discovery, loading, and system prompt generation |
+| `services/lsp.js` | Code navigation: go-to-definition, workspace symbol search |
+| `services/personalization.js` | Environment rule extraction and rules.md generation |
+| `memory/store.js` | Persistent memory CRUD with search |
+| `memory/compact.js` | Token-aware message compaction |
 
 ---
 
@@ -575,13 +483,10 @@ All session transcripts are saved as JSONL files in the configuration directory:
 ```text
 .hax-agent/sessions/
 ├── 2025-01-15T10-30-00-000Z-a1b2c3d4.jsonl
-├── 2025-01-15T11-00-00-000Z-e5f6g7h8.jsonl
 └── ...
 ```
 
 - Each record is a single line of JSON, containing `timestamp`, `role`, `content`, and other fields.
-- New sessions automatically generate filenames based on timestamp + random suffix.
-- On startup, the most recent transcript is automatically loaded as context.
 - The desktop app's "Recent Sessions" list reads from the same transcript files and can resume historical conversations.
 
 ### Memory Storage
@@ -591,35 +496,28 @@ Persistent memories are saved as JSON files in:
 ```text
 .hax-agent/memory/
 ├── user-preferences-5f8a2b1c.json
-├── project-rules-9e3d7f6a.json
 └── ...
 ```
 
-- Each memory is a separate file containing `name`, `content`, `createdAt`, and `updatedAt`.
-- Supports clearing context via `/clear` or managing memories via `writeMemory` / `deleteMemory`.
+- Manage memories via `/memory search <query>` or `/memory list`.
+- `/personalize` extracts environment rules from conversations into `.hax-agent/rules.md`.
 
 ---
 
-## Multi-Agent Team
+## Provider Profiles
 
-The built-in `auth-refactor` team plan, designed for authentication module refactoring, includes the following roles:
+Pre-configured profiles for quick provider switching via `/provider`:
 
-| Role | Responsibility |
-|------|---------------|
-| 🏗️ **Architect** | Design the overall refactoring plan and module breakdown |
-| 🔐 **Token Expert** | Token generation, validation, and refresh strategy |
-| 💾 **Session Expert** | Session storage and state management |
-| 👤 **Identity Expert** | User identity and permission model |
-| 🛡️ **Security Reviewer** | Security audit and vulnerability detection |
-| 🧪 **Test Engineer** | Test coverage and integration testing plan |
+| Profile | Provider | Model |
+|---------|----------|-------|
+| `claude` | Anthropic | claude-sonnet-4-20250514 |
+| `sonnet` | Anthropic | claude-sonnet-4-20250514 |
+| `haiku` | Anthropic | claude-haiku-3-5-20241022 |
+| `gpt` | OpenAI | gpt-4o |
+| `gpt-mini` | OpenAI | gpt-4o-mini |
+| `local` | Ollama | (local config) |
 
-Run the team plan:
-
-```bash
-npm run auth:team
-# or
-hax-agent team auth-refactor
-```
+Custom profiles are managed via `~/.haxagent/profiles.json`, switchable with `/provider <name>`.
 
 ---
 
@@ -631,38 +529,13 @@ hax-agent team auth-refactor
 npm test
 ```
 
-The project uses the Node.js built-in test runner (`node --test`). Test files are in the `test/` directory:
-
-```text
-test/
-├── agent-engine.test.js          # Agent engine behavior
-├── auth-refactor.test.js         # Auth refactoring team
-├── cli.test.js                   # CLI entry & commands
-├── config-memory.test.js         # Config, memory, & context
-├── context-window.test.js        # Context window management
-├── error-handling.test.js        # Error handling & serialization
-├── session-commands.test.js      # Session, command suggestions, InputHistory
-├── desktop-git-assist.test.js    # Desktop Git assist
-├── desktop-main.test.js          # Desktop main process
-├── desktop-markdown.test.js      # Desktop Markdown rendering
-├── desktop-renderer.test.js      # Desktop renderer components
-├── desktop-smoke.smoke.js        # Desktop smoke test
-├── file-context.test.js          # File context recall
-├── init-wizard.test.js           # Setup wizard
-├── orchestration.test.js         # Orchestration logic
-├── permissions.test.js           # Permission management
-├── providers.test.js             # AI providers
-├── skills.test.js                # Skills system
-├── team-plan.test.js             # Team plan formatting
-├── team-tools.test.js            # Team tools
-└── updater.test.js               # CLI self-update
-```
+The project uses the Node.js built-in test runner (`node --test`). Test files are in the `test/` directory.
 
 ### Directory Conventions
 
-- `src/` — Source code, following CommonJS module conventions
+- `src/` — Source code, following CommonJS module conventions, layered architecture (core -> engine -> api/tools/services)
 - `desktop/` — Desktop app source, sharing the same core layer as the CLI
-- `test/` — Test files, one-to-one mapping with tested modules
+- `test/` — Test files
 - `.hax-agent/` — Runtime data (sessions, memories, settings), already in `.gitignore`
 
 ### Development & Contributing
@@ -682,8 +555,8 @@ Issues and PRs are welcome! Please ensure:
 
 ## License
 
-MIT © [IdiotTIQS](https://github.com/IdiotTIQS)
+MIT (c) [IdiotTIQS](https://github.com/IdiotTIQS)
 
 ---
 
-*Hax Agent CLI — Let your AI coding assistant serve you in your terminal.*
+*Hax Agent CLI -- Let your AI coding assistant serve you in your terminal.*

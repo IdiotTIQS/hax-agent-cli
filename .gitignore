@@ -13,3 +13,7 @@ Thumbs.db
 *.swo
 dist/
 nodesimple/
+.audit/
+.codebuddy/
+.workbuddy/
+bash.exe.stackdump

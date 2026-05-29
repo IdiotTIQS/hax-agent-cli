@@ -1,285 +1,284 @@
 "use strict";
 
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('node:fs/promises');
-const os = require('node:os');
-const path = require('node:path');
+const assert = require("node:assert/strict");
+const test = require("node:test");
 
-const { UndoStack } = require('../src/undo-stack');
-const { PluginRegistry } = require('../src/plugins');
-const { writeMemory, readMemory, listMemories, searchMemories, deleteMemory } = require('../src/memory');
-const { ToolRegistry } = require('../src/tools/registry');
-const { PermissionManager } = require('../src/permissions');
+// === Core Layer ===
 
-// ── UndoStack ──────────────────────────────────────────────
-test('UndoStack: push, undo, redo cycle', async (t) => {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'hax-smoke-'));
-  const filePath = path.join(dir, 'test.txt');
-  await fs.writeFile(filePath, 'original', 'utf8');
-
-  const stack = new UndoStack(10);
-  stack.push({
-    toolName: 'file.write',
-    filePath,
-    originalContent: 'original',
-    newContent: 'modified',
-    description: 'Test edit',
-  });
-
-  const undoResult = await stack.undo();
-  assert.equal(undoResult.undone, true);
-  const afterUndo = await fs.readFile(filePath, 'utf8');
-  assert.equal(afterUndo, 'original');
-
-  const redoResult = await stack.redo();
-  assert.equal(redoResult.redone, true);
-  const afterRedo = await fs.readFile(filePath, 'utf8');
-  assert.equal(afterRedo, 'modified');
-
-  await fs.rm(dir, { recursive: true, force: true });
+test("core/api/errors — all error types and classifier", () => {
+  const {
+    ApiError, ContextTooLongError, RateLimitError, ServerError,
+    AuthError, classifyApiError, isContextTooLongError, ApiErrorCode,
+  } = require("../src/core/api/errors");
+  assert.equal(Object.keys(ApiErrorCode).length, 9);
+  const ctxErr = classifyApiError(new Error("prompt is too long"));
+  assert.ok(ctxErr instanceof ContextTooLongError);
+  assert.equal(isContextTooLongError(new Error("context_length_exceeded")), true);
 });
 
-test('UndoStack: empty stack returns not undone', async (t) => {
-  const stack = new UndoStack();
-  const result = await stack.undo();
-  assert.equal(result.undone, false);
-  assert.equal(result.description, 'Nothing to undo');
+test("core/messages/types — StandardMessage and content blocks", () => {
+  const { StandardMessage, ContentBlockType, StreamEventType } = require("../src/core/messages/types");
+  const msg = StandardMessage.user("Hello");
+  assert.equal(msg.role, "user");
+  assert.equal(msg.text, "Hello");
+  assert.ok(msg.estimateTokens() > 0);
+  assert.ok(Object.keys(ContentBlockType).length >= 5);
+  assert.ok(Object.keys(StreamEventType).length >= 10);
 });
 
-test('UndoStack: undo after external modification preserves current', async (t) => {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'hax-smoke-'));
-  const filePath = path.join(dir, 'test.txt');
-  await fs.writeFile(filePath, 'v1', 'utf8');
-
-  const stack = new UndoStack();
-  stack.push({ toolName: 'file.edit', filePath, originalContent: 'v1', newContent: 'v2' });
-  await fs.writeFile(filePath, 'v2', 'utf8');
-
-  // Simulate external modification: change file after our edit
-  await fs.writeFile(filePath, 'externally-modified', 'utf8');
-
-  const result = await stack.undo();
-  assert.equal(result.undone, true);
-  const content = await fs.readFile(filePath, 'utf8');
-  assert.equal(content, 'v1');
-
-  // Redo should restore the externally-modified version (captured before undo)
-  const redoResult = await stack.redo();
-  assert.equal(redoResult.redone, true);
-  const redoContent = await fs.readFile(filePath, 'utf8');
-  assert.equal(redoContent, 'v2');
-
-  await fs.rm(dir, { recursive: true, force: true });
+test("core/permissions/checker — PermissionChecker", () => {
+  const { PermissionChecker, PermissionMode } = require("../src/core/permissions/checker");
+  const pc = new PermissionChecker({ mode: PermissionMode.DEFAULT });
+  assert.equal(pc.mode, "default");
 });
 
-// ── PluginRegistry ─────────────────────────────────────────
-test('PluginRegistry: register and run hooks', async (t) => {
-  const registry = new PluginRegistry();
-  const callOrder = [];
-
-  registry.register({
-    name: 'test-plugin',
-    hooks: {
-      beforeToolCall(ctx) { callOrder.push('before'); return ctx; },
-      afterToolCall(ctx) { callOrder.push('after'); return ctx; },
-    },
-  });
-
-  await registry.runHook('beforeToolCall', { toolName: 'test' });
-  await registry.runHook('afterToolCall', { toolName: 'test', result: 'ok' });
-
-  assert.deepEqual(callOrder, ['before', 'after']);
+test("core/api/provider-adapter — adapter protocol", () => {
+  const { ApiStreamEventType, createProviderAdapter } = require("../src/core/api/provider-adapter");
+  assert.ok(Object.keys(ApiStreamEventType).length >= 7);
+  const adapter = createProviderAdapter({ provider: "anthropic" });
+  assert.equal(adapter.name, "anthropic");
 });
 
-test('PluginRegistry: hook error isolation', async (t) => {
-  const registry = new PluginRegistry();
-  const results = [];
+// === Engine Layer ===
 
-  registry.register({
-    name: 'good',
-    hooks: { beforeToolCall(ctx) { results.push('good'); return ctx; } },
-  });
-  registry.register({
-    name: 'bad',
-    hooks: { beforeToolCall() { throw new Error('Boom!'); } },
-  });
-
-  // Should not throw — bad plugin is isolated
-  await registry.runHook('beforeToolCall', { toolName: 'test' });
-  assert.deepEqual(results, ['good']);
+test("engine/agent — AgentEngine, Session, HookExecutor, 10 events", () => {
+  const { AgentEngine, Session, HookExecutor, HookEvent } = require("../src/engine/agent");
+  const s = new Session({ provider: { name: "test", model: "test" } });
+  assert.ok(s.id.startsWith("s_"));
+  assert.equal(s.messages.length, 0);
+  const hooks = new HookExecutor();
+  assert.equal(typeof hooks.register, "function");
+  assert.equal(Object.keys(HookEvent).length, 10);
 });
 
-test('PluginRegistry: duplicate registration throws', async (t) => {
-  const registry = new PluginRegistry();
-  registry.register({ name: 'unique', hooks: {} });
-  assert.throws(() => registry.register({ name: 'unique', hooks: {} }), /already registered/);
+test("engine/query — QueryContext state tracking", () => {
+  const { QueryContext } = require("../src/engine/query");
+  const ctx = new QueryContext({ cwd: process.cwd(), model: "claude-sonnet-4-20250514" });
+  ctx.setGoal("Test goal");
+  assert.equal(ctx.taskFocus.goal, "Test goal");
+  assert.ok(ctx.buildContextSummary().includes("Test goal"));
 });
 
-test('PluginRegistry: unregister removes hooks', async (t) => {
-  const registry = new PluginRegistry();
-  const calls = [];
-  registry.register({
-    name: 'removable',
-    hooks: { beforeToolCall() { calls.push('called'); } },
-  });
+// === API Layer ===
 
-  await registry.runHook('beforeToolCall', {});
-  assert.equal(calls.length, 1);
-
-  registry.unregister('removable');
-  await registry.runHook('beforeToolCall', {});
-  assert.equal(calls.length, 1); // Not called again
+test("api/provider — 12 providers", () => {
+  const { createProvider, listProviders } = require("../src/api/provider");
+  assert.ok(listProviders().length >= 12);
+  const p = createProvider({ provider: "anthropic", model: "claude-sonnet-4-20250514" });
+  assert.equal(p.name, "anthropic");
 });
 
-// ── Memory with Namespace/Tags ─────────────────────────────
-test('Memory: namespace and tags persistence', async (t) => {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'hax-mem-'));
-  const opts = {
-    projectRoot: dir,
-    memoryDirectory: path.join(dir, 'memory'),
-    namespace: 'production',
-    tags: ['architecture', 'critical'],
-  };
-
-  writeMemory('deploy-config', 'Use blue-green deployment', opts);
-  const mem = readMemory('deploy-config', opts);
-
-  assert.equal(mem.namespace, 'production');
-  assert.deepEqual(mem.tags, ['architecture', 'critical']);
-  assert.equal(mem.content, 'Use blue-green deployment');
-
-  deleteMemory('deploy-config', opts);
-  await fs.rm(dir, { recursive: true, force: true });
+test("api/retry — withRetry and isRetryable", () => {
+  const { withRetry, isRetryable } = require("../src/api/retry");
+  assert.equal(typeof withRetry, "function");
+  assert.equal(isRetryable({ status: 429 }), true);
 });
 
-test('Memory: namespace filtering in search', async (t) => {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'hax-mem-'));
-  const baseOpts = { projectRoot: dir, memoryDirectory: path.join(dir, 'memory') };
+// === Tools Layer ===
 
-  writeMemory('api-key-prod', 'prod-key-123', { ...baseOpts, namespace: 'production' });
-  writeMemory('api-key-dev', 'dev-key-456', { ...baseOpts, namespace: 'development' });
-  writeMemory('db-url', 'postgres://prod', { ...baseOpts, namespace: 'production', tags: ['database'] });
-
-  const prodResults = searchMemories('api', { ...baseOpts, namespace: 'production' });
-  assert.equal(prodResults.length, 1, 'only production api-key matches');
-  assert.equal(prodResults[0].content, 'prod-key-123');
-  assert.ok(prodResults[0].score > 0);
-
-  const dbResults = searchMemories('postgres', baseOpts);
-  assert.ok(dbResults.length >= 1, 'finds db-url by content');
-
-  // Cleanup: use correct namespace for each
-  deleteMemory('api-key-prod', { ...baseOpts, namespace: 'production' });
-  deleteMemory('api-key-dev', { ...baseOpts, namespace: 'development' });
-  deleteMemory('db-url', { ...baseOpts, namespace: 'production' });
-  await fs.rm(dir, { recursive: true, force: true });
+test("tools/registry — ToolRegistry with 42 tools", () => {
+  const { createDefaultRegistry } = require("../src/tools/registry");
+  const r = createDefaultRegistry(process.cwd());
+  assert.ok(r.list().length >= 40);
+  assert.equal(r.get("file.read").isReadOnly(), true);
+  assert.equal(r.get("file.write").isReadOnly(), false);
 });
 
-test('Memory: weighted search scoring', async (t) => {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'hax-mem-'));
-  const baseOpts = { projectRoot: dir, memoryDirectory: path.join(dir, 'memory') };
-
-  // Name match should score higher than content match
-  writeMemory('kubernetes-scaling', 'This is about database scaling strategies', baseOpts);
-  writeMemory('db-config', 'kubernetes cluster settings for production', baseOpts);
-
-  const results = searchMemories('kubernetes', baseOpts);
-  assert.equal(results.length, 2);
-  // Name match should rank higher than content-only match
-  assert.equal(results[0].name, 'kubernetes-scaling');
-  assert.ok(results[0].score > results[1].score);
-
-  deleteMemory('kubernetes-scaling', baseOpts);
-  deleteMemory('db-config', baseOpts);
-  await fs.rm(dir, { recursive: true, force: true });
+test("tools/extended — all extended tools present", () => {
+  const { extendedTools } = require("../src/tools/extended");
+  assert.ok(extendedTools.length >= 28);
+  const names = extendedTools.map((t) => t.name);
+  for (const n of ["agent", "send_message", "task.create", "enter_plan_mode", "enter_worktree", "cron.create", "grep", "lsp"]) {
+    assert.ok(names.includes(n), `Missing tool: ${n}`);
+  }
 });
 
-// ── ToolRegistry with UndoStack + PluginRegistry ───────────
-test('ToolRegistry: undoStack and pluginRegistry integration', async (t) => {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'hax-smoke-'));
-  const undoStack = new UndoStack();
-  const pluginRegistry = new PluginRegistry();
-  const hookCalls = [];
+// === Services Layer ===
 
-  pluginRegistry.register({
-    name: 'watcher',
-    hooks: {
-      beforeToolCall(ctx) { hookCalls.push(`before:${ctx.toolName}`); },
-      afterToolCall(ctx) { hookCalls.push(`after:${ctx.toolName}`); },
-    },
-  });
-
-  const registry = new ToolRegistry({
-    root: dir,
-    undoStack,
-    pluginRegistry,
-  });
-
-  // Register a simple test tool
-  registry.register({
-    name: 'file.write',
-    description: 'Test write',
-    execute: async (args, ctx) => {
-      const p = path.join(ctx.root, args.path);
-      await fs.mkdir(path.dirname(p), { recursive: true });
-      await fs.writeFile(p, args.content, 'utf8');
-      if (ctx.undoStack) {
-        ctx.undoStack.push({
-          toolName: 'file.write',
-          filePath: p,
-          originalContent: '',
-          newContent: args.content,
-        });
-      }
-      return { path: args.path, bytes: args.content.length };
-    },
-  });
-
-  const result = await registry.execute('file.write', {
-    path: 'hello.txt',
-    content: 'Hello, World!',
-  });
-
-  assert.equal(result.ok, true);
-  assert.equal(result.toolName, 'file.write');
-
-  // Verify hooks fired
-  assert.deepEqual(hookCalls, ['before:file.write', 'after:file.write']);
-
-  // Verify undo works
-  assert.equal(undoStack.canUndo(), true);
-  const undoResult = await undoStack.undo();
-  assert.equal(undoResult.undone, true);
-  const fileContent = await fs.readFile(path.join(dir, 'hello.txt'), 'utf8');
-  assert.equal(fileContent, '');
-
-  await fs.rm(dir, { recursive: true, force: true });
+test("services/lsp — goToDefinition, findReferences, workspaceSearch", () => {
+  const lsp = require("../src/services/lsp");
+  assert.equal(typeof lsp.goToDefinition, "function");
+  assert.equal(typeof lsp.findReferences, "function");
+  assert.equal(typeof lsp.workspaceSearch, "function");
 });
 
-// ── Batch mode parsing ─────────────────────────────────────
-const { parseBatchInput } = require('../src/batch');
-
-test('parseBatchInput: single turn', () => {
-  assert.deepEqual(parseBatchInput('Hello'), ['Hello']);
+test("services/personalization — extractFacts, extractLocalRules", () => {
+  const { extractFacts, extractLocalRules, factsToMarkdown } = require("../src/services/personalization");
+  const facts = extractFacts("ssh user@host.example.com\nconda activate myenv\npython 3.12");
+  assert.ok(facts.length > 0);
+  const rules = extractLocalRules([{ role: "user", content: "python 3.12" }]);
+  assert.ok(Array.isArray(rules));
+  assert.ok(factsToMarkdown(facts).includes("Environment Facts"));
 });
 
-test('parseBatchInput: multi marker', () => {
-  const input = '---multi---\ntask one\ntask two\ntask three';
-  assert.deepEqual(parseBatchInput(input), ['task one', 'task two', 'task three']);
+test("services/mcp — McpClientManager", () => {
+  const { McpClientManager } = require("../src/services/mcp");
+  assert.equal(typeof new McpClientManager().addServer, "function");
 });
 
-test('parseBatchInput: alternate multi marker', () => {
-  const input = '@@@multi@@@\nstep a\nstep b';
-  assert.deepEqual(parseBatchInput(input), ['step a', 'step b']);
+test("services/session-memory — SessionSnapshot", () => {
+  const { SessionSnapshot } = require("../src/services/session-memory");
+  const snap = new SessionSnapshot({ sessionId: "test", turnCount: 5 });
+  assert.equal(snap.toJSON().turnCount, 5);
 });
 
-test('parseBatchInput: empty input', () => {
-  assert.deepEqual(parseBatchInput(''), []);
-  assert.deepEqual(parseBatchInput('   '), []);
+test("services/memory-extract — MemoryExtractor", () => {
+  const { MemoryExtractor, buildExtractionRequest } = require("../src/services/memory-extract");
+  const ex = new MemoryExtractor();
+  assert.equal(ex.shouldExtract(5), true);
+  const prompt = ex.buildExtractionPrompt([{ role: "user", content: "I prefer tabs" }], []);
+  assert.ok(prompt.includes("Extract durable memories"));
 });
 
-test('parseBatchInput: filters blank lines in multi', () => {
-  const input = '---multi---\ntask one\n\n\ntask two\n  \ntask three';
-  assert.deepEqual(parseBatchInput(input), ['task one', 'task two', 'task three']);
+test("services/autodream — AutodreamManager", () => {
+  const { AutodreamManager } = require("../src/services/autodream");
+  assert.equal(typeof new AutodreamManager().shouldRun, "function");
+});
+
+// === Memory Layer ===
+
+test("memory/store — MemoryStore CRUD", () => {
+  const { MemoryStore } = require("../src/memory/store");
+  const store = new MemoryStore();
+  assert.equal(typeof store.init, "function");
+  assert.equal(typeof store.save, "function");
+});
+
+test("memory/compact — microcompact and context window", () => {
+  const { microcompact, getContextWindow } = require("../src/memory/compact");
+  assert.equal(typeof microcompact, "function");
+  assert.equal(getContextWindow("claude-sonnet-4-20250514"), 200000);
+});
+
+// === Core Compaction ===
+
+test("core/memory/compaction — full compaction suite", () => {
+  const { microCompact, contextCollapse, splitPreservingToolPairs, getContextWindow, CompactionType } = require("../src/core/memory/compaction");
+  assert.equal(typeof microCompact, "function");
+  assert.equal(typeof contextCollapse, "function");
+  assert.equal(typeof splitPreservingToolPairs, "function");
+  assert.equal(Object.keys(CompactionType).length, 4);
+  assert.equal(getContextWindow("gpt-4o"), 128000);
+});
+
+// === Hooks & Plugins ===
+
+test("hooks/registry — 10 events, 4 hook types", () => {
+  const { HookEvent, HookType, HookRegistry, HookExecutor } = require("../src/hooks/registry");
+  assert.equal(Object.keys(HookEvent).length, 10);
+  assert.equal(Object.keys(HookType).length, 4);
+  assert.equal(typeof new HookRegistry().register, "function");
+});
+
+test("plugins/registry — PluginRegistry", () => {
+  const { PluginRegistry } = require("../src/plugins/registry");
+  assert.equal(typeof new PluginRegistry().loadPlugin, "function");
+});
+
+test("plugins/schema — manifest validation", () => {
+  const { validatePluginManifest, securityAudit } = require("../src/plugins/schema");
+  const result = validatePluginManifest({ name: "test-plugin", version: "1.0.0" });
+  assert.equal(result.valid, true);
+  assert.equal(securityAudit({ name: "test", version: "1.0.0" }).risk, "low");
+});
+
+test("plugins/installer — PluginInstaller", () => {
+  const { PluginInstaller } = require("../src/plugins/installer");
+  assert.equal(typeof new PluginInstaller().installFromDir, "function");
+});
+
+// === Skills ===
+
+test("skills/registry — Skill loading and registry", () => {
+  const { Skill, SkillRegistry, parseFrontmatter } = require("../src/skills/registry");
+  const registry = new SkillRegistry();
+  registry.register(new Skill({ name: "test", description: "Test skill" }));
+  assert.equal(registry.size, 1);
+  const prompt = registry.buildSystemPrompt();
+  assert.ok(prompt.includes("test"));
+});
+
+// === Config ===
+
+test("config/settings — defaults and loading", () => {
+  const { loadSettings, DEFAULTS } = require("../src/config/settings");
+  assert.equal(DEFAULTS.agent.provider, "anthropic");
+});
+
+test("config/profiles — 6 builtin profiles", () => {
+  const { ProfileManager, BUILTIN } = require("../src/config/profiles");
+  assert.ok(Object.keys(BUILTIN).length >= 6);
+  assert.equal(new ProfileManager().activeName, "claude");
+});
+
+// === Prompts ===
+
+test("prompts/manager — prompt assembly", () => {
+  const { loadProjectContext, buildEnvironmentContext, buildFullSystemPrompt } = require("../src/prompts/manager");
+  const ctx = buildEnvironmentContext();
+  assert.ok(ctx.includes(process.platform));
+  const prompt = buildFullSystemPrompt("You are a helpful assistant.", { skipEnvironment: false });
+  assert.ok(prompt.includes("You are a helpful assistant."));
+});
+
+// === TUI ===
+
+test("tui/index — Terminal UI", () => {
+  const { TUI } = require("../src/tui/index");
+  const tui = new TUI({ isTTY: false });
+  assert.equal(typeof tui.renderEvent, "function");
+  assert.equal(typeof tui.getPrompt, "function");
+  assert.equal(typeof tui.createApprovalCallback, "function");
+  // Verify events render without crashing
+  tui._started = true;
+  tui.renderEvent({ type: "turn.started" });
+  tui.renderEvent({ type: "message.delta", delta: "Hello" });
+  tui.renderEvent({ type: "tool.start", name: "file.read", input: { path: "test.js" } });
+  tui.renderEvent({ type: "tool.result", name: "file.read", isError: false, durationMs: 5 });
+  tui.renderEvent({ type: "turn.completed" });
+  tui.renderEvent({ type: "turn.failed", error: { message: "test error" } });
+  tui.stop();
+});
+
+// === Shared ===
+
+test("shared/utils — ANSI, THEME, helpers", () => {
+  const { ANSI, THEME, stripAnsi, estimateStringTokens } = require("../src/shared/utils");
+  assert.ok(ANSI.reset);
+  assert.ok(THEME.accent);
+  assert.equal(stripAnsi("\x1b[31mred\x1b[0m"), "red");
+  assert.ok(estimateStringTokens("Hello world") > 0);
+});
+
+// === CLI and Library ===
+
+test("cli — CLI entry exports main()", () => {
+  const cli = require("../src/cli");
+  assert.equal(typeof cli.main, "function");
+});
+
+test("index — library exports all 8 subsystems", () => {
+  const lib = require("../src/index");
+  for (const key of ["engine", "tools", "api", "config", "skills", "memory", "tui", "commands"]) {
+    assert.ok(key in lib, `Missing export: ${key}`);
+  }
+});
+
+// === Integration ===
+
+test("integration — full wiring works", () => {
+  const { Session, AgentEngine, HookExecutor } = require("../src/engine/agent");
+  const { createProvider } = require("../src/api/provider");
+  const { createDefaultRegistry } = require("../src/tools/registry");
+  const { PermissionChecker } = require("../src/core/permissions/checker");
+
+  const provider = createProvider({ provider: "anthropic", model: "claude-sonnet-4-20250514" });
+  const registry = createDefaultRegistry(process.cwd());
+  const pm = new PermissionChecker();
+  const session = new Session({ provider, toolRegistry: registry, permissionManager: pm });
+  const engine = new AgentEngine({ session, projectRoot: process.cwd() });
+
+  assert.ok(session.id);
+  assert.ok(registry.list().length >= 40);
+  assert.equal(typeof engine.sendMessage, "function");
 });

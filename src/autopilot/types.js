@@ -1,0 +1,16 @@
+"use strict";
+/** Autopilot type definitions. Ported from OpenHarness autopilot/types.py */
+
+const AutopilotTaskStatus = { PENDING: "pending", RUNNING: "running", COMPLETED: "completed", FAILED: "failed", CANCELLED: "cancelled" };
+const AutopilotTriggerType = { CRON: "cron", MANUAL: "manual", WEBHOOK: "webhook", EVENT: "event" };
+
+class AutopilotTask {
+  constructor(o = {}) {
+    this.id = o.id || ""; this.name = o.name || ""; this.prompt = o.prompt || "";
+    this.status = o.status || AutopilotTaskStatus.PENDING; this.triggerType = o.triggerType || AutopilotTriggerType.MANUAL;
+    this.createdAt = o.createdAt || Date.now(); this.startedAt = o.startedAt || null; this.completedAt = o.completedAt || null;
+    this.result = o.result || null; this.error = o.error || null; this.metadata = o.metadata || {};
+  }
+}
+
+module.exports = { AutopilotTaskStatus, AutopilotTriggerType, AutopilotTask };

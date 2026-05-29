@@ -1,0 +1,3 @@
+"use strict";
+class WorkSecret { constructor(o) { this.version = o.version || 1; this.sessionIngressToken = o.sessionIngressToken || ""; this.apiBaseUrl = o.apiBaseUrl || ""; } static decode(encoded) { try { const data = JSON.parse(Buffer.from(encoded, "base64").toString("utf-8")); return new WorkSecret(data); } catch (_) { return null; } } encode() { return Buffer.from(JSON.stringify({ version: this.version, session_ingress_token: this.sessionIngressToken, api_base_url: this.apiBaseUrl })).toString("base64"); } }
+module.exports = { WorkSecret };

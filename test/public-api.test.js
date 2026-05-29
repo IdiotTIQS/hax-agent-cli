@@ -3,10 +3,25 @@ const test = require('node:test');
 
 const api = require('../src');
 
-test('public API exposes basic runtime under an explicit namespace', () => {
-  assert.equal(typeof api.basicRuntime, 'object');
-  assert.equal(api.basicRuntime.Session, api.Session);
-  assert.equal(api.basicRuntime.createSession, api.createSession);
-  assert.equal(api.basicRuntime.TaskList, api.TaskList);
-  assert.equal(api.basicRuntime.CommandRegistry, api.CommandRegistry);
+test('public API exposes core namespaces', () => {
+  for (const ns of ['engine', 'tools', 'api', 'config', 'skills', 'memory', 'tui', 'commands']) {
+    assert.equal(typeof api[ns], 'object', ns + ' should be object');
+  }
+});
+
+test('public API exposes OpenHarness parity namespaces', () => {
+  for (const ns of ['state', 'platforms', 'paths', 'swarm', 'tasks', 'sandbox', 'keybindings', 'vim', 'utils']) {
+    assert.equal(typeof api[ns], 'object', ns + ' should be object');
+  }
+});
+
+test('engine exports Session, AgentEngine, HookExecutor', () => {
+  assert.equal(typeof api.engine.Session, 'function');
+  assert.equal(typeof api.engine.AgentEngine, 'function');
+  assert.equal(typeof api.engine.HookExecutor, 'function');
+});
+
+test('tools exports ToolRegistry factory', () => {
+  assert.equal(typeof api.tools.ToolRegistry, 'function');
+  assert.equal(typeof api.tools.createDefaultRegistry, 'function');
 });
