@@ -161,11 +161,17 @@ register("plan", (_, ctx) => {
   ctx.rl?.prompt?.();
 }, "Toggle Plan mode (block all mutating tools)");
 
+register("think", (_, ctx) => {
+  ctx.session._thinking = !ctx.session._thinking;
+  ctx.screen.write(`${styled(THEME.info, "Thinking mode: " + (ctx.session._thinking ? "ON" : "OFF"))}\n`);
+  ctx.rl?.prompt?.();
+}, "Toggle thinking/reasoning mode (DeepSeek V4, Claude, etc.)");
+
 register("fullauto", (_, ctx) => {
   const pm = ctx.session.permissionManager;
   if (pm) {
     pm.mode = pm.mode === PermissionMode.FULL_AUTO ? PermissionMode.DEFAULT : PermissionMode.FULL_AUTO;
-    ctx.screen.write(`${styled(THEME.warning, `Permission mode: ${pm.mode.toUpperCase()}`)}\n`);
+    ctx.screen.write(`${styled(THEME.warning, "Permission mode: " + pm.mode.toUpperCase())}\n`);
   }
   ctx.rl?.prompt?.();
 }, "Toggle Full Auto mode (approve all tools silently)");

@@ -38,6 +38,9 @@ class BaseOpenAICompatible {
         messages: this._toMessages(req.messages || [], req.system),
       };
       if (tools.length) body.tools = tools;
+      if (req.thinking) {
+        body.extra_body = { thinking: { type: "enabled" } };
+      }
 
       const stream = await withRetry(() => client.chat.completions.create(body, { signal: req.signal }));
 
