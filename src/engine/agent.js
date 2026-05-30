@@ -195,6 +195,7 @@ class AgentEngine extends EventEmitter {
       // === API Call with bounded tokens ===
       const maxTok = boundedCompletionTokens(ctx.maxTokens, ctx.contextWindowTokens);
       let text = ""; let toolUses = []; let usage = null;
+      let reasoningText = ""; // Accumulate DeepSeek V4 reasoning_content
 
       try {
         for await (const chunk of s.provider.stream({
@@ -205,7 +206,10 @@ class AgentEngine extends EventEmitter {
           thinkIntensity: s._thinkIntensity || null,
         })) {
           if (chunk.type === "text") { text += chunk.delta; yield { type: "message.delta", delta: chunk.delta }; }
-          else if (chunk.type === "thinking") yield { type: "thinking" };
+          else if (chunk.type === "thinking") {
+            if (chunk.delta) reasoningText += chunk.delta;
+            yield chunk;
+          }
           else if (chunk.type === "tool_uses") { toolUses = chunk.toolUses || []; text = chunk.text || text; usage = chunk.usage; }
           else if (chunk.type === "usage") { usage = chunk; s.inputTokens += chunk.inputTokens || 0; s.outputTokens += chunk.outputTokens || 0; yield chunk; }
           else if (chunk.type === "error") {
@@ -237,14 +241,18 @@ class AgentEngine extends EventEmitter {
 
       // No tools -> done
       if (!toolUses.length) {
-        msgs.push({ role: "assistant", content: text });
-        s.messages.push({ role: "assistant", content: text });
+        var aMsg = { role: "assistant", content: text };
+        if (reasoningText) aMsg.reasoning_content = reasoningText;
+        msgs.push(aMsg);
+        s.messages.push({ ...aMsg });
         yield { type: "turn.completed", text, usage, context: ctx.buildContextSummary() };
         return;
       }
 
-      // Track assistant message
-      msgs.push({ role: "assistant", content: text });
+      // Track assistant message with reasoning_content for DeepSeek V4
+      var aMsg = { role: "assistant", content: text };
+      if (reasoningText) aMsg.reasoning_content = reasoningText;
+      msgs.push(aMsg);
 
       // === Tool Execution (sequential for safety) ===
       const results = [];

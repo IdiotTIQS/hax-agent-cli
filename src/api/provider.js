@@ -39,16 +39,11 @@ class BaseOpenAICompatible {
       };
       if (tools.length) body.tools = tools;
       if (req.thinking) {
-        var thinkCfg = { type: "enabled" };
-        if (req.thinkIntensity) {
-          if (typeof req.thinkIntensity === "number") {
-            thinkCfg.budget_tokens = req.thinkIntensity;
-          } else {
-            var levels = { low: 1024, medium: 4096, high: 8192, "x-high": 16384, max: 32768 };
-            thinkCfg.budget_tokens = levels[req.thinkIntensity] || 4096;
-          }
-        }
-        body.thinking = thinkCfg;
+        var intensity = typeof req.thinkIntensity === "number" ? "high" : (req.thinkIntensity || "high");
+        // DeepSeek V4: reasoning_effort is standard, thinking goes in extra_body
+        if (intensity === "max" || intensity === "x-high") body.reasoning_effort = "max";
+        else body.reasoning_effort = "high";
+        body.extra_body = { thinking: { type: "enabled" } };
       }
 
       const stream = await withRetry(() => client.chat.completions.create(body, { signal: req.signal }));
@@ -86,8 +81,19 @@ class BaseOpenAICompatible {
   }
 
   _toMessages(msgs, system) {
-    const arr = system ? [{ role: "system", content: system }] : [];
-    for (const m of msgs) arr.push({ role: m.role, content: typeof m.content === "string" ? m.content : JSON.stringify(m.content) });
+    var arr = system ? [{ role: "system", content: system }] : [];
+    for (var i = 0; i < msgs.length; i++) {
+      var m = msgs[i];
+      var content = typeof m.content === "string" ? m.content : JSON.stringify(m.content);
+      var msg = { role: m.role, content: content };
+      // Critical for DeepSeek V4: reasoning_content must be passed back for tool-call turns
+      if (m.reasoning_content) {
+        msg.reasoning_content = m.reasoning_content;
+      } else if (m.role === "assistant" && m.reasoningContent) {
+        msg.reasoning_content = m.reasoningContent;
+      }
+      arr.push(msg);
+    }
     return arr;
   }
 
