@@ -62,7 +62,20 @@ async function runInteractive(args) {
   if (settings.ui?.theme) { try { require("./shared/themes").applyTheme(settings.ui.theme, THEME); } catch (_) {} }
 
   var isTTY = process.stdout.isTTY;
-  var rl = readline.createInterface({ input: process.stdin, output: process.stdout, terminal: isTTY });
+  var rl = readline.createInterface({
+    input: process.stdin, output: process.stdout, terminal: isTTY,
+    completer: function (line) {
+      var hits = [];
+      if (line.startsWith("/")) {
+        var partial = line.slice(1).toLowerCase();
+        var cmdNames = Object.keys(commands.commands || {});
+        // Also include skill names
+        try { for (var s of skills.list()) { cmdNames.push(s.name); } } catch (_) {}
+        hits = cmdNames.filter(function (c) { return c.startsWith(partial); }).map(function (c) { return "/" + c; });
+      }
+      return [hits.length ? hits : [], line];
+    }
+  });
 
   // Old proven renderer
   var screen = { isTTY: function() { return isTTY; }, columns: process.stdout.columns || 80, write: function(t) { process.stdout.write(t); }, clear: function() { process.stdout.write(ANSI.clearScreen); } };
