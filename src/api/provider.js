@@ -40,7 +40,6 @@ class BaseOpenAICompatible {
       if (tools.length) body.tools = tools;
       if (req.thinking) {
         var thinkCfg = { type: "enabled" };
-        // Intensity: "low"/"medium"/"high" for DeepSeek, number for budget_tokens
         if (req.thinkIntensity) {
           if (typeof req.thinkIntensity === "number") {
             thinkCfg.budget_tokens = req.thinkIntensity;
@@ -49,7 +48,7 @@ class BaseOpenAICompatible {
             thinkCfg.budget_tokens = levels[req.thinkIntensity] || 4096;
           }
         }
-        body.extra_body = { thinking: thinkCfg };
+        body.thinking = thinkCfg;
       }
 
       const stream = await withRetry(() => client.chat.completions.create(body, { signal: req.signal }));
@@ -57,8 +56,9 @@ class BaseOpenAICompatible {
       for await (const chunk of stream) {
         const delta = chunk.choices?.[0]?.delta;
         if (delta?.content) { text += delta.content; yield { type: "text", delta: delta.content }; }
-        // DeepSeek V4 thinking content (reasoning_content in streaming)
-        if (delta?.reasoning_content) { yield { type: "thinking", delta: delta.reasoning_content }; }
+        // DeepSeek V4 thinking content — check multiple possible field names
+        var thinkDelta = delta?.reasoning_content || delta?.thinking || delta?.reasoning || delta?.think;
+        if (thinkDelta) { yield { type: "thinking", delta: thinkDelta }; }
         if (delta?.tool_calls) {
           for (const tc of delta.tool_calls) {
             const idx = tc.index;
