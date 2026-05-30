@@ -23,6 +23,11 @@ function main(argv) {
 
 async function runInteractive(args) {
   var noColor = args && args.includes("--no-color");
+
+  // First-run setup wizard
+  var { shouldRunSetup, runSetup } = require("./setup");
+  if (shouldRunSetup()) await runSetup();
+
   var settings = loadSettings();
   var profiles = new ProfileManager();
   var profileCfg = profiles.active;
