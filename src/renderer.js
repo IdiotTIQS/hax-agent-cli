@@ -157,6 +157,13 @@ class ResponseRenderer {
     this.lineOpen = true;
   }
 
+  _flushTextBuffer() {
+    if (this.lineBuffer && this.lineBuffer.length > 0) {
+      this.screen.write(this.markdown._renderInline(this.lineBuffer) + '\n');
+      this.lineBuffer = '';
+    }
+  }
+
   thinking(chunk) {
     if (!this.assistantStarted) {
       this.spinner.stop();
@@ -169,8 +176,8 @@ class ResponseRenderer {
   }
 
   startTool(chunk) {
+    this._flushTextBuffer();
     this.toolCount++;
-    // Flush previous collapsed batch if tool changed
     if (this._collapsed && this._collapsed.name !== chunk.name) {
       this._flushCollapsed();
     }
@@ -263,6 +270,7 @@ class ResponseRenderer {
   complete(usage) {
     this.spinner.stop();
     if (this._collapsed) this._flushCollapsed();
+    this._flushTextBuffer();
 
     if (this.lineBuffer.length > 0) {
       const rendered = this.markdown._renderInline(this.lineBuffer);
@@ -296,6 +304,7 @@ class ResponseRenderer {
   fail(message) {
     this.spinner.stop();
     if (this._collapsed) this._flushCollapsed();
+    this._flushTextBuffer();
     if (!this.assistantStarted) {
       this.screen.write(`\n${THEME.assistantIndicator}Assistant${ANSI.reset}\n`);
       this.assistantStarted = true;
@@ -312,6 +321,7 @@ class ResponseRenderer {
   interrupt() {
     this.spinner.stop();
     if (this._collapsed) this._flushCollapsed();
+    this._flushTextBuffer();
     if (this.lineBuffer.length > 0) {
       this.screen.write(`${this.lineBuffer}\n`);
       this.lineBuffer = '';
