@@ -186,11 +186,17 @@ async function runInteractive(args) {
     process.exit(0);
   });
 
+  var _sigintCount = 0;
   rl.on("SIGINT", function () {
+    _sigintCount++;
     if (session.isStreaming) {
       engine.interrupt();
+      _sigintCount = 0;
+    } else if (_sigintCount >= 2) {
+      rl.close();
     } else {
       process.stdout.write("\n" + ANSI.dim + "Press Ctrl+C again to exit, or type /exit" + ANSI.reset + "\n");
+      setTimeout(function () { _sigintCount = 0; }, 1000);
       refreshPrompt();
       rl.prompt();
     }
