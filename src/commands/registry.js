@@ -166,7 +166,7 @@ register("think", (args, ctx) => {
   if (args[0] === "off") {
     s._thinking = false; s._thinkIntensity = null;
     ctx.screen.write(styled(THEME.info, "Thinking: OFF") + "\n");
-  } else if (args[0] === "low" || args[0] === "medium" || args[0] === "high") {
+  } else if (["low","medium","high","x-high","max"].includes(args[0])) {
     s._thinking = true; s._thinkIntensity = args[0];
     ctx.screen.write(styled(THEME.success, "Thinking: ON (" + args[0] + ")") + "\n");
   } else if (args[0] && /^\d+$/.test(args[0])) {

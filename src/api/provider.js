@@ -44,12 +44,9 @@ class BaseOpenAICompatible {
         if (req.thinkIntensity) {
           if (typeof req.thinkIntensity === "number") {
             thinkCfg.budget_tokens = req.thinkIntensity;
-          } else if (req.thinkIntensity === "low") {
-            thinkCfg.budget_tokens = 1024;
-          } else if (req.thinkIntensity === "high") {
-            thinkCfg.budget_tokens = 8192;
           } else {
-            thinkCfg.budget_tokens = 4096; // medium / default
+            var levels = { low: 1024, medium: 4096, high: 8192, "x-high": 16384, max: 32768 };
+            thinkCfg.budget_tokens = levels[req.thinkIntensity] || 4096;
           }
         }
         body.extra_body = { thinking: thinkCfg };
