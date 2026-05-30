@@ -202,6 +202,7 @@ class AgentEngine extends EventEmitter {
           tools: registry?.toApiSchema() || [],
           signal, maxTokens: maxTok,
           thinking: s._thinking || false,
+          thinkIntensity: s._thinkIntensity || null,
         })) {
           if (chunk.type === "text") { text += chunk.delta; yield { type: "message.delta", delta: chunk.delta }; }
           else if (chunk.type === "thinking") yield { type: "thinking" };

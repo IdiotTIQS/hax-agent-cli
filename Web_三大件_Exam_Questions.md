@@ -1,0 +1,369 @@
+# Web Fundamentals (HTML, CSS, JavaScript) — Exam Questions
+
+> **Level:** University Year 1 (Introductory)
+> **Type:** Structured Questions
+> **Total:** 20 Questions
+
+---
+
+## Section A: HTML (Questions 1–7)
+
+---
+
+### Question 1 — Basic HTML Skeleton (6 marks)
+
+**Topic:** HTML
+
+Write a **complete HTML5 page** with the following:
+
+1. The correct **doctype**
+2. `<html>`, `<head>`, `<body>` tags
+3. A `<title>` that says "My First Webpage"
+4. A main heading (`<h1>`) that says "Hello World!"
+5. A paragraph (`<p>`) that says "This is my first webpage."
+
+---
+
+### Question 2 — Lists (6 marks)
+
+**Topic:** HTML
+
+Create an HTML page that shows your **daily schedule**.
+
+1. Add a main heading: "My Daily Schedule"
+2. Create an **ordered list** (`<ol>`) of 4 things you do in the morning
+3. Create an **unordered list** (`<ul>`) of 3 things you do in the evening
+4. Add a paragraph that says "I like to stay organized!"
+
+---
+
+### Question 3 — Links and Images (6 marks)
+
+**Topic:** HTML
+
+Write HTML code that includes:
+
+1. A hyperlink that goes to `https://www.wikipedia.org` and opens in a **new tab**
+2. An **image** using this placeholder URL: `https://via.placeholder.com/150`
+3. Add `alt` text to the image describing what it is
+4. Add a line break (`<br>`) between the link and the image
+
+---
+
+### Question 4 — Text Formatting (6 marks)
+
+**Topic:** HTML
+
+Write HTML to display the following text with proper formatting:
+
+1. A sentence with a **bold** word using `<strong>`
+2. A sentence with an *italic* word using `<em>`
+3. A sentence with a word that is <u>underlined</u> using `<u>`
+4. A heading that says "My Favourite Quote" followed by a **blockquote** (`<blockquote>`) containing a short quote of your choice
+
+---
+
+### Question 5 — Tables (6 marks)
+
+**Topic:** HTML
+
+Create an HTML table showing the **weekly class schedule**.
+
+1. The table should have **3 columns**: Day, Subject, Time
+2. Add a **table header row** (`<thead>` with `<th>`)
+3. Add **at least 3 rows** of data in `<tbody>`
+4. Add a **border** to the table using the `border` attribute
+
+Example:
+
+| Day     | Subject    | Time  |
+|---------|-----------|-------|
+| Monday  | Math      | 9:00  |
+| Tuesday | English   | 10:00 |
+| Wednesday | Science | 11:00 |
+
+---
+
+### Question 6 — Forms (6 marks)
+
+**Topic:** HTML
+
+Create a **login form** with the following fields:
+
+1. A `<form>` with `method="POST"` and `action="/login"`
+2. A **text input** for username with a `<label>`
+3. A **password input** for password with a `<label>`
+4. A **Submit button** that says "Log In"
+5. A **checkbox** with a label that says "Remember me"
+
+---
+
+### Question 7 — HTML Review (6 marks)
+
+**Topic:** HTML
+
+Write a single HTML page that combines everything you have learned. The page must include:
+
+1. A heading: "About Me"
+2. A paragraph introducing yourself
+3. An unordered list of your 3 favourite foods
+4. A link to your favourite website
+5. An image (use any placeholder image URL)
+6. A horizontal line (`<hr>`) separating the introduction from the list
+
+---
+
+## Section B: CSS (Questions 8–14)
+
+---
+
+### Question 8 — Basic Selectors (6 marks)
+
+**Topic:** CSS
+
+Given this HTML:
+
+```html
+<h1>Welcome</h1>
+<p class="highlight">This is important.</p>
+<p>This is normal.</p>
+<div id="box">This is a box.</div>
+```
+
+Write CSS rules to:
+
+1. Make the `<h1>` color **red**
+2. Make the paragraph with class `highlight` have a **yellow background**
+3. Make the `<div id="box">` have a **2px solid blue border** and **padding of 10px**
+4. Make all `<p>` elements have **font-size of 18px**
+
+---
+
+### Question 9 — Colors and Backgrounds (6 marks)
+
+**Topic:** CSS
+
+Write CSS to style a webpage as follows:
+
+1. Set the **background color of the whole page** (`<body>`) to `#f5f5f5`
+2. Make all `<h1>` elements have **dark blue** text (`#003366`)
+3. Make all `<h2>` elements have a **light blue background** (`#add8e6`)
+4. Make all `<p>` elements have **white background** and **padding of 10px**
+
+---
+
+### Question 10 — Fonts and Text (6 marks)
+
+**Topic:** CSS
+
+Write CSS rules to style text on a page:
+
+1. Make all `<h1>` elements **center-aligned**
+2. Make all `<p>` elements have **font-size of 16px** and **line-height of 1.8**
+3. Make all `<a>` (links) have **no underline** (text-decoration: none)
+4. Make all `<a>` (links) turn **red** when the mouse hovers over them (use `:hover`)
+
+---
+
+### Question 11 — The Box Model (6 marks)
+
+**Topic:** CSS
+
+Given this HTML:
+
+```html
+<div class="card">
+  <h3>Card Title</h3>
+  <p>This is the card content.</p>
+</div>
+```
+
+Write CSS to:
+
+1. Give the `.card` a **width of 300px**
+2. Add **20px padding** inside the card
+3. Add a **1px solid #ccc border** around the card
+4. Add **margin of 50px auto** to center it horizontally
+5. Add a **background color** of `#ffffff`
+
+---
+
+### Question 12 — Flexbox Basics (6 marks)
+
+**Topic:** CSS
+
+Create a **flexbox container** with 3 boxes inside it.
+
+1. Write HTML with a `<div class="container">` containing 3 `<div class="box">` elements
+2. Write CSS to:
+   - Make the container a **flexbox** using `display: flex`
+   - Set a **gap of 20px** between the boxes
+   - Make each box have a **width of 100px**, **height of 100px**, and **background color of lightblue**
+   - **Center** the boxes horizontally inside the container using `justify-content: center`
+
+---
+
+### Question 13 — Flexbox Navigation (6 marks)
+
+**Topic:** CSS
+
+Create a simple **navigation bar** using Flexbox.
+
+1. Write HTML: a `<nav>` element with an unordered list (`<ul>`) containing 4 links: Home, About, Blog, Contact
+2. Write CSS to:
+   - Remove the **bullet points** from the list
+   - Use `display: flex` on the `<ul>` to display items in a **row**
+   - Use `justify-content: space-around` to space items evenly
+   - Give each `<li>` some **padding** and a **background color** of `#444`
+   - Make the link text **white** and remove the underline
+
+---
+
+### Question 14 — CSS Review (6 marks)
+
+**Topic:** CSS
+
+Given the HTML below:
+
+```html
+<div class="profile-card">
+  <h2>John Doe</h2>
+  <p class="title">Web Developer</p>
+  <p>I love building websites and learning new technologies.</p>
+</div>
+```
+
+Write CSS to style it as a **profile card**:
+
+1. Give `.profile-card` a **width of 350px**, **padding of 25px**, **margin of 30px auto**, a **1px solid #ddd border**, and **rounded corners** (`border-radius: 10px`)
+2. Center the `<h2>` text
+3. Make the `.title` text **gray** and **italic**
+4. Give the card a **box shadow**: `box-shadow: 2px 2px 10px rgba(0,0,0,0.1)`
+5. Give the whole page (`<body>`) a background color of `#f0f0f0`
+
+---
+
+## Section C: JavaScript (Questions 15–20)
+
+---
+
+### Question 15 — Variables and Data Types (6 marks)
+
+**Topic:** JavaScript (Basic)
+
+Write JavaScript code to:
+
+1. Declare a variable `name` and assign it your name as a **string**
+2. Declare a variable `age` and assign it your age as a **number**
+3. Declare a variable `isStudent` and assign it **true** (boolean)
+4. Declare a variable `hobbies` and assign it an **array** of 3 strings (your hobbies)
+5. Use `console.log()` to print all four variables to the console
+
+Write only the JavaScript code (no HTML needed).
+
+---
+
+### Question 16 — Conditionals (if/else) (6 marks)
+
+**Topic:** JavaScript
+
+Write JavaScript code that:
+
+1. Declares a variable `score` and set it to any number (e.g., 75)
+2. Use an `if / else if / else` statement to print:
+   - "Grade A" if score is 90 or above
+   - "Grade B" if score is 80 or above
+   - "Grade C" if score is 70 or above
+   - "Grade D" if score is 60 or above
+   - "Grade F" if score is below 60
+3. Use `console.log()` to print the result
+
+Write only the JavaScript code (no HTML needed).
+
+---
+
+### Question 17 — Loops (6 marks)
+
+**Topic:** JavaScript
+
+Write JavaScript code to:
+
+1. Create an array called `fruits` with 5 fruit names: "Apple", "Banana", "Cherry", "Orange", "Grape"
+2. Use a **for loop** to print each fruit to the console
+3. Use a **while loop** to print the numbers from 1 to 5
+4. Add comments to explain what each loop does
+
+Write only the JavaScript code (no HTML needed).
+
+---
+
+### Question 18 — Functions (6 marks)
+
+**Topic:** JavaScript
+
+Write JavaScript code to:
+
+1. Declare a **function** called `greet` that takes a parameter `name` and returns the string: "Hello, [name]! Nice to meet you!"
+2. Declare another **function** called `add` that takes two parameters `a` and `b` and returns their sum
+3. Call both functions with example values and print the results using `console.log()`
+4. Add comments to explain what each function does
+
+Write only the JavaScript code (no HTML needed).
+
+---
+
+### Question 19 — DOM Manipulation (6 marks)
+
+**Topic:** JavaScript (DOM)
+
+Write a complete HTML page (with embedded `<script>`) that does the following:
+
+1. Shows a heading: "My Counter"
+2. Shows a `<p id="counter">` that displays the number 0
+3. Shows **two buttons**: "Increase" and "Decrease"
+4. When the user clicks "Increase", the number goes up by 1
+5. When the user clicks "Decrease", the number goes down by 1
+
+Requirements:
+- Use `document.getElementById()` to get elements
+- Use `addEventListener()` to handle clicks
+- Use a **variable** to keep track of the count
+- Update the `<p>` text every time the count changes
+
+---
+
+### Question 20 — Mini Project: Number Guessing Game (6 marks)
+
+**Topic:** HTML + CSS + JavaScript (combined)
+
+Build a simple **Number Guessing Game** in a single HTML file.
+
+### HTML (2 marks)
+- A heading: "Guess the Number!"
+- A paragraph explaining: "I am thinking of a number between 1 and 10."
+- A **text input** for the user's guess
+- A **button** that says "Guess"
+- A `<p id="result">` to show the result message
+
+### CSS (2 marks)
+- Center all content using Flexbox on `<body>`
+- Give the button a **background color of blue**, **white text**, and some **padding**
+- Add some **margin** between elements for spacing
+
+### JavaScript (2 marks)
+- When the page loads, **generate a random number** between 1 and 10 using `Math.random()` and `Math.floor()`
+- When the button is clicked:
+  - Read the user's guess from the input
+  - If the guess is **correct**, show: "🎉 Correct! You guessed it!"
+  - If the guess is **too high**, show: "Too high! Try again."
+  - If the guess is **too low**, show: "Too low! Try again."
+  - If the input is empty, show: "Please enter a number!"
+
+---
+
+## End of Exam Paper
+
+**Total Questions: 20**
+**Total Marks: 120**
+
+Good luck! 🍀

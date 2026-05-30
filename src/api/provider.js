@@ -39,7 +39,20 @@ class BaseOpenAICompatible {
       };
       if (tools.length) body.tools = tools;
       if (req.thinking) {
-        body.extra_body = { thinking: { type: "enabled" } };
+        var thinkCfg = { type: "enabled" };
+        // Intensity: "low"/"medium"/"high" for DeepSeek, number for budget_tokens
+        if (req.thinkIntensity) {
+          if (typeof req.thinkIntensity === "number") {
+            thinkCfg.budget_tokens = req.thinkIntensity;
+          } else if (req.thinkIntensity === "low") {
+            thinkCfg.budget_tokens = 1024;
+          } else if (req.thinkIntensity === "high") {
+            thinkCfg.budget_tokens = 8192;
+          } else {
+            thinkCfg.budget_tokens = 4096; // medium / default
+          }
+        }
+        body.extra_body = { thinking: thinkCfg };
       }
 
       const stream = await withRetry(() => client.chat.completions.create(body, { signal: req.signal }));

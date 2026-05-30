@@ -161,11 +161,24 @@ register("plan", (_, ctx) => {
   ctx.rl?.prompt?.();
 }, "Toggle Plan mode (block all mutating tools)");
 
-register("think", (_, ctx) => {
-  ctx.session._thinking = !ctx.session._thinking;
-  ctx.screen.write(`${styled(THEME.info, "Thinking mode: " + (ctx.session._thinking ? "ON" : "OFF"))}\n`);
+register("think", (args, ctx) => {
+  var s = ctx.session;
+  if (args[0] === "off") {
+    s._thinking = false; s._thinkIntensity = null;
+    ctx.screen.write(styled(THEME.info, "Thinking: OFF") + "\n");
+  } else if (args[0] === "low" || args[0] === "medium" || args[0] === "high") {
+    s._thinking = true; s._thinkIntensity = args[0];
+    ctx.screen.write(styled(THEME.success, "Thinking: ON (" + args[0] + ")") + "\n");
+  } else if (args[0] && /^\d+$/.test(args[0])) {
+    s._thinking = true; s._thinkIntensity = parseInt(args[0]);
+    ctx.screen.write(styled(THEME.success, "Thinking: ON (" + args[0] + " tokens)") + "\n");
+  } else {
+    s._thinking = !s._thinking;
+    if (!s._thinking) s._thinkIntensity = null;
+    ctx.screen.write(styled(THEME.info, "Thinking: " + (s._thinking ? "ON" : "OFF")) + "\n");
+  }
   ctx.rl?.prompt?.();
-}, "Toggle thinking/reasoning mode (DeepSeek V4, Claude, etc.)");
+}, "Toggle thinking mode (/think low|medium|high|N or off)");
 
 register("fullauto", (_, ctx) => {
   const pm = ctx.session.permissionManager;

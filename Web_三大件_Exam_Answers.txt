@@ -1,0 +1,831 @@
+Web 三大件 (HTML, CSS, JavaScript) — 参考答案
+
+级别：大学一年级（入门）
+题目总数：20 题
+
+================================================================================
+A 部分：HTML（第 1-7 题）
+================================================================================
+
+--------------------------------------------------------------------------------
+第 1 题 — 基本 HTML 骨架（6 分）
+--------------------------------------------------------------------------------
+
+题目：HTML
+
+答案：
+
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>My First Webpage</title>
+  </head>
+  <body>
+    <h1>Hello World!</h1>
+    <p>This is my first webpage.</p>
+  </body>
+</html>
+
+解释：
+- 第 1 行：<!DOCTYPE html> 声明这是一个 HTML5 文档
+- <html> 是页面的根元素
+- <head> 包含元信息和页面标题
+- <title> 设置浏览器标签页上显示的文本
+- <body> 包含所有可见内容
+- <h1> 是一级标题（最大的标题）
+- <p> 是段落元素
+
+
+--------------------------------------------------------------------------------
+第 2 题 — 列表（6 分）
+--------------------------------------------------------------------------------
+
+题目：HTML
+
+答案：
+
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Daily Schedule</title>
+  </head>
+  <body>
+    <h1>My Daily Schedule</h1>
+
+    <h2>Morning Routine</h2>
+    <ol>
+      <li>Wake up at 7:00</li>
+      <li>Brush my teeth</li>
+      <li>Eat breakfast</li>
+      <li>Go to school</li>
+    </ol>
+
+    <h2>Evening Routine</h2>
+    <ul>
+      <li>Do homework</li>
+      <li>Read a book</li>
+      <li>Go to bed at 10:00</li>
+    </ul>
+
+    <p>I like to stay organized!</p>
+  </body>
+</html>
+
+解释：
+- <ol> 创建有序（编号）列表
+- <ul> 创建无序（项目符号）列表
+- <li> 是两种列表中的列表项
+- 每个 <li> 会自动获得一个编号（<ol>）或一个圆点（<ul>）
+
+
+--------------------------------------------------------------------------------
+第 3 题 — 链接和图片（6 分）
+--------------------------------------------------------------------------------
+
+题目：HTML
+
+答案：
+
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Links and Images</title>
+  </head>
+  <body>
+    <a href="https://www.wikipedia.org" target="_blank">Visit Wikipedia</a>
+    <br>
+    <img src="https://via.placeholder.com/150" alt="A placeholder image showing a gray square">
+  </body>
+</html>
+
+解释：
+- <a href="..."> 创建超链接
+- target="_blank" 使链接在新浏览器标签页中打开
+- <br> 创建换行
+- <img src="..."> 显示图片
+- alt 提供文本描述，用于无障碍访问（屏幕阅读器）和图片加载失败时
+
+
+--------------------------------------------------------------------------------
+第 4 题 — 文本格式化（6 分）
+--------------------------------------------------------------------------------
+
+题目：HTML
+
+答案：
+
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Text Formatting</title>
+  </head>
+  <body>
+    <p>This word is <strong>bold</strong> and this word is <em>italic</em>.</p>
+    <p>This word is <u>underlined</u>.</p>
+
+    <h2>My Favourite Quote</h2>
+    <blockquote>
+      The only way to do great work is to love what you do. — Steve Jobs
+    </blockquote>
+  </body>
+</html>
+
+解释：
+- <strong> 使文本加粗（同时增加语义重要性）
+- <em> 使文本变为斜体（同时增加强调）
+- <u> 给文本加下划线
+- <blockquote> 用于长引用；浏览器通常会缩进它
+
+
+--------------------------------------------------------------------------------
+第 5 题 — 表格（6 分）
+--------------------------------------------------------------------------------
+
+题目：HTML
+
+答案：
+
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Weekly Schedule</title>
+  </head>
+  <body>
+    <h1>Weekly Class Schedule</h1>
+
+    <table border="1">
+      <thead>
+        <tr>
+          <th>Day</th>
+          <th>Subject</th>
+          <th>Time</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Monday</td>
+          <td>Math</td>
+          <td>9:00</td>
+        </tr>
+        <tr>
+          <td>Tuesday</td>
+          <td>English</td>
+          <td>10:00</td>
+        </tr>
+        <tr>
+          <td>Wednesday</td>
+          <td>Science</td>
+          <td>11:00</td>
+        </tr>
+      </tbody>
+    </table>
+  </body>
+</html>
+
+解释：
+- <table> 创建表格；border="1" 添加可见边框
+- <thead> 包含表头行
+- <tbody> 包含数据行
+- <tr> 是表格的一行
+- <th> 是表头单元格（默认加粗居中）
+- <td> 是普通数据单元格
+
+
+--------------------------------------------------------------------------------
+第 6 题 — 表单（6 分）
+--------------------------------------------------------------------------------
+
+题目：HTML
+
+答案：
+
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Login Form</title>
+  </head>
+  <body>
+    <h1>Login</h1>
+
+    <form method="POST" action="/login">
+      <label for="username">Username:</label>
+      <input type="text" id="username" name="username">
+      <br><br>
+
+      <label for="password">Password:</label>
+      <input type="password" id="password" name="password">
+      <br><br>
+
+      <input type="checkbox" id="remember" name="remember">
+      <label for="remember">Remember me</label>
+      <br><br>
+
+      <input type="submit" value="Log In">
+    </form>
+  </body>
+</html>
+
+解释：
+- <form> 包裹所有表单字段；method="POST" 隐藏发送数据，action="/login" 是服务器地址
+- <label> 为每个输入框提供文本标签；"for" 属性链接到输入框的 "id"
+- <input type="text"> 是单行文本框
+- <input type="password"> 隐藏输入的字符
+- <input type="checkbox"> 创建可勾选的框
+- <input type="submit"> 创建提交表单数据的按钮
+
+
+--------------------------------------------------------------------------------
+第 7 题 — HTML 综合复习（6 分）
+--------------------------------------------------------------------------------
+
+题目：HTML
+
+答案：
+
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>About Me</title>
+  </head>
+  <body>
+    <h1>About Me</h1>
+    <p>Hi! My name is Alex. I am a university student who loves learning web development.</p>
+
+    <hr>
+
+    <h2>My Favourite Foods</h2>
+    <ul>
+      <li>Pizza</li>
+      <li>Sushi</li>
+      <li>Ice cream</li>
+    </ul>
+
+    <a href="https://www.google.com" target="_blank">Visit my favourite website</a>
+    <br><br>
+    <img src="https://via.placeholder.com/200" alt="A placeholder image">
+  </body>
+</html>
+
+解释：
+- <hr> 创建水平线（主题分隔）用来分隔不同部分
+- 这个页面综合了：标题、段落、列表、链接、图片和水平线
+
+
+================================================================================
+B 部分：CSS（第 8-14 题）
+================================================================================
+
+--------------------------------------------------------------------------------
+第 8 题 — 基础选择器（6 分）
+--------------------------------------------------------------------------------
+
+题目：CSS
+
+答案：
+
+/* 1. 将 <h1> 的文字颜色设为红色 */
+h1 {
+  color: red;
+}
+
+/* 2. 将 class 为 "highlight" 的段落背景色设为黄色 */
+.highlight {
+  background-color: yellow;
+}
+
+/* 3. 将 <div id="box"> 设为 2px 实线蓝色边框，内边距 10px */
+#box {
+  border: 2px solid blue;
+  padding: 10px;
+}
+
+/* 4. 将所有 <p> 元素的字体大小设为 18px */
+p {
+  font-size: 18px;
+}
+
+解释：
+- h1 是元素选择器 —— 选中所有 <h1> 元素
+- .highlight 是类选择器 —— 选中任何 class="highlight" 的元素
+- #box 是 ID 选择器 —— 选中 id="box" 的单个元素
+- p 是元素选择器 —— 选中所有 <p> 元素
+
+
+--------------------------------------------------------------------------------
+第 9 题 — 颜色和背景（6 分）
+--------------------------------------------------------------------------------
+
+题目：CSS
+
+答案：
+
+/* 1. 将整个页面的背景色设为 #f5f5f5 */
+body {
+  background-color: #f5f5f5;
+}
+
+/* 2. 将所有 <h1> 元素的文字颜色设为深蓝色 (#003366) */
+h1 {
+  color: #003366;
+}
+
+/* 3. 将所有 <h2> 元素的背景色设为浅蓝色 (#add8e6) */
+h2 {
+  background-color: #add8e6;
+}
+
+/* 4. 将所有 <p> 元素设白色背景和内边距 10px */
+p {
+  background-color: white;
+  padding: 10px;
+}
+
+解释：
+- background-color 设置元素的背景填充色
+- color 设置文字颜色
+- padding 在元素内部添加空间（位于内容和边框之间）
+- #f5f5f5、#003366、#add8e6 是十六进制颜色代码
+
+
+--------------------------------------------------------------------------------
+第 10 题 — 字体和文本（6 分）
+--------------------------------------------------------------------------------
+
+题目：CSS
+
+答案：
+
+/* 1. 将所有 <h1> 元素居中对齐 */
+h1 {
+  text-align: center;
+}
+
+/* 2. 将所有 <p> 元素的字体大小设为 16px，行高设为 1.8 */
+p {
+  font-size: 16px;
+  line-height: 1.8;
+}
+
+/* 3. 将所有 <a>（链接）的下划线去掉 */
+a {
+  text-decoration: none;
+}
+
+/* 4. 当鼠标悬停时，将所有 <a>（链接）变为红色 */
+a:hover {
+  color: red;
+}
+
+解释：
+- text-align: center 使文本水平居中
+- font-size 设置文字大小
+- line-height 控制行间距（1.8 表示字体大小的 1.8 倍）
+- text-decoration: none 去掉链接的下划线
+- :hover 是一个伪类，当鼠标悬停在元素上时应用样式
+
+
+--------------------------------------------------------------------------------
+第 11 题 — 盒模型（6 分）
+--------------------------------------------------------------------------------
+
+题目：CSS
+
+答案：
+
+.card {
+  width: 300px;
+  padding: 20px;
+  border: 1px solid #ccc;
+  margin: 50px auto;
+  background-color: #ffffff;
+}
+
+解释：
+- width: 300px 设置卡片的**内容宽度**
+- padding: 20px 在内容与边框之间添加空间（元素**内部**）
+- border: 1px solid #ccc 在元素周围创建可见的轮廓线
+- margin: 50px auto 在元素**外部**添加空间；"auto" 使其水平居中
+- CSS 盒模型：从内到外依次为 → 内容(content) | 内边距(padding) | 边框(border) | 外边距(margin)
+
+
+--------------------------------------------------------------------------------
+第 12 题 — Flexbox 基础（6 分）
+--------------------------------------------------------------------------------
+
+题目：CSS
+
+答案：
+
+HTML：
+
+<div class="container">
+  <div class="box">Box 1</div>
+  <div class="box">Box 2</div>
+  <div class="box">Box 3</div>
+</div>
+
+CSS：
+
+.container {
+  display: flex;
+  gap: 20px;
+  justify-content: center;
+}
+
+.box {
+  width: 100px;
+  height: 100px;
+  background-color: lightblue;
+}
+
+解释：
+- display: flex 将容器变为弹性盒子
+- gap: 20px 在 flex 子项之间添加 20px 间距
+- justify-content: center 将子项在容器中水平居中
+- 每个 .box 是一个 flex 子项，有固定宽度和高度
+
+
+--------------------------------------------------------------------------------
+第 13 题 — Flexbox 导航栏（6 分）
+--------------------------------------------------------------------------------
+
+题目：CSS
+
+答案：
+
+HTML：
+
+<nav>
+  <ul>
+    <li><a href="#">Home</a></li>
+    <li><a href="#">About</a></li>
+    <li><a href="#">Blog</a></li>
+    <li><a href="#">Contact</a></li>
+  </ul>
+</nav>
+
+CSS：
+
+ul {
+  list-style: none;
+  display: flex;
+  justify-content: space-around;
+}
+
+li {
+  padding: 10px 20px;
+  background-color: #444;
+}
+
+a {
+  color: white;
+  text-decoration: none;
+}
+
+解释：
+- list-style: none 去掉列表的项目符号（圆点）
+- display: flex 使列表项水平排列在一行
+- justify-content: space-around 均匀分布子项，每个周围有空间
+- padding: 10px 20px 在每个 <li> 内部添加上下 10px、左右 20px 的空间
+- background-color: #444 给每个项设置深灰色背景
+- color: white 使链接文字为白色
+- text-decoration: none 去掉链接的下划线
+
+
+--------------------------------------------------------------------------------
+第 14 题 — CSS 综合复习（6 分）
+--------------------------------------------------------------------------------
+
+题目：CSS
+
+答案：
+
+/* 设置整个页面的样式 */
+body {
+  background-color: #f0f0f0;
+}
+
+/* 设置个人名片的样式 */
+.profile-card {
+  width: 350px;
+  padding: 25px;
+  margin: 30px auto;
+  border: 1px solid #ddd;
+  border-radius: 10px;
+  box-shadow: 2px 2px 10px rgba(0, 0, 0, 0.1);
+  background-color: white;
+}
+
+/* 居中对齐姓名 */
+.profile-card h2 {
+  text-align: center;
+}
+
+/* 设置职位文字的样式 */
+.title {
+  color: gray;
+  font-style: italic;
+}
+
+解释：
+- border-radius: 10px 使卡片的角变圆
+- box-shadow 创建阴影效果：向右 2px、向下 2px、模糊 10px、半透明黑色
+- rgba(0,0,0,0.1) 表示黑色 10% 透明度
+- font-style: italic 使文字倾斜
+
+
+================================================================================
+C 部分：JavaScript（第 15-20 题）
+================================================================================
+
+--------------------------------------------------------------------------------
+第 15 题 — 变量和数据类型（6 分）
+--------------------------------------------------------------------------------
+
+题目：JavaScript（基础）
+
+答案：
+
+// 1. 声明一个字符串变量 name
+let name = "Alice";
+
+// 2. 声明一个数字变量 age
+let age = 20;
+
+// 3. 声明一个布尔变量 isStudent
+let isStudent = true;
+
+// 4. 声明一个数组变量 hobbies
+let hobbies = ["Reading", "Swimming", "Coding"];
+
+// 5. 在控制台打印所有变量
+console.log(name);      // 输出: Alice
+console.log(age);       // 输出: 20
+console.log(isStudent); // 输出: true
+console.log(hobbies);   // 输出: ["Reading", "Swimming", "Coding"]
+
+解释：
+- let 用于声明变量（现代 JavaScript 的关键字）
+- 字符串使用引号（"" 或 ''）
+- 数字不使用引号
+- 布尔值直接用 true/false（不加引号）
+- 数组用方括号 [] 保存多个值
+
+
+--------------------------------------------------------------------------------
+第 16 题 — 条件判断（if/else）（6 分）
+--------------------------------------------------------------------------------
+
+题目：JavaScript
+
+答案：
+
+// 声明一个分数变量
+let score = 75;
+
+// 使用 if/else if/else 判断等级
+if (score >= 90) {
+  console.log("Grade A");
+} else if (score >= 80) {
+  console.log("Grade B");
+} else if (score >= 70) {
+  console.log("Grade C");
+} else if (score >= 60) {
+  console.log("Grade D");
+} else {
+  console.log("Grade F");
+}
+
+// 因为 score = 75，所以输出为: Grade C
+
+解释：
+- if 检查第一个条件；如果为 true，执行该代码块
+- else if 在前一个条件为 false 时检查下一个条件
+- else 在所有条件都不为 true 时执行
+- >= 表示"大于或等于"
+- 条件按从上到下的顺序依次检查
+
+
+--------------------------------------------------------------------------------
+第 17 题 — 循环（6 分）
+--------------------------------------------------------------------------------
+
+题目：JavaScript
+
+答案：
+
+// 1. 创建一个水果数组
+let fruits = ["Apple", "Banana", "Cherry", "Orange", "Grape"];
+
+// 2. 使用 for 循环打印每个水果
+// 循环从 i=0 开始，当 i < fruits.length 时继续执行
+for (let i = 0; i < fruits.length; i++) {
+  console.log(fruits[i]);
+}
+
+// 3. 使用 while 循环打印数字 1 到 5
+let num = 1;
+while (num <= 5) {
+  console.log(num);
+  num++; // 每次循环将 num 增加 1
+}
+
+解释：
+- for 循环：(初始值; 条件; 增量) —— 在已知循环次数时使用
+  - i = 0 从第一个索引开始，i++ 每次循环增加 1
+  - fruits[i] 通过索引访问每个元素
+- while 循环：只要条件为 true 就一直运行
+  - 必须手动更新计数器（num++)，否则会导致死循环
+
+
+--------------------------------------------------------------------------------
+第 18 题 — 函数（6 分）
+--------------------------------------------------------------------------------
+
+题目：JavaScript
+
+答案：
+
+// 1. 声明一个名为 greet 的函数
+// 它接收一个 name 参数，返回问候语字符串
+function greet(name) {
+  return "Hello, " + name + "! Nice to meet you!";
+}
+
+// 2. 声明一个名为 add 的函数
+// 它接收两个数字，返回它们的和
+function add(a, b) {
+  return a + b;
+}
+
+// 3. 调用两个函数并打印结果
+console.log(greet("Bob"));       // 输出: Hello, Bob! Nice to meet you!
+console.log(add(5, 3));          // 输出: 8
+
+解释：
+- function 是声明函数的关键字
+- 参数 (name, a, b) 是函数接收的输入
+- return 将值返回给函数被调用的地方
+- + 运算符既可以拼接字符串，也可以对数字做加法
+
+
+--------------------------------------------------------------------------------
+第 19 题 — DOM 操作（6 分）
+--------------------------------------------------------------------------------
+
+题目：JavaScript（DOM）
+
+答案：
+
+<!DOCTYPE html>
+<html>
+<head>
+  <title>My Counter</title>
+</head>
+<body>
+
+  <h1>My Counter</h1>
+  <p id="counter">0</p>
+  <button id="increase">Increase</button>
+  <button id="decrease">Decrease</button>
+
+  <script>
+    // 获取 HTML 元素的引用
+    let counterDisplay = document.getElementById("counter");
+    let increaseBtn = document.getElementById("increase");
+    let decreaseBtn = document.getElementById("decrease");
+
+    // 记录当前计数值
+    let count = 0;
+
+    // 给 Increase 按钮添加点击事件
+    increaseBtn.addEventListener("click", function() {
+      count = count + 1;              // 计数值增加 1
+      counterDisplay.innerText = count; // 更新显示
+    });
+
+    // 给 Decrease 按钮添加点击事件
+    decreaseBtn.addEventListener("click", function() {
+      count = count - 1;              // 计数值减少 1
+      counterDisplay.innerText = count; // 更新显示
+    });
+  </script>
+
+</body>
+</html>
+
+解释：
+- document.getElementById("id") 通过 id 属性查找 HTML 元素
+- addEventListener("click", function) 在元素被点击时运行代码
+- .innerText 改变元素内显示的可见文本
+- count 变量存储当前数值；每次点击增加或减少 1
+
+
+--------------------------------------------------------------------------------
+第 20 题 — 小项目：猜数字游戏（6 分）
+--------------------------------------------------------------------------------
+
+题目：HTML + CSS + JavaScript（综合）
+
+答案：
+
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Number Guessing Game</title>
+  <style>
+    /* 使用 Flexbox 将所有内容居中 */
+    body {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      font-family: Arial, sans-serif;
+    }
+
+    /* 按钮样式 */
+    button {
+      background-color: blue;
+      color: white;
+      padding: 10px 20px;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+    }
+
+    /* 元素之间添加间距 */
+    input, button, p {
+      margin: 10px;
+    }
+
+    input {
+      padding: 8px;
+      font-size: 16px;
+    }
+
+    p {
+      font-size: 18px;
+    }
+  </style>
+</head>
+<body>
+
+  <h1>Guess the Number!</h1>
+  <p>I am thinking of a number between 1 and 10.</p>
+  <input type="text" id="guessInput" placeholder="Enter your guess">
+  <button id="guessBtn">Guess</button>
+  <p id="result"></p>
+
+  <script>
+    // 页面加载时生成一个 1 到 10 之间的随机数
+    let secretNumber = Math.floor(Math.random() * 10) + 1;
+
+    // 获取 HTML 元素的引用
+    let guessInput = document.getElementById("guessInput");
+    let guessBtn = document.getElementById("guessBtn");
+    let resultDisplay = document.getElementById("result");
+
+    // 给 Guess 按钮添加点击事件
+    guessBtn.addEventListener("click", function() {
+      let userGuess = guessInput.value;  // 读取输入框的值
+
+      // 检查输入是否为空
+      if (userGuess === "") {
+        resultDisplay.innerText = "Please enter a number!";
+        return;  // 停止执行后续代码
+      }
+
+      // 将输入的字符串转换为数字
+      userGuess = Number(userGuess);
+
+      // 将用户的猜测与秘密数字进行比较
+      if (userGuess === secretNumber) {
+        resultDisplay.innerText = "Correct! You guessed it!";
+      } else if (userGuess > secretNumber) {
+        resultDisplay.innerText = "Too high! Try again.";
+      } else {
+        resultDisplay.innerText = "Too low! Try again.";
+      }
+    });
+  </script>
+
+</body>
+</html>
+
+解释：
+- Math.random() 生成一个 0 到 1 之间的随机小数
+- Math.floor() 向下取整到最近的整数
+- Math.floor(Math.random() * 10) + 1 得到 1 到 10 之间的随机整数
+- Number() 将字符串转换为数字，以便进行比较
+- === 运算符检查严格相等（值和类型都必须相同）
+
+
+================================================================================
+参考答案结束
+================================================================================
+
+题目总数：20
+总分：120
+
+祝学习顺利！🍀
