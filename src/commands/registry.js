@@ -3,6 +3,16 @@
 const path = require("path");
 const fs = require("fs");
 const { ANSI, THEME, styled } = require("../shared/utils");
+
+function _persist(key, val, sub) {
+  try {
+    const { loadSettings, saveSettings } = require("../config/settings");
+    var s = loadSettings();
+    if (sub) { if (!s[key]) s[key] = {}; s[key][sub] = val; }
+    else s[key] = val;
+    saveSettings(s);
+  } catch (_) {}
+}
 const { PermissionMode } = require("../engine/agent");
 
 const commands = {};
@@ -147,7 +157,8 @@ register("yolo", (_, ctx) => {
   const pm = ctx.session.permissionManager;
   if (pm) {
     pm.mode = pm.mode === PermissionMode.YOLO ? PermissionMode.DEFAULT : PermissionMode.YOLO;
-    ctx.screen.write(`${styled(THEME.warning, `Permission mode: ${pm.mode.toUpperCase()}`)}\n`);
+    _saveSetting("permissions", "mode", pm.mode);
+    ctx.screen.write(`${styled(THEME.warning, "Permission: " + pm.mode.toUpperCase())}\n`);
   }
   ctx.rl?.prompt?.();
 }, "Toggle YOLO mode (auto-approve all tools)");
@@ -156,7 +167,8 @@ register("plan", (_, ctx) => {
   const pm = ctx.session.permissionManager;
   if (pm) {
     pm.mode = pm.mode === PermissionMode.PLAN ? PermissionMode.DEFAULT : PermissionMode.PLAN;
-    ctx.screen.write(`${styled(THEME.info, `Permission mode: ${pm.mode.toUpperCase()}${pm.mode === PermissionMode.PLAN ? " — all mutating tools blocked" : ""}`)}\n`);
+    _persist("permissions", pm.mode, "mode");
+    ctx.screen.write(`${styled(THEME.info, "Permission: " + pm.mode.toUpperCase() + (pm.mode === PermissionMode.PLAN ? " — all mutating tools blocked" : ""))}\n`);
   }
   ctx.rl?.prompt?.();
 }, "Toggle Plan mode (block all mutating tools)");
@@ -165,9 +177,11 @@ register("think", (args, ctx) => {
   var s = ctx.session;
   if (args[0] === "off") {
     s._thinking = false; s._thinkIntensity = null;
+    _persist("agent", false, "thinking"); _persist("agent", null, "thinkIntensity");
     ctx.screen.write(styled(THEME.info, "Thinking: OFF") + "\n");
   } else if (["low","medium","high","x-high","max"].includes(args[0])) {
     s._thinking = true; s._thinkIntensity = args[0];
+    _persist("agent", args[0], "thinkIntensity"); _persist("agent", true, "thinking");
     ctx.screen.write(styled(THEME.success, "Thinking: ON (" + args[0] + ")") + "\n");
   } else if (args[0] && /^\d+$/.test(args[0])) {
     s._thinking = true; s._thinkIntensity = parseInt(args[0]);
@@ -184,7 +198,8 @@ register("fullauto", (_, ctx) => {
   const pm = ctx.session.permissionManager;
   if (pm) {
     pm.mode = pm.mode === PermissionMode.FULL_AUTO ? PermissionMode.DEFAULT : PermissionMode.FULL_AUTO;
-    ctx.screen.write(`${styled(THEME.warning, "Permission mode: " + pm.mode.toUpperCase())}\n`);
+    _persist("permissions", pm.mode, "mode");
+    ctx.screen.write(`${styled(THEME.warning, "Permission: " + pm.mode.toUpperCase())}\n`);
   }
   ctx.rl?.prompt?.();
 }, "Toggle Full Auto mode (approve all tools silently)");
@@ -197,13 +212,13 @@ register("perms", (_, ctx) => {
 
 register("allow", (args, ctx) => {
   const pm = ctx.session.permissionManager;
-  if (pm && args[0]) { pm.allowTool(args[0]); ctx.screen.write(`${styled(THEME.success, "Always allow: " + args[0])}\n`); }
+  if (pm && args[0]) { pm.allowTool(args[0]); _persist("permissions", [...pm._alwaysAllow], "allowedTools"); ctx.screen.write(`${styled(THEME.success, "Always allow: " + args[0])}\n`); }
   ctx.rl?.prompt?.();
 }, "Always allow a tool");
 
 register("deny", (args, ctx) => {
   const pm = ctx.session.permissionManager;
-  if (pm && args[0]) { pm.denyTool(args[0]); ctx.screen.write(`${styled(THEME.warning, "Always deny: " + args[0])}\n`); }
+  if (pm && args[0]) { pm.denyTool(args[0]); _persist("permissions", [...pm._alwaysDeny], "deniedTools"); ctx.screen.write(`${styled(THEME.warning, "Always deny: " + args[0])}\n`); }
   ctx.rl?.prompt?.();
 }, "Always deny a tool");
 
@@ -432,7 +447,8 @@ register("theme", (args, ctx) => {
     for (const t of listThemes()) ctx.screen.write(`  ${t.name.padEnd(12)} ${t.description}\n`);
   } else if (args[0]) {
     applyTheme(args[0], require("../shared/utils").THEME);
-    ctx.screen.write(`${styled(THEME.success, `Theme: ${args[0]}`)}\n`);
+    _persist("ui", args[0], "theme");
+    ctx.screen.write(`${styled(THEME.success, "Theme: " + args[0])}\n`);
   } else {
     ctx.screen.write(`${styled(THEME.info, "Usage: /theme <name> | /theme list")}\n`);
     ctx.screen.write(`  Available: ${Object.keys(require("../shared/themes").THEMES).join(", ")}\n`);

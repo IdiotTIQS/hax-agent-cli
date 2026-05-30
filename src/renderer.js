@@ -167,11 +167,15 @@ class ResponseRenderer {
   thinking(chunk) {
     if (!this.assistantStarted) {
       this.spinner.stop();
+      this.screen.write("\n" + THEME.assistantIndicator + "Assistant " + THEME.dim + "(thinking)" + ANSI.reset + "\n");
       this.assistantStarted = true;
     }
-    if (this.spinner.isTTY) {
-      this.thinkingSummary = chunk.summary || 'Thinking...';
-      this.spinner.start('', this.thinkingSummary);
+    if (chunk.delta) {
+      // Show thinking content in dimmed gray
+      this.screen.write(THEME.dim + chunk.delta + ANSI.reset);
+    } else if (this.spinner.isTTY) {
+      this.thinkingSummary = chunk.summary || "Thinking...";
+      this.spinner.start("", this.thinkingSummary);
     }
   }
 

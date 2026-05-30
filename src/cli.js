@@ -46,6 +46,13 @@ async function runInteractive(args) {
   };
   var engine = new AgentEngine({ session, projectRoot: process.cwd(), skillRegistry: skills, approvalCallback: approvalCallback });
 
+  // Restore saved settings: permission mode, thinking, theme
+  if (settings.permissions?.mode) pm.mode = settings.permissions.mode;
+  if (settings.permissions?.allowedTools) { for (var t of settings.permissions.allowedTools) pm.allowTool(t); }
+  if (settings.permissions?.deniedTools) { for (var t of settings.permissions.deniedTools) pm.denyTool(t); }
+  if (settings.agent?.thinking) { session._thinking = true; session._thinkIntensity = settings.agent.thinkIntensity || null; }
+  if (settings.ui?.theme) { try { require("./shared/themes").applyTheme(settings.ui.theme, THEME); } catch (_) {} }
+
   var isTTY = process.stdout.isTTY;
   var rl = readline.createInterface({ input: process.stdin, output: process.stdout, terminal: isTTY });
 
@@ -122,6 +129,7 @@ async function runInteractive(args) {
               switch (event.type) {
                 case "turn.started": renderer.startWaiting?.(); break;
                 case "message.delta": renderer.writeText?.(event.delta); break;
+                case "thinking": renderer.thinking?.(event); break;
                 case "tool.start": renderer.startTool?.(event); break;
                 case "tool.result": renderer.finishTool?.(event); break;
                 case "tool.limit": renderer.notice?.("Tool limit reached"); break;
@@ -166,9 +174,17 @@ async function runInteractive(args) {
     rl.prompt();
   });
 
-  // Ctrl+L = clear screen
+  // Ctrl+L = clear screen, Shift+Tab = cycle permission mode
   if (isTTY) {
     process.stdin.on("keypress", function (str, key) {
+      if (key && key.shift && key.name === "tab") {
+        var modes = ["normal", "yolo", "plan", "fullauto"];
+        var idx = modes.indexOf(pm.mode);
+        pm.mode = modes[(idx + 1) % modes.length];
+        try { var s = require("./config/settings").loadSettings(); if (!s.permissions) s.permissions = {}; s.permissions.mode = pm.mode; require("./config/settings").saveSettings(s); } catch (_) {}
+        process.stdout.write("\r" + ANSI.clearLine + styled(THEME.warning, "[" + pm.mode.toUpperCase() + "]") + " ");
+        refreshPrompt();
+      }
       if (key && key.ctrl && key.name === "l") {
         process.stdout.write(ANSI.clearScreen);
         process.stdout.write(banner());

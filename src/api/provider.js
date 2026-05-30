@@ -57,6 +57,8 @@ class BaseOpenAICompatible {
       for await (const chunk of stream) {
         const delta = chunk.choices?.[0]?.delta;
         if (delta?.content) { text += delta.content; yield { type: "text", delta: delta.content }; }
+        // DeepSeek V4 thinking content (reasoning_content in streaming)
+        if (delta?.reasoning_content) { yield { type: "thinking", delta: delta.reasoning_content }; }
         if (delta?.tool_calls) {
           for (const tc of delta.tool_calls) {
             const idx = tc.index;
