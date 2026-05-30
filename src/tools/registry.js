@@ -15,7 +15,13 @@ class ToolRegistry {
 }
 
 // === Helpers ===
-function resolvePath(root, p) { const r = path.resolve(root, p); if (!r.startsWith(path.resolve(root))) throw new Error("Path outside workspace: " + p); return r; }
+function resolvePath(root, p) {
+  var r = path.resolve(root, p);
+  var home = path.join((process.env.HOME || process.env.USERPROFILE || ""), ".haxagent");
+  // Allow project root, home .haxagent (tool_artifacts, memory, etc.), and temp dirs
+  if (r.startsWith(path.resolve(root)) || (home && r.startsWith(home)) || r.startsWith(require("os").tmpdir())) return r;
+  throw new Error("Path outside workspace: " + p);
+}
 function requireString(v, name) { if (typeof v !== "string" || !v.trim()) throw new Error(`${name} is required`); return v.trim(); }
 
 // === All Tools ===
@@ -134,7 +140,13 @@ const tools = {
     inputSchema: { type: "object", required: ["command"], properties: { command: { type: "string" }, args: { type: "array", items: { type: "string" } }, cwd: { type: "string" }, timeoutMs: { type: "number", default: 30000 } } },
     async execute(args, ctx) {
       const { execSync } = require("child_process");
-      const cmd = [args.command, ...(args.args || [])].filter(Boolean).join(" ");
+      var cmd = [args.command, ...(args.args || [])].filter(Boolean).join(" ");
+      // Windows: convert common Unix commands
+      if (process.platform === "win32") {
+        if (/^(tail|head|grep|awk|sed)\s/.test(cmd)) {
+          cmd = "powershell -NoProfile -Command \"" + cmd.replace(/"/g, '\\"') + "\"";
+        }
+      }
       try {
         const stdout = execSync(cmd, { cwd: args.cwd || ctx.root, timeout: args.timeoutMs || 30000, maxBuffer: 1024 * 1024, encoding: "utf-8", shell: true });
         return { ok: true, data: { command: cmd, stdout, stderr: "", exitCode: 0 } };
