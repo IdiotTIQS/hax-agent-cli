@@ -24,12 +24,15 @@ function main(argv) {
 async function runInteractive(args) {
   var noColor = args && args.includes("--no-color");
 
-  // First-run setup wizard
+  // First-run setup wizard — reload after setup saves to disk
   var { shouldRunSetup, runSetup } = require("./setup");
-  if (shouldRunSetup()) await runSetup();
+  if (shouldRunSetup()) { await runSetup(); require("./config/settings").reloadSettings(); }
 
   var settings = loadSettings();
   var profiles = new ProfileManager();
+  // Use saved profile from settings, falling back to builtin
+  var savedProfile = settings.agent?._activeProfile || settings.agent?.provider || null;
+  if (savedProfile && profiles.use(savedProfile)) { /* profile already active */ }
   var profileCfg = profiles.active;
   var provider = createProvider({ provider: profileCfg.provider, model: profileCfg.model, apiUrl: profileCfg.apiUrl });
   var pm = new PermissionChecker({ mode: settings.permissions?.mode || PermissionMode.DEFAULT });
