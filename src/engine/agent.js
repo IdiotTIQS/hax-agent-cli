@@ -266,8 +266,10 @@ class AgentEngine extends EventEmitter {
       }
 
       // Track assistant message with reasoning_content for DeepSeek V4
+      // and tool_uses (with ids) so subsequent _toMessages can round-trip them.
       var aMsg = { role: "assistant", content: text };
       if (reasoningText) aMsg.reasoning_content = reasoningText;
+      if (toolUses.length) aMsg.tool_uses = toolUses;
       msgs.push(aMsg);
 
       // === Tool Execution (sequential for safety) ===
@@ -279,7 +281,7 @@ class AgentEngine extends EventEmitter {
         if (hooks) {
           const hookResult = await hooks.run(HookEvent.PRE_TOOL_USE, { toolName: name, args: input, session: s });
           if (hookResult?.blocked) {
-            results.push({ type: "tool_result", content: JSON.stringify({ ok: false, error: { code: "HOOK_BLOCKED", message: hookResult.reason || "Blocked by hook" } }) });
+            results.push({ type: "tool_result", tool_use_id: tu.id || null, tool_name: name, content: JSON.stringify({ ok: false, error: { code: "HOOK_BLOCKED", message: hookResult.reason || "Blocked by hook" } }) });
             continue;
           }
         }
@@ -295,13 +297,13 @@ class AgentEngine extends EventEmitter {
               const answer = await this._approvalCallback(name, input);
               if (answer !== "approve" && answer !== "always") {
                 yield { type: "tool.result", name, isError: true, error: { code: "PERMISSION_DENIED", message: "User denied" } };
-                results.push({ type: "tool_result", content: JSON.stringify({ ok: false, error: { code: "PERMISSION_DENIED", message: "User denied" } }) });
+                results.push({ type: "tool_result", tool_use_id: tu.id || null, tool_name: name, content: JSON.stringify({ ok: false, error: { code: "PERMISSION_DENIED", message: "User denied" } }) });
                 continue;
               }
               if (answer === "always") pm.allowTool(name);
             } else {
               yield { type: "tool.result", name, isError: true, error: { code: "PERMISSION_DENIED", message: pr.reason } };
-              results.push({ type: "tool_result", content: JSON.stringify({ ok: false, error: { code: "PERMISSION_DENIED", message: pr.reason } }) });
+              results.push({ type: "tool_result", tool_use_id: tu.id || null, tool_name: name, content: JSON.stringify({ ok: false, error: { code: "PERMISSION_DENIED", message: pr.reason } }) });
               continue;
             }
           }
@@ -333,7 +335,12 @@ class AgentEngine extends EventEmitter {
         // Post-tool hook
         if (hooks) await hooks.run(HookEvent.POST_TOOL_USE, { toolName: name, args: input, result: execResult, session: s });
 
-        results.push({ type: "tool_result", content: JSON.stringify(execResult) });
+        results.push({
+          type: "tool_result",
+          tool_use_id: tu.id || null,
+          tool_name: name,
+          content: JSON.stringify(execResult),
+        });
       }
 
       msgs.push({ role: "user", content: results });

@@ -132,3 +132,46 @@ test("enableCache 缺省时 system 保持字符串(向后兼容)", () => {
   });
   assert.equal(typeof body.system, "string");
 });
+
+// -- added for Task 4: Native Tool Use --
+
+test("_toMessages 将 tool_result 转换为 Anthropic 块格式", () => {
+  const p = new AnthropicProvider({ apiKey: "test" });
+  const result = p._toMessages([
+    { role: "user", content: "list files" },
+    { role: "assistant", content: "ok", tool_uses: [{ id: "tu_1", name: "file.glob", input: { pattern: "*.js" } }] },
+    { role: "user", content: [
+      { type: "tool_result", tool_use_id: "tu_1", content: '{"ok":true}' }
+    ]},
+  ]);
+
+  assert.equal(result.length, 3);
+  // assistant 应转换为 [text, tool_use]
+  assert.ok(Array.isArray(result[1].content));
+  assert.equal(result[1].content[0].type, "text");
+  assert.equal(result[1].content[1].type, "tool_use");
+  assert.equal(result[1].content[1].id, "tu_1");
+  // user tool_result 应保留 tool_use_id
+  assert.equal(result[2].content[0].tool_use_id, "tu_1");
+});
+
+test("_parseDsml 为每个 invoke 生成唯一 id", () => {
+  const p = new AnthropicProvider({ apiKey: "test" });
+  const FW = "｜";
+  const text = `${FW}${FW}DSML${FW}${FW}invoke name="x">${FW}${FW}DSML${FW}${FW}parameter name="a">1</${FW}${FW}DSML${FW}${FW}parameter></${FW}${FW}DSML${FW}${FW}invoke>` +
+               `${FW}${FW}DSML${FW}${FW}invoke name="y">${FW}${FW}DSML${FW}${FW}parameter name="b">2</${FW}${FW}DSML${FW}${FW}parameter></${FW}${FW}DSML${FW}${FW}invoke>`;
+  const uses = p._parseDsml(text);
+  assert.equal(uses.length, 2);
+  assert.ok(uses[0].id.startsWith("dsml_"));
+  assert.ok(uses[1].id.startsWith("dsml_"));
+  assert.notEqual(uses[0].id, uses[1].id, "两次 invoke 应有不同 id");
+});
+
+test("_toMessages 处理无 tool_uses 的 assistant 消息(向后兼容)", () => {
+  const p = new AnthropicProvider({ apiKey: "test" });
+  const result = p._toMessages([
+    { role: "user", content: "hi" },
+    { role: "assistant", content: "hello" },
+  ]);
+  assert.equal(result[1].content, "hello", "无 tool_uses 时保持原始字符串内容");
+});

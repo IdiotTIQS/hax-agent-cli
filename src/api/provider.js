@@ -111,6 +111,9 @@ class AnthropicProvider {
     const client = new Anthropic({ apiKey: this.apiKey, baseURL: this.apiUrl });
     let text = "", usage = null;
 
+    // Accumulate native tool_use blocks keyed by content_block index
+    const nativeToolUses = {}; // index -> { id, name, input_acc: string }
+
     try {
       const stream = await withRetry(() => client.messages.create(
         this._buildRequestBody(req),
@@ -118,15 +121,45 @@ class AnthropicProvider {
       ));
 
       for await (const e of stream) {
-        if (e.type === "content_block_delta" && e.delta?.type === "text_delta") { text += e.delta.text; yield { type: "text", delta: e.delta.text }; }
-        else if (e.type === "content_block_start" && e.content_block?.type === "tool_use") yield { type: "thinking" };
-        else if (e.type === "message_delta") usage = e.usage;
+        if (e.type === "content_block_start") {
+          if (e.content_block?.type === "tool_use") {
+            nativeToolUses[e.index] = {
+              id: e.content_block.id,
+              name: e.content_block.name,
+              input_acc: "",
+            };
+            yield { type: "thinking" }; // UI hint
+          }
+        } else if (e.type === "content_block_delta") {
+          if (e.delta?.type === "text_delta") {
+            text += e.delta.text;
+            yield { type: "text", delta: e.delta.text };
+          } else if (e.delta?.type === "input_json_delta" && nativeToolUses[e.index]) {
+            nativeToolUses[e.index].input_acc += e.delta.partial_json || "";
+          }
+        } else if (e.type === "message_delta") {
+          usage = e.usage;
+        }
       }
     } catch (err) { yield { type: "error", message: err.message }; return; }
 
-    if (usage) yield { type: "usage", inputTokens: usage.input_tokens || 0, outputTokens: usage.output_tokens || 0 };
-    const dsml = this._parseDsml(text);
-    yield dsml.length ? { type: "tool_uses", toolUses: dsml, text, usage } : { type: "tool_uses", toolUses: [], text, usage };
+    if (usage) yield {
+      type: "usage",
+      inputTokens: usage.input_tokens || 0,
+      outputTokens: usage.output_tokens || 0,
+      cache_creation_input_tokens: usage.cache_creation_input_tokens || 0,
+      cache_read_input_tokens: usage.cache_read_input_tokens || 0,
+    };
+
+    // Prefer native tool_use; fall back to DSML when text contains DSML invokes
+    const nativeUses = Object.values(nativeToolUses).map(t => {
+      let input = {};
+      try { input = JSON.parse(t.input_acc || "{}"); } catch (_) {}
+      return { id: t.id, name: t.name, input };
+    });
+
+    const toolUses = nativeUses.length > 0 ? nativeUses : this._parseDsml(text);
+    yield { type: "tool_uses", toolUses, text, usage };
   }
 
   _buildRequestBody(req) {
@@ -160,15 +193,42 @@ class AnthropicProvider {
     return body;
   }
 
-  _toMessages(msgs) { return msgs.map(m => ({ role: m.role, content: m.content })); }
+  _toMessages(msgs) {
+    return msgs.map(m => {
+      // user message carrying tool_result blocks \u2192 convert to Anthropic content blocks
+      if (m.role === "user" && Array.isArray(m.content)) {
+        const blocks = m.content.map(c => {
+          if (c && c.type === "tool_result") {
+            return {
+              type: "tool_result",
+              tool_use_id: c.tool_use_id,
+              content: typeof c.content === "string" ? c.content : JSON.stringify(c.content),
+            };
+          }
+          return c;
+        });
+        return { role: "user", content: blocks };
+      }
+      // assistant message with recorded tool_uses \u2192 restore as Anthropic blocks
+      if (m.role === "assistant" && Array.isArray(m.tool_uses) && m.tool_uses.length) {
+        const blocks = [];
+        if (m.content) blocks.push({ type: "text", text: m.content });
+        for (const tu of m.tool_uses) {
+          blocks.push({ type: "tool_use", id: tu.id, name: tu.name, input: tu.input });
+        }
+        return { role: "assistant", content: blocks };
+      }
+      return { role: m.role, content: m.content };
+    });
+  }
 
   _parseDsml(text) {
     const re = /\uFF5C\uFF5CDSML\uFF5C\uFF5Cinvoke\s+name="([^"]+)"[^>]*>([\s\S]*?)<\/\uFF5C\uFF5CDSML\uFF5C\uFF5Cinvoke>/g;
-    const uses = []; let m;
+    const uses = []; let m; let i = 0;
     while ((m = re.exec(text)) !== null) {
       const p = {}; const pr = /\uFF5C\uFF5CDSML\uFF5C\uFF5Cparameter\s+name="([^"]+)"[^>]*>([\s\S]*?)<\/\uFF5C\uFF5CDSML\uFF5C\uFF5Cparameter>/g; let pm;
       while ((pm = pr.exec(m[2])) !== null) p[pm[1]] = pm[2].trim();
-      uses.push({ name: m[1], input: p });
+      uses.push({ id: `dsml_${Date.now()}_${i++}`, name: m[1], input: p });
     }
     return uses;
   }
