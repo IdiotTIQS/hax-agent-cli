@@ -51,7 +51,7 @@ async function runSetup() {
 
   // 3. Model
   var models = provider === "deepseek" ? ["deepseek-v4-flash", "deepseek-v4-pro"] :
-    provider === "anthropic" ? ["claude-sonnet-4-6", "claude-opus-4-8", "claude-haiku-4-5-20251001"] :
+    provider === "anthropic" ? ["claude-sonnet-4-6", "claude-opus-4-7", "claude-haiku-4-5-20251001"] :
     provider === "openai" ? ["gpt-5.4-mini", "gpt-5.5", "o3-2025-04-16"] :
     ["default"];
   out.write("\n\x1b[1m3. Choose model:\x1b[0m\n");

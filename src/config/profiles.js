@@ -18,7 +18,7 @@ const BUILTIN = {
   claude:    { provider: "anthropic",  model: "claude-sonnet-4-6",         apiUrl: "https://api.anthropic.com" },
   sonnet:    { provider: "anthropic",  model: "claude-sonnet-4-6" },
   haiku:     { provider: "anthropic",  model: "claude-haiku-4-5-20251001" },
-  opus:      { provider: "anthropic",  model: "claude-opus-4-8" },
+  opus:      { provider: "anthropic",  model: "claude-opus-4-7" },
   // OpenAI — updated 2026-05
   gpt:       { provider: "openai",     model: "gpt-5.4-mini",              apiUrl: "https://api.openai.com/v1" },
   "gpt-pro": { provider: "openai",     model: "gpt-5.5" },

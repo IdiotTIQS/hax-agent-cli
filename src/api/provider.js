@@ -103,7 +103,7 @@ class BaseOpenAICompatible {
 // === Anthropic ===
 
 class AnthropicProvider {
-  constructor(o = {}) { this.apiKey = o.apiKey || process.env.ANTHROPIC_API_KEY; this.apiUrl = o.apiUrl || "https://api.anthropic.com"; this.model = o.model || "claude-sonnet-4-20250514"; this.maxTokens = o.maxTokens || 8192; }
+  constructor(o = {}) { this.apiKey = o.apiKey || process.env.ANTHROPIC_API_KEY; this.apiUrl = o.apiUrl || "https://api.anthropic.com"; this.model = o.model || "claude-sonnet-4-6"; this.maxTokens = o.maxTokens || 8192; }
   get name() { return "anthropic"; }
 
   async *stream(req = {}) {
@@ -144,7 +144,7 @@ class AnthropicProvider {
     return uses;
   }
 
-  async listModels() { return [{ id: "claude-sonnet-4-6" }, { id: "claude-opus-4-8" }, { id: "claude-haiku-4-5-20251001" }]; }
+  async listModels() { return [{ id: "claude-opus-4-7" }, { id: "claude-sonnet-4-6" }, { id: "claude-haiku-4-5-20251001" }]; }
 }
 
 // === Provider Registry ===

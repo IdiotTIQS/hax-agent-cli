@@ -244,7 +244,7 @@ async function _callVisionAPI(provider, base64Image, mediaType, prompt, maxToken
         : new Anthropic({ apiKey: provider.apiKey, baseURL: provider.apiUrl || "https://api.anthropic.com" });
 
       const response = await client.messages.create({
-        model: provider.model || "claude-sonnet-4-20250514",
+        model: provider.model || "claude-sonnet-4-6",
         max_tokens: maxTokens,
         messages: [{
           role: "user",

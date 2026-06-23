@@ -183,7 +183,7 @@ class AnthropicProviderAdapter extends ProviderAdapter {
     super({ ...o, name: "anthropic" });
     this.apiKey = o.apiKey || process.env.ANTHROPIC_API_KEY;
     this.apiUrl = o.apiUrl || "https://api.anthropic.com";
-    this.model = o.model || "claude-sonnet-4-20250514";
+    this.model = o.model || "claude-sonnet-4-6";
   }
 
   async *streamMessage(request) {
@@ -316,9 +316,9 @@ class AnthropicProviderAdapter extends ProviderAdapter {
 
   getMaxContextTokens() {
     const modelTokens = {
-      "claude-opus-4-20250514": 200000,
-      "claude-sonnet-4-20250514": 200000,
-      "claude-haiku-3-5-20241022": 200000,
+      "claude-opus-4-7": 200000,
+      "claude-sonnet-4-6": 200000,
+      "claude-haiku-4-5-20251001": 200000,
       "claude-3-5-sonnet": 200000,
       "claude-3-opus": 200000,
       "claude-3-haiku": 200000,

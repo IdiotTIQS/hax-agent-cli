@@ -115,7 +115,7 @@ class HookExecutor {
     this._registry = o.registry || new HookRegistry();
     this._pluginRegistry = o.pluginRegistry || null;
     this._apiClient = o.apiClient || null;
-    this._defaultModel = o.defaultModel || "claude-sonnet-4-20250514";
+    this._defaultModel = o.defaultModel || "claude-sonnet-4-6";
   }
 
   /** Update the registry (reload from plugins etc.) */
