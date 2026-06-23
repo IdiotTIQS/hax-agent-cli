@@ -96,3 +96,39 @@ test("thinkIntensity 'xhigh'(无连字符) 映射到 effort=xhigh", () => {
   });
   assert.equal(body.output_config.effort, "xhigh");
 });
+
+// -- added for Task 3: Prompt Caching --
+
+test("enableCache=true 时 system 被转为带 cache_control 的内容块", () => {
+  const p = new AnthropicProvider({ apiKey: "test", model: "claude-sonnet-4-6" });
+  const body = p._buildRequestBody({
+    messages: [{ role: "user", content: "hi" }],
+    system: "You are helpful.",
+    enableCache: true,
+  });
+  assert.ok(Array.isArray(body.system), "system 应为内容块数组");
+  assert.equal(body.system.length, 1);
+  assert.equal(body.system[0].type, "text");
+  assert.equal(body.system[0].text, "You are helpful.");
+  assert.deepEqual(body.system[0].cache_control, { type: "ephemeral" });
+});
+
+test("enableCache=false 时 system 保持字符串", () => {
+  const p = new AnthropicProvider({ apiKey: "test" });
+  const body = p._buildRequestBody({
+    messages: [{ role: "user", content: "hi" }],
+    system: "You are helpful.",
+    enableCache: false,
+  });
+  assert.equal(typeof body.system, "string");
+  assert.equal(body.system, "You are helpful.");
+});
+
+test("enableCache 缺省时 system 保持字符串(向后兼容)", () => {
+  const p = new AnthropicProvider({ apiKey: "test" });
+  const body = p._buildRequestBody({
+    messages: [{ role: "user", content: "hi" }],
+    system: "You are helpful.",
+  });
+  assert.equal(typeof body.system, "string");
+});

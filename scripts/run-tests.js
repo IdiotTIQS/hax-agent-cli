@@ -5,7 +5,7 @@
 
 const { spawn } = require('node:child_process');
 
-const nodeArgs = ['--test', 'test/smoke-test.test.js', 'test/public-api.test.js', 'test/pricing-fix.test.js', 'test/anthropic-provider.test.js'];
+const nodeArgs = ['--test', 'test/smoke-test.test.js', 'test/public-api.test.js', 'test/pricing-fix.test.js', 'test/anthropic-provider.test.js', 'test/engine-system-prompt.test.js'];
 
 const major = parseInt(process.versions.node.split('.')[0], 10);
 const minor = parseInt(process.versions.node.split('.')[1], 10);

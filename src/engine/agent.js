@@ -15,6 +15,38 @@ const {
 } = require("./query");
 const { PermissionChecker: CorePermissionChecker, PermissionMode, SENSITIVE_PATH_PATTERNS } = require("../core/permissions/checker");
 
+// === CostTracker ===
+
+const { getPricing, getCost } = require("../pricing");
+
+class CostTracker {
+  constructor() {
+    this.inputTokens = 0;
+    this.outputTokens = 0;
+    this.cacheCreationTokens = 0;
+    this.cacheReadTokens = 0;
+    this.turnCount = 0;
+    this.toolCallCount = 0;
+    this.startTime = Date.now();
+  }
+  addUsage(usage) {
+    if (!usage) return;
+    this.inputTokens += num(usage, "input_tokens", "inputTokens", "prompt_tokens") || 0;
+    this.outputTokens += num(usage, "output_tokens", "outputTokens", "completion_tokens") || 0;
+    this.cacheCreationTokens += num(usage, "cache_creation_input_tokens", "cacheCreationInputTokens") || 0;
+    this.cacheReadTokens += num(usage, "cache_read_input_tokens", "cacheReadInputTokens") || 0;
+    this.turnCount += 1;
+  }
+  addToolCall() { this.toolCallCount += 1; }
+  getCost(model) { return getCost(model, this.inputTokens, this.outputTokens, this.cacheCreationTokens, this.cacheReadTokens); }
+  getPricing(model) { return getPricing(model); }
+}
+
+function num(obj, ...keys) {
+  for (const k of keys) { if (Number.isFinite(obj[k])) return obj[k]; }
+  return 0;
+}
+
 // === Session ===
 
 class Session {
@@ -24,6 +56,8 @@ class Session {
     this.toolRegistry = o.toolRegistry;
     this.permissionManager = o.permissionManager || null;
     this.hookExecutor = o.hookExecutor || null;
+    this.pluginRegistry = o.pluginRegistry || null;
+    this.sandbox = o.sandbox || null;
     this.messages = [];
     this.isStreaming = false;
     this.responseInterrupted = false;
@@ -31,12 +65,14 @@ class Session {
     this.inputTokens = 0; this.outputTokens = 0; this.toolCallCount = 0; this.turnCount = 0;
     this.goal = o.goal || null;
     this._modifiedFiles = new Set();
+    this.costTracker = new CostTracker();
   }
   getStatusLine() {
     const m = this.provider?.model || "?";
+    const cost = this.costTracker.getCost(m);
     const t = this.inputTokens + this.outputTokens;
     const pm = this.permissionManager?.mode || "normal";
-    return `${this.provider?.name || "?"} · ${m} · ${t}t · ${this.turnCount} turns · ${pm}`;
+    return `${this.provider?.name || "?"} · ${m} · $${cost.toFixed(4)} · ${t}t · ${this.turnCount} turns · ${pm}`;
   }
 }
 
@@ -192,6 +228,12 @@ class AgentEngine extends EventEmitter {
     for (let turn = 0; turn < this.maxToolTurns; turn++) {
       if (signal.aborted) break;
 
+      // 每轮注入动态上下文为 system-reminder(不污染稳定 system 前缀)
+      const dynamicReminder = this._buildDynamicContextReminder();
+      const msgsWithReminder = dynamicReminder
+        ? [...msgs, { role: "user", content: dynamicReminder, internal: true }]
+        : msgs;
+
       // === API Call with bounded tokens ===
       const maxTok = boundedCompletionTokens(ctx.maxTokens, ctx.contextWindowTokens);
       let text = ""; let toolUses = []; let usage = null;
@@ -199,11 +241,13 @@ class AgentEngine extends EventEmitter {
 
       try {
         for await (const chunk of s.provider.stream({
-          messages: msgs, system: systemPrompt,
+          messages: msgsWithReminder,
+          system: this._buildStableSystemPrompt(),
           tools: registry?.toApiSchema() || [],
           signal, maxTokens: maxTok,
           thinking: s._thinking || false,
           thinkIntensity: s._thinkIntensity || null,
+          enableCache: s.provider?.name === "anthropic",
         })) {
           if (chunk.type === "text") { text += chunk.delta; yield { type: "message.delta", delta: chunk.delta }; }
           else if (chunk.type === "thinking") {
@@ -211,7 +255,7 @@ class AgentEngine extends EventEmitter {
             yield chunk;
           }
           else if (chunk.type === "tool_uses") { toolUses = chunk.toolUses || []; text = chunk.text || text; usage = chunk.usage; }
-          else if (chunk.type === "usage") { usage = chunk; s.inputTokens += chunk.inputTokens || 0; s.outputTokens += chunk.outputTokens || 0; yield chunk; }
+          else if (chunk.type === "usage") { usage = chunk; s.inputTokens += chunk.inputTokens || 0; s.outputTokens += chunk.outputTokens || 0; if (s.costTracker) s.costTracker.addUsage(chunk); yield chunk; }
           else if (chunk.type === "error") {
             // Reactive compaction: if prompt too long, compact and retry
             if (isPromptTooLongError(chunk) && ptlRetries < MAX_PTL_RETRIES) {
@@ -296,6 +340,7 @@ class AgentEngine extends EventEmitter {
         try {
           execResult = await registry.execute(name, input, { root: this.projectRoot, session: s });
           s.toolCallCount++;
+          if (s.costTracker) s.costTracker.addToolCall();
         } catch (err) {
           execResult = { ok: false, error: { code: "EXECUTION_ERROR", message: err.message } };
         }
@@ -340,9 +385,9 @@ class AgentEngine extends EventEmitter {
     return this._skillSystemPrompt || "";
   }
 
-  _buildSystemPrompt() {
+  /** Return the stable system prompt prefix (used for prompt caching). */
+  _buildStableSystemPrompt() {
     const skillsPrompt = this._getSkillsPrompt();
-    const ctx = this._queryContext.buildContextSummary();
     return [
       "You are Hax Agent, a professional AI coding assistant with deep expertise in software development.",
       "Think like a senior engineer: deliberate, thorough, security-conscious.",
@@ -365,12 +410,24 @@ class AgentEngine extends EventEmitter {
       "- shell.run: Execute shell commands with arguments array.",
       "- web.fetch: Fetch URL content.",
       "- web.search: Search the web.",
-      "- agent: Spawn a sub-agent for ONE truly independent task. Do NOT spawn more than 2-3 agents per turn. For most tasks, work sequentially yourself.",
-      "- task.create/get/list/stop: Manage background tasks. Tasks run independently; check task.output for results.",
-      "",
-      ctx ? `Current Context:\n${ctx}` : "",
+      "- agent: Spawn a sub-agent for ONE truly independent task. Do NOT spawn more than 2-3 agents per turn.",
+      "- task.create/get/list/stop: Manage background tasks.",
       skillsPrompt || "",
     ].filter(Boolean).join("\n");
+  }
+
+  /** Return the per-turn dynamic context summary, injected as a separate user message. */
+  _buildDynamicContextReminder() {
+    const ctx = this._queryContext.buildContextSummary();
+    if (!ctx) return null;
+    return `<system-reminder>\nCurrent Context:\n${ctx}\n</system-reminder>`;
+  }
+
+  /** Compatibility: legacy callers can still fetch the full system prompt (not split). */
+  _buildSystemPrompt() {
+    const stable = this._buildStableSystemPrompt();
+    const dynamic = this._buildDynamicContextReminder();
+    return dynamic ? `${stable}\n\n${dynamic}` : stable;
   }
 }
 

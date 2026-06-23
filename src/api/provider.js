@@ -136,7 +136,17 @@ class AnthropicProvider {
       stream: true,
       messages: this._toMessages(req.messages || []),
     };
-    if (req.system) body.system = String(req.system);
+    if (req.system) {
+      if (req.enableCache) {
+        body.system = [{
+          type: "text",
+          text: String(req.system),
+          cache_control: { type: "ephemeral" },
+        }];
+      } else {
+        body.system = String(req.system);
+      }
+    }
     if (req.tools?.length) body.tools = req.tools;
     if (req.thinking) {
       body.thinking = { type: "adaptive" };

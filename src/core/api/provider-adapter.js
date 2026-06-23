@@ -125,6 +125,7 @@ class ApiMessageRequest {
     this.metadata = o.metadata || {};
     this.thinking = o.thinking || false;
     this.thinkIntensity = o.thinkIntensity || null;
+    this.enableCache = o.enableCache || false;
   }
 }
 
@@ -218,7 +219,17 @@ class AnthropicProviderAdapter extends ProviderAdapter {
         max_tokens: maxTokens,
         stream: true,
         messages: this._formatMessages(request.messages),
-        ...(request.system ? { system: String(request.system) } : {}),
+        ...(request.system
+          ? {
+              system: request.enableCache
+                ? [{
+                    type: "text",
+                    text: String(request.system),
+                    cache_control: { type: "ephemeral" },
+                  }]
+                : String(request.system),
+            }
+          : {}),
         ...(request.tools?.length ? { tools: this._formatTools(request.tools) } : {}),
       };
       if (request.thinking) {
