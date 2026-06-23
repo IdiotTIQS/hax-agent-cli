@@ -211,14 +211,24 @@ class AnthropicProviderAdapter extends ProviderAdapter {
     const toolUseMap = new Map(); // id → { name, input: "" }
 
     try {
-      const stream = await client.messages.create({
+      const body = {
         model,
         max_tokens: maxTokens,
         stream: true,
         messages: this._formatMessages(request.messages),
         ...(request.system ? { system: String(request.system) } : {}),
         ...(request.tools?.length ? { tools: this._formatTools(request.tools) } : {}),
-      }, { signal: request.signal });
+      };
+      if (request.thinking) {
+        body.thinking = { type: "adaptive" };
+        const intensity = request.thinkIntensity;
+        let effort = "high";
+        if (intensity === "low" || intensity === "medium" || intensity === "high") effort = intensity;
+        else if (intensity === "x-high" || intensity === "xhigh") effort = "xhigh";
+        else if (intensity === "max") effort = "max";
+        body.output_config = { effort };
+      }
+      const stream = await client.messages.create(body, { signal: request.signal });
 
       for await (const event of stream) {
         switch (event.type) {

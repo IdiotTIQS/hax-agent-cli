@@ -112,12 +112,10 @@ class AnthropicProvider {
     let text = "", usage = null;
 
     try {
-      const stream = await withRetry(() => client.messages.create({
-        model: req.model || this.model, max_tokens: req.maxTokens || this.maxTokens, stream: true,
-        messages: this._toMessages(req.messages || []),
-        ...(req.system ? { system: String(req.system) } : {}),
-        ...(req.tools?.length ? { tools: req.tools } : {}),
-      }, { signal: req.signal }));
+      const stream = await withRetry(() => client.messages.create(
+        this._buildRequestBody(req),
+        { signal: req.signal }
+      ));
 
       for await (const e of stream) {
         if (e.type === "content_block_delta" && e.delta?.type === "text_delta") { text += e.delta.text; yield { type: "text", delta: e.delta.text }; }
@@ -129,6 +127,27 @@ class AnthropicProvider {
     if (usage) yield { type: "usage", inputTokens: usage.input_tokens || 0, outputTokens: usage.output_tokens || 0 };
     const dsml = this._parseDsml(text);
     yield dsml.length ? { type: "tool_uses", toolUses: dsml, text, usage } : { type: "tool_uses", toolUses: [], text, usage };
+  }
+
+  _buildRequestBody(req) {
+    const body = {
+      model: req.model || this.model,
+      max_tokens: req.maxTokens || this.maxTokens,
+      stream: true,
+      messages: this._toMessages(req.messages || []),
+    };
+    if (req.system) body.system = String(req.system);
+    if (req.tools?.length) body.tools = req.tools;
+    if (req.thinking) {
+      body.thinking = { type: "adaptive" };
+      const intensity = req.thinkIntensity;
+      let effort = "high";
+      if (intensity === "low" || intensity === "medium" || intensity === "high") effort = intensity;
+      else if (intensity === "x-high" || intensity === "xhigh") effort = "xhigh";
+      else if (intensity === "max") effort = "max";
+      body.output_config = { effort };
+    }
+    return body;
   }
 
   _toMessages(msgs) { return msgs.map(m => ({ role: m.role, content: m.content })); }
