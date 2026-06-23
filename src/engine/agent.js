@@ -15,37 +15,6 @@ const {
 } = require("./query");
 const { PermissionChecker: CorePermissionChecker, PermissionMode, SENSITIVE_PATH_PATTERNS } = require("../core/permissions/checker");
 
-// === CostTracker ===
-
-const { getPricing, getCost } = require("../pricing");
-
-class CostTracker {
-  constructor() {
-    this.inputTokens = 0;
-    this.outputTokens = 0;
-    this.cacheCreationTokens = 0;
-    this.cacheReadTokens = 0;
-    this.turnCount = 0;
-    this.toolCallCount = 0;
-    this.startTime = Date.now();
-  }
-  addUsage(usage) {
-    if (!usage) return;
-    this.inputTokens += num(usage, "input_tokens", "inputTokens", "prompt_tokens") || 0;
-    this.outputTokens += num(usage, "output_tokens", "outputTokens", "completion_tokens") || 0;
-    this.cacheCreationTokens += num(usage, "cache_creation_input_tokens", "cacheCreationInputTokens") || 0;
-    this.cacheReadTokens += num(usage, "cache_read_input_tokens", "cacheReadInputTokens") || 0;
-    this.turnCount += 1;
-  }
-  addToolCall() { this.toolCallCount += 1; }
-  getCost(model) { return getCost(model, this.inputTokens, this.outputTokens, this.cacheCreationTokens, this.cacheReadTokens); }
-  getPricing(model) { return getPricing(model); }
-}
-
-function num(obj, ...keys) {
-  for (const k of keys) { if (Number.isFinite(obj[k])) return obj[k]; }
-  return 0;
-}
 
 // === Session ===
 
@@ -65,14 +34,12 @@ class Session {
     this.inputTokens = 0; this.outputTokens = 0; this.toolCallCount = 0; this.turnCount = 0;
     this.goal = o.goal || null;
     this._modifiedFiles = new Set();
-    this.costTracker = new CostTracker();
   }
   getStatusLine() {
     const m = this.provider?.model || "?";
-    const cost = this.costTracker.getCost(m);
     const t = this.inputTokens + this.outputTokens;
     const pm = this.permissionManager?.mode || "normal";
-    return `${this.provider?.name || "?"} · ${m} · $${cost.toFixed(4)} · ${t}t · ${this.turnCount} turns · ${pm}`;
+    return `${this.provider?.name || "?"} · ${m} · ${t}t · ${this.turnCount} turns · ${pm}`;
   }
 }
 
@@ -187,7 +154,9 @@ class AgentEngine extends EventEmitter {
     yield { type: "turn.started", sessionId: s.id };
 
     try {
-      yield* this._runToolLoop(opts.system || this._buildSystemPrompt(), s.responseAbortController.signal);
+      const stableSystem = opts.system || this._buildStableSystemPrompt();
+      const hasCustomSystem = !!opts.system;
+      yield* this._runToolLoop(stableSystem, s.responseAbortController.signal, hasCustomSystem);
     } catch (err) {
       if (s.responseInterrupted) yield { type: "turn.interrupted" };
       else yield { type: "turn.failed", error: { message: err.message } };
@@ -199,7 +168,7 @@ class AgentEngine extends EventEmitter {
         const gc = `[goal continuation]\nActive goal: ${s.goal.text}\nContinue working toward the goal. If complete, say GOAL_STATUS: complete.`;
         s.messages.push({ role: "user", content: gc, internal: true });
         s.responseAbortController = new AbortController();
-        try { yield* this._runToolLoop(this._buildSystemPrompt(), s.responseAbortController.signal); }
+        try { yield* this._runToolLoop(this._buildStableSystemPrompt(), s.responseAbortController.signal, false); }
         catch (_) { break; }
         finally { s.responseAbortController = null; }
         const last = s.messages[s.messages.length - 1];
@@ -215,7 +184,7 @@ class AgentEngine extends EventEmitter {
 
   interrupt() { const s = this.session; s.responseInterrupted = true; s.responseAbortController?.abort(); }
 
-  async *_runToolLoop(systemPrompt, signal) {
+  async *_runToolLoop(stableSystem, signal, hasCustomSystem = false) {
     const s = this.session;
     const registry = s.toolRegistry;
     const pm = s.permissionManager;
@@ -224,12 +193,15 @@ class AgentEngine extends EventEmitter {
     let msgs = [...s.messages];
     let ptlRetries = 0;
     const MAX_PTL_RETRIES = 3;
+    // Only inject dynamic reminder for default system prompt path,
+    // and only for Anthropic (allows consecutive user messages safely).
+    const allowReminder = !hasCustomSystem && s.provider?.name === "anthropic";
 
     for (let turn = 0; turn < this.maxToolTurns; turn++) {
       if (signal.aborted) break;
 
       // 每轮注入动态上下文为 system-reminder(不污染稳定 system 前缀)
-      const dynamicReminder = this._buildDynamicContextReminder();
+      const dynamicReminder = allowReminder ? this._buildDynamicContextReminder() : null;
       const msgsWithReminder = dynamicReminder
         ? [...msgs, { role: "user", content: dynamicReminder, internal: true }]
         : msgs;
@@ -242,7 +214,7 @@ class AgentEngine extends EventEmitter {
       try {
         for await (const chunk of s.provider.stream({
           messages: msgsWithReminder,
-          system: this._buildStableSystemPrompt(),
+          system: stableSystem,
           tools: registry?.toApiSchema() || [],
           signal, maxTokens: maxTok,
           thinking: s._thinking || false,
@@ -255,7 +227,7 @@ class AgentEngine extends EventEmitter {
             yield chunk;
           }
           else if (chunk.type === "tool_uses") { toolUses = chunk.toolUses || []; text = chunk.text || text; usage = chunk.usage; }
-          else if (chunk.type === "usage") { usage = chunk; s.inputTokens += chunk.inputTokens || 0; s.outputTokens += chunk.outputTokens || 0; if (s.costTracker) s.costTracker.addUsage(chunk); yield chunk; }
+          else if (chunk.type === "usage") { usage = chunk; s.inputTokens += chunk.inputTokens || 0; s.outputTokens += chunk.outputTokens || 0; yield chunk; }
           else if (chunk.type === "error") {
             // Reactive compaction: if prompt too long, compact and retry
             if (isPromptTooLongError(chunk) && ptlRetries < MAX_PTL_RETRIES) {
@@ -340,7 +312,6 @@ class AgentEngine extends EventEmitter {
         try {
           execResult = await registry.execute(name, input, { root: this.projectRoot, session: s });
           s.toolCallCount++;
-          if (s.costTracker) s.costTracker.addToolCall();
         } catch (err) {
           execResult = { ok: false, error: { code: "EXECUTION_ERROR", message: err.message } };
         }
