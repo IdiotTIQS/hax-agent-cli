@@ -65,3 +65,34 @@ test("请求体绝不包含 budget_tokens、temperature、top_p、top_k", () => 
   assert.equal(body.top_p, undefined);
   assert.equal(body.top_k, undefined);
 });
+
+// -- added by fix
+test("thinkIntensity 'medium' 映射到 effort=medium", () => {
+  const p = new AnthropicProvider({ apiKey: "test" });
+  const body = p._buildRequestBody({
+    messages: [{ role: "user", content: "x" }],
+    thinking: true,
+    thinkIntensity: "medium",
+  });
+  assert.equal(body.output_config.effort, "medium");
+});
+
+test("thinkIntensity 'high' 显式映射到 effort=high", () => {
+  const p = new AnthropicProvider({ apiKey: "test" });
+  const body = p._buildRequestBody({
+    messages: [{ role: "user", content: "x" }],
+    thinking: true,
+    thinkIntensity: "high",
+  });
+  assert.equal(body.output_config.effort, "high");
+});
+
+test("thinkIntensity 'xhigh'(无连字符) 映射到 effort=xhigh", () => {
+  const p = new AnthropicProvider({ apiKey: "test" });
+  const body = p._buildRequestBody({
+    messages: [{ role: "user", content: "x" }],
+    thinking: true,
+    thinkIntensity: "xhigh",
+  });
+  assert.equal(body.output_config.effort, "xhigh");
+});

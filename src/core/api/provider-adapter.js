@@ -123,6 +123,8 @@ class ApiMessageRequest {
     this.maxTokens = o.maxTokens || 8192;
     this.signal = o.signal || null;
     this.metadata = o.metadata || {};
+    this.thinking = o.thinking || false;
+    this.thinkIntensity = o.thinkIntensity || null;
   }
 }
 
