@@ -1,9 +1,23 @@
-const { listMemories, readTranscript } = require('./memory');
+/**
+ * Memory/transcript loading. The legacy synchronous `listMemories` /
+ * `readTranscript` from the former src/memory.js were removed in the
+ * architecture migration; the new src/memory/ store is async with a different
+ * data model and is not a drop-in replacement here. Until context loading is
+ * ported to the new store, these degrade gracefully to empty results — callers
+ * may still pass `memories` / `transcript` in explicitly to supply data.
+ */
+function listMemories(_settings) {
+  return [];
+}
+
+function readTranscript(_sessionId, _settings) {
+  return [];
+}
 
 /**
  * Load prompt context from memories and transcript, building the system prompt
  * and message list for the provider.
- * @param {{ settings: object, memories?: object[], transcript?: object[], sessionId?: string, userPrompt?: string, instructions?: string, runtime?: object }} options
+ * @param {{ settings?: object, memories?: object[], transcript?: object[], sessionId?: string, userPrompt?: string, instructions?: string, runtime?: object }} [options]
  * @returns {{ systemPrompt: string, messages: object[], memories: object[], transcript: object[] }}
  */
 function loadPromptContext(options = {}) {

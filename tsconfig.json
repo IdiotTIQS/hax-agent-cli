@@ -51,18 +51,18 @@
     "src/tasks/**/*.js",
     "src/bridge/**/*.js",
     "src/autopilot/**/*.js",
-    "src/services/*.js"
+    "src/services/**/*.js",
+    "src/commands/**/*.js",
+    "src/swarm/**/*.js",
+    "src/session.js",
+    "src/context.js"
   ],
   "exclude": [
     "node_modules",
     "desktop",
     "dist",
-    "test",
-    // 工作区内有未提交改动的半成品 services 文件
-    "src/services/session-memory.js"
+    "test"
   ]
-  // 暂未纳入 include（待处理，不影响上面已覆盖范围的类型检查）：
-  //  - 半成品（工作区 modified/未跟踪）：cli.js, session.js, commands/,
-  //    sandbox/, tui/, services/session-memory.js
-  //  - 已知真实 bug（缺失模块/导出，需功能修复）：context.js, swarm/in-process.js
+  // 暂未纳入 include（工作区半成品，本次修复范围之外、仍有 pre-existing
+  // 类型问题待其改动落定后处理）：cli.js, sandbox/, tui/
 }

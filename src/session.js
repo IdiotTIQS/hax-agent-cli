@@ -1,5 +1,18 @@
-const { createSessionId } = require('./memory');
-const { createTranslator } = require('./i18n');
+const crypto = require('crypto');
+const { getPricing, getCost: calcCost } = require('./pricing');
+
+/**
+ * Generate a unique, file-safe session id (timestamp + random suffix).
+ * Inlined from the former src/memory.js (removed during the architecture
+ * migration); the new src/memory/ modules don't provide an equivalent.
+ * @param {Date} [date]
+ * @returns {string}
+ */
+function createSessionId(date = new Date()) {
+  const timestamp = date.toISOString().replace(/[:.]/g, '-');
+  const suffix = crypto.randomBytes(4).toString('hex');
+  return `${timestamp}-${suffix}`;
+}
 
 class InputHistory {
   constructor(maxSize = 1000) {
@@ -74,26 +87,6 @@ class CostTracker {
     this.turnCount = 0;
     this.toolCallCount = 0;
     this.startTime = Date.now();
-    this.pricing = {
-      'claude-sonnet-4-20250514': { input: 3.0, output: 15.0, cacheWrite: 3.75, cacheRead: 0.3 },
-      'claude-opus-4-20250514': { input: 15.0, output: 75.0, cacheWrite: 18.75, cacheRead: 1.5 },
-      'claude-opus-4-7': { input: 15.0, output: 75.0, cacheWrite: 18.75, cacheRead: 1.5 },
-      'claude-haiku-3-5-20241022': { input: 0.8, output: 4.0, cacheWrite: 1.0, cacheRead: 0.08 },
-      'claude-3-5-sonnet-20241022': { input: 3.0, output: 15.0, cacheWrite: 3.75, cacheRead: 0.3 },
-      'claude-3-opus-20240229': { input: 15.0, output: 75.0, cacheWrite: 18.75, cacheRead: 1.5 },
-      'claude-sonnet-4-7-20250501': { input: 3.0, output: 15.0, cacheWrite: 3.75, cacheRead: 0.3 },
-      'gpt-4o': { input: 2.5, output: 10.0 },
-      'gpt-4o-mini': { input: 0.15, output: 0.6 },
-      'gpt-4.1': { input: 2.0, output: 8.0 },
-      'gpt-4.1-mini': { input: 0.4, output: 1.6 },
-      'o3-mini': { input: 1.1, output: 4.4 },
-      'gemini-2.5-pro-exp-03-25': { input: 1.25, output: 10.0 },
-      'gemini-2.5-pro-preview-06-05': { input: 1.25, output: 10.0 },
-      'gemini-2.5-flash-preview-04-17': { input: 0.15, output: 0.6 },
-      'gemini-2.5-flash-preview-05-20': { input: 0.15, output: 0.6 },
-      'gemini-2.0-flash': { input: 0.1, output: 0.4 },
-      'gemini-2.0-flash-lite': { input: 0.075, output: 0.3 },
-    };
   }
 
   addUsage(usage, model) {
@@ -110,39 +103,11 @@ class CostTracker {
   }
 
   getCost(model) {
-    const p = this.getPricing(model);
-    if (!p) return 0;
-    const inputCost = (this.inputTokens / 1_000_000) * p.input;
-    const outputCost = (this.outputTokens / 1_000_000) * p.output;
-    const cacheWriteCost = p.cacheWrite ? (this.cacheCreationTokens / 1_000_000) * p.cacheWrite : 0;
-    const cacheReadCost = p.cacheRead ? (this.cacheReadTokens / 1_000_000) * p.cacheRead : 0;
-    return inputCost + outputCost + cacheWriteCost + cacheReadCost;
+    return calcCost(model, this.inputTokens, this.outputTokens, this.cacheCreationTokens, this.cacheReadTokens);
   }
 
   getPricing(model) {
-    const key = String(model || '').toLowerCase();
-    if (this.pricing[key]) return this.pricing[key];
-
-    // Priority-ordered fallback patterns
-    const FALLBACKS = [
-      [/claude.*opus/,        'claude-opus-4-7'],
-      [/claude.*haiku/,       'claude-haiku-3-5-20241022'],
-      [/claude.*sonnet/,      'claude-sonnet-4-20250514'],
-      [/gpt-4\.1.*mini/,      'gpt-4.1-mini'],
-      [/gpt-4\.1/,            'gpt-4.1'],
-      [/gpt-4o.*mini/,        'gpt-4o-mini'],
-      [/gpt-4o/,              'gpt-4o'],
-      [/o3.*mini/,            'o3-mini'],
-      [/gemini-2\.5.*pro/,    'gemini-2.5-pro-preview-06-05'],
-      [/gemini-2\.5.*flash/,  'gemini-2.5-flash-preview-05-20'],
-      [/gemini-2\.0.*flash.*lite/, 'gemini-2.0-flash-lite'],
-      [/gemini-2\.0.*flash/,  'gemini-2.0-flash'],
-    ];
-
-    for (const [pattern, pricingKey] of FALLBACKS) {
-      if (pattern.test(key)) return this.pricing[pricingKey];
-    }
-    return null;
+    return getPricing(model);
   }
 
   formatSummary(model) {
@@ -197,6 +162,8 @@ class Session {
     this.modifiedFiles = new Set();
     this.goal = null;
     this.pluginRegistry = options.pluginRegistry || null;
+    /** @type {{ inputTokens: number, budgetTokens: number } | null} */
+    this.contextStats = null;
   }
 
   getElapsedTime() {
@@ -207,7 +174,6 @@ class Session {
   }
 
   getStatusLine() {
-    const t = createTranslator(this.settings?.ui?.locale);
     const provider = this.provider?.name || 'provider';
     const model = this.provider?.model || 'model';
     const cost = this.costTracker.getCost(model);
@@ -217,7 +183,7 @@ class Session {
     let permMode = '';
     if (this.permissionManager) {
       const mode = this.permissionManager.mode;
-      const modeLabel = mode === 'yolo' ? 'YOLO' : t('common.mode.standard');
+      const modeLabel = mode === 'yolo' ? 'YOLO' : 'Standard';
       const modeColor = mode === 'yolo' ? '\x1B[93m' : '\x1B[92m';
       permMode = ` · ${modeColor}${modeLabel}\x1B[0m`;
     }

@@ -1,7 +1,7 @@
 "use strict";
 /** In-process teammate execution backend. Ported from OpenHarness swarm/in_process.py */
 const { TaskType, TaskStatus, SpawnResult, BackendType } = require("./types");
-const { TeammateMailbox, createIdleNotification } = require("./mailbox");
+const { TeammateMailbox } = require("./mailbox");
 
 class TeammateAbortController {
   constructor() { this._aborted = false; this._forceAborted = false; this.signal = { get aborted() { return false; } }; }

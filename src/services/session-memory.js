@@ -1,7 +1,7 @@
 "use strict";
 
 /**
- * Session Memory — save and restore session snapshots.
+ * Session Memory - save and restore session snapshots.
  * Ported from OpenHarness services/session_memory/
  *
  * Captures session state (messages, tool calls, stats) to disk
@@ -25,7 +25,7 @@ class SessionSnapshot {
     this.messages = o.messages || [];
     this.goal = o.goal || null;
     this.provider = o.provider || null;
-    this.permissionMode = o.permissionMode || "default";
+    this.permissionMode = o.permissionMode || "normal";
     this.modifiedFiles = o.modifiedFiles || [];
     this.metadata = o.metadata || {};
   }
@@ -61,7 +61,8 @@ class SessionSnapshot {
 class SessionMemoryStore {
   /**
    * @param {Object} options
-   * @param {string} [options.memoryDir] — base directory for memory storage
+   * @param {string} [options.memoryDir] - base directory for memory storage
+   * @param {number} [options.maxSnapshots] - max snapshots to retain
    */
   constructor(options = {}) {
     this._memoryDir = options.memoryDir || path.join(os.homedir(), ".haxagent", "memory");
@@ -71,7 +72,7 @@ class SessionMemoryStore {
 
   /**
    * Save a session snapshot to disk.
-   * @param {Session|Object} session — session object with id, messages, etc.
+   * @param {Object} session - session object with id, messages, etc.
    * @returns {string} path to saved snapshot
    */
   saveSnapshot(session) {
@@ -89,7 +90,7 @@ class SessionMemoryStore {
       messages: session.messages || [],
       goal: session.goal || null,
       provider: session.provider?.model || null,
-      permissionMode: session.permissionManager?.mode || "default",
+      permissionMode: session.permissionManager?.mode || "normal",
       modifiedFiles: session._modifiedFiles ? [...session._modifiedFiles] : [],
       metadata: {
         savedAt: new Date().toISOString(),
@@ -110,7 +111,7 @@ class SessionMemoryStore {
 
   /**
    * Load a session snapshot from disk.
-   * @param {string} filePath — path to snapshot file
+   * @param {string} filePath - path to snapshot file
    * @returns {SessionSnapshot|null}
    */
   loadSnapshot(filePath) {

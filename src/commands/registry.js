@@ -157,7 +157,7 @@ register("yolo", (_, ctx) => {
   const pm = ctx.session.permissionManager;
   if (pm) {
     pm.mode = pm.mode === PermissionMode.YOLO ? PermissionMode.DEFAULT : PermissionMode.YOLO;
-    _saveSetting("permissions", "mode", pm.mode);
+    _persist("permissions", pm.mode, "mode");
     ctx.screen.write(`${styled(THEME.warning, "Permission: " + pm.mode.toUpperCase())}\n`);
   }
   ctx.rl?.prompt?.();
@@ -285,12 +285,18 @@ register("lsp", async (args, ctx) => {
 register("cost", (_, ctx) => {
   const s = ctx.session;
   const input = s.inputTokens; const output = s.outputTokens;
-  const anthroCost = ((input * 3 + output * 15) / 1000000);
-  ctx.screen.write(`  Input:  ${input.toLocaleString()} tokens\n`);
-  ctx.screen.write(`  Output: ${output.toLocaleString()} tokens\n`);
-  ctx.screen.write(`  Total:  ${(input + output).toLocaleString()} tokens\n`);
-  ctx.screen.write(`  Cost:   ~$${anthroCost.toFixed(4)} (Anthropic pricing)\n`);
-  ctx.screen.write(`  Turns:  ${s.turnCount} · Tools: ${s.toolCallCount}\n`);
+  const model = s.provider?.model || "?";
+  const cost = s.costTracker ? s.costTracker.getCost(model) : 0;
+  const pricing = s.costTracker ? s.costTracker.getPricing(model) : null;
+  const source = pricing ? `${s.provider?.name || "unknown"} pricing` : "no pricing data";
+  ctx.screen.write(`  Provider: ${s.provider?.name || "?"} / ${model}\n`);
+  ctx.screen.write(`  Input:    ${input.toLocaleString()} tokens\n`);
+  ctx.screen.write(`  Output:   ${output.toLocaleString()} tokens\n`);
+  ctx.screen.write(`  Total:    ${(input + output).toLocaleString()} tokens\n`);
+  if (s.cacheCreationTokens > 0) ctx.screen.write(`  Cache write: ${s.cacheCreationTokens.toLocaleString()} tokens\n`);
+  if (s.cacheReadTokens > 0) ctx.screen.write(`  Cache read:  ${s.cacheReadTokens.toLocaleString()} tokens\n`);
+  ctx.screen.write(`  Cost:     ~$${cost.toFixed(4)} (${source})\n`);
+  ctx.screen.write(`  Turns:    ${s.turnCount} · Tools: ${s.toolCallCount}\n`);
   ctx.rl?.prompt?.();
 }, "Show cost and usage breakdown");
 
@@ -433,6 +439,36 @@ register("permissions", (args, ctx) => {
   ctx.rl?.prompt?.();
 }, "Manage tool permissions");
 
+register("sandbox", (args, ctx) => {
+  const s = ctx.session;
+  if (args[0] === "on" || args[0] === "enable") {
+    if (s.sandbox) { ctx.screen.write(`${styled(THEME.info, "Sandbox already running (" + s.sandbox.backend + ")")}\n`); }
+    else {
+      const { SandboxAdapter } = require("../sandbox/adapter");
+      const settings = require("../config/settings").loadSettings();
+      s.sandbox = new SandboxAdapter({ backend: settings.sandbox?.backend || "docker", image: settings.sandbox?.image || "node:18-alpine", network: settings.sandbox?.network || "none", cpus: settings.sandbox?.cpus || 2, memory: settings.sandbox?.memory || "512m", hostDir: process.cwd() });
+      s.sandbox.start().then(() => {
+        ctx.screen.write(`${styled(THEME.success, "Sandbox started (" + s.sandbox.backend + ")")}\n`);
+        ctx.rl?.prompt?.();
+      }).catch((err) => {
+        ctx.screen.write(`${styled(THEME.error, "Sandbox failed: " + err.message)}\n`);
+        s.sandbox = null;
+        ctx.rl?.prompt?.();
+      });
+      return;
+    }
+  } else if (args[0] === "off" || args[0] === "disable") {
+    if (s.sandbox) { s.sandbox.stop(); s.sandbox = null; ctx.screen.write(`${styled(THEME.success, "Sandbox stopped")}\n`); }
+    else { ctx.screen.write(`${styled(THEME.info, "Sandbox is not running")}\n`); }
+  } else {
+    const running = s.sandbox?.isRunning;
+    const backend = s.sandbox?.backend || "none";
+    ctx.screen.write(`${styled(THEME.info, `Sandbox: ${running ? "running (" + backend + ")" : "disabled"}`)}\n`);
+    ctx.screen.write(`  Usage: /sandbox [on|off]\n`);
+  }
+  ctx.rl?.prompt?.();
+}, "Docker sandbox isolation for shell commands");
+
 register("providers", (_, ctx) => {
   const { listProviders } = require("../api/provider");
   const providers = listProviders();
@@ -474,7 +510,5 @@ register("personalize", (_, ctx) => {
 
 // Load extended commands
 require("./extended-commands")(register, styled, THEME, ANSI);
-
-module.exports = { register, execute, commands };
 
 module.exports = { register, execute, commands };
