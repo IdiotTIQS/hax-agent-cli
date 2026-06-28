@@ -12,8 +12,22 @@ const path = require("path");
 const SKIP = new Set([".git", "node_modules", ".venv", "venv", "__pycache__", ".hax-agent"]);
 const EXT_MAP = { ".js": "js", ".mjs": "js", ".cjs": "js", ".jsx": "js", ".ts": "ts", ".tsx": "ts", ".py": "python", ".pyw": "python" };
 
+/**
+ * A parsed code symbol (class/function). Named `Symbol` for the public API;
+ * fields are declared here so checkJs does not confuse it with the builtin Symbol.
+ */
 class Symbol {
-  constructor(o) { Object.assign(this, o); }
+  /**
+   * @param {{ name: string, kind: string, path: string, line: number, signature: string }} o
+   */
+  constructor(o) {
+    /** @type {string} */ this.name = o.name;
+    /** @type {string} */ this.kind = o.kind;
+    /** @type {string} */ this.path = o.path;
+    /** @type {number} */ this.line = o.line;
+    /** @type {string} */ this.signature = o.signature;
+    Object.assign(this, o);
+  }
 }
 
 function detectLanguage(fp) { return EXT_MAP[path.extname(String(fp)).toLowerCase()] || "text"; }
@@ -51,10 +65,22 @@ function _pySymbols(code, fp) {
   return syms;
 }
 
-function goToDefinition(root, symbol) {
+/**
+ * Find symbol definitions across the workspace.
+ * @param {string} root - workspace root
+ * @param {string} symbol - symbol name to find
+ * @param {string|null} [file] - optional file path filter (only return defs in this file)
+ * @param {number|null} [line] - optional source line hint (reserved; not yet used for ranking)
+ * @returns {Symbol[]}
+ */
+function goToDefinition(root, symbol, file = null, line = null) {
   if (!symbol) return [];
   const results = [];
-  for (const f of iterFiles(root)) for (const s of listSymbols(f)) if (s.name === symbol) results.push(s);
+  const fileFilter = file ? String(file).replace(/\\/g, "/") : null;
+  for (const f of iterFiles(root)) {
+    if (fileFilter && !f.replace(/\\/g, "/").endsWith(fileFilter)) continue;
+    for (const s of listSymbols(f)) if (s.name === symbol) results.push(s);
+  }
   return results;
 }
 

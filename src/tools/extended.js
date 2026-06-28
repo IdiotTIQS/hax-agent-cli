@@ -62,9 +62,9 @@ const agentTool = {
       var cmd = '"' + process.execPath + '" "' + cliPath + '" --batch "' + escaped + '"';
       var timeout = Math.min(args.maxTurns || 10, 20) * 60000;
 
-      var stdout = require("child_process").execSync(cmd, {
+      var stdout = require("child_process").execSync(cmd, /** @type {any} */ ({
         cwd: ctx.root, timeout: timeout, encoding: "utf-8", maxBuffer: 500 * 1024, shell: true,
-      }).trim().slice(0, 30000);
+      })).trim().slice(0, 30000);
 
       return { ok: true, data: { agentId: id, description: desc, output: stdout, status: "completed" } };
     } catch (err) {
@@ -123,7 +123,7 @@ const taskCreateTool = {
     properties: {
       prompt: { type: "string" },
       model: { type: "string" },
-      permissionMode: { type: "string", default: "default" },
+      permissionMode: { type: "string", default: "normal" },
     },
   },
   async execute(args, ctx) {
@@ -259,9 +259,9 @@ const exitPlanModeTool = {
     if (pm) {
       const { PermissionMode } = require("../engine/agent");
       pm.mode = PermissionMode.DEFAULT;
-      return { ok: true, data: { mode: "default", message: "Exited plan mode. Tools restored." } };
+      return { ok: true, data: { mode: "normal", message: "Exited plan mode. Tools restored." } };
     }
-    return { ok: true, data: { mode: "default" } };
+    return { ok: true, data: { mode: "normal" } };
   },
   isReadOnly: () => true,
 };

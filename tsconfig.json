@@ -26,7 +26,8 @@
   "include": [
     "src/core/**/*.js",
     "src/api/**/*.js",
-    "src/engine/**/*.js"
+    "src/engine/**/*.js",
+    "src/tools/**/*.js"
   ],
   "exclude": [
     "node_modules",

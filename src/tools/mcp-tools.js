@@ -272,7 +272,7 @@ async function _listResources(manager, serverName, info) {
       headers: { "Content-Type": "application/json", ...info._httpClient.headers },
       body: JSON.stringify(request),
     });
-    const data = await r.json();
+    const data = /** @type {any} */ (await r.json());
     return (data?.resources || []).map((r) => ({
       uri: r.uri,
       name: r.name || r.uri,
@@ -304,7 +304,7 @@ async function _readResource(manager, serverName, info, uri) {
       headers: { "Content-Type": "application/json", ...info._httpClient.headers },
       body: JSON.stringify(request),
     });
-    const data = await r.json();
+    const data = /** @type {any} */ (await r.json());
     if (data?.error) throw new Error(data.error.message);
     return data?.contents || data;
   }

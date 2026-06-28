@@ -3,6 +3,7 @@
 const fs = require("fs");
 const path = require("path");
 const { extendedTools } = require("./extended");
+const { validateWorkspacePath, isSensitivePath } = require("../sandbox/path-validator");
 
 class ToolRegistry {
   constructor(o = {}) { this.root = path.resolve(o.root || process.cwd()); this._tools = new Map(); }
@@ -23,6 +24,13 @@ function resolvePath(root, p) {
   throw new Error("Path outside workspace: " + p);
 }
 function requireString(v, name) { if (typeof v !== "string" || !v.trim()) throw new Error(`${name} is required`); return v.trim(); }
+function _stripHtml(s) { return String(s || "").replace(/<[^>]+>/g, "").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#x27;/g, "'").replace(/&nbsp;/g, " ").trim(); }
+function _cleanDdgUrl(u) {
+  // DuckDuckGo wraps URLs in a redirect; extract the actual URL
+  const m = /[?&]uddg=([^&]+)/.exec(u);
+  if (m) return decodeURIComponent(m[1]);
+  return u;
+}
 
 // === All Tools ===
 const tools = {
@@ -77,7 +85,9 @@ const tools = {
     name: "file.write", description: "Write content to a file. Overwrites by default.",
     inputSchema: { type: "object", required: ["path", "content"], properties: { path: { type: "string" }, content: { type: "string" }, overwrite: { type: "boolean", default: true } } },
     async execute(args, ctx) {
-      const fp = resolvePath(ctx.root, requireString(args.path, "path"));
+      const targetPath = requireString(args.path, "path");
+      if (isSensitivePath(targetPath)) throw new Error("Access denied: sensitive path");
+      const fp = resolvePath(ctx.root, targetPath);
       const dir = path.dirname(fp);
       if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
       const existed = fs.existsSync(fp);
@@ -92,7 +102,9 @@ const tools = {
     name: "file.edit", description: "Edit a file by finding and replacing text.",
     inputSchema: { type: "object", required: ["path", "old_string", "new_string"], properties: { path: { type: "string" }, old_string: { type: "string" }, new_string: { type: "string" }, replace_all: { type: "boolean", default: false } } },
     async execute(args, ctx) {
-      const fp = resolvePath(ctx.root, requireString(args.path, "path"));
+      const targetPath = requireString(args.path, "path");
+      if (isSensitivePath(targetPath)) throw new Error("Access denied: sensitive path");
+      const fp = resolvePath(ctx.root, targetPath);
       if (!fs.existsSync(fp)) throw new Error("File not found: " + args.path);
       let content = fs.readFileSync(fp, "utf-8");
       const old = args.old_string, nw = args.new_string;
@@ -110,7 +122,9 @@ const tools = {
     name: "file.delete", description: "Delete a file (moves to .hax-agent/trash by default).",
     inputSchema: { type: "object", required: ["path"], properties: { path: { type: "string" }, permanent: { type: "boolean", default: false } } },
     async execute(args, ctx) {
-      const fp = resolvePath(ctx.root, requireString(args.path, "path"));
+      const targetPath = requireString(args.path, "path");
+      if (isSensitivePath(targetPath)) throw new Error("Access denied: sensitive path");
+      const fp = resolvePath(ctx.root, targetPath);
       if (!fs.existsSync(fp)) throw new Error("File not found");
       const stat = fs.statSync(fp);
       if (args.permanent) { fs.unlinkSync(fp); }
@@ -139,8 +153,22 @@ const tools = {
     name: "shell.run", description: "Run a shell command with optional arguments.",
     inputSchema: { type: "object", required: ["command"], properties: { command: { type: "string" }, args: { type: "array", items: { type: "string" } }, cwd: { type: "string" }, timeoutMs: { type: "number", default: 30000 } } },
     async execute(args, ctx) {
-      const { execSync } = require("child_process");
       var cmd = [args.command, ...(args.args || [])].filter(Boolean).join(" ");
+      var sandbox = ctx.session?.sandbox;
+
+      // Use sandbox if available and running
+      if (sandbox && sandbox.isRunning) {
+        try {
+          var result = await sandbox.execAsync(cmd, { timeoutMs: args.timeoutMs || 30000 });
+          if (result.exitCode === 0) return { ok: true, data: { command: cmd, stdout: result.stdout, stderr: result.stderr, exitCode: 0 } };
+          else return { ok: false, error: { code: "SHELL_ERROR", message: `Exit code ${result.exitCode}`, stdout: result.stdout, stderr: result.stderr, exitCode: result.exitCode } };
+        } catch (err) {
+          return { ok: false, error: { code: "SANDBOX_ERROR", message: err.message } };
+        }
+      }
+
+      // Fallback: direct execution
+      const { execSync } = require("child_process");
       // Windows: convert common Unix commands
       if (process.platform === "win32") {
         if (/^(tail|head|grep|awk|sed)\s/.test(cmd)) {
@@ -148,7 +176,7 @@ const tools = {
         }
       }
       try {
-        const stdout = execSync(cmd, { cwd: args.cwd || ctx.root, timeout: args.timeoutMs || 30000, maxBuffer: 1024 * 1024, encoding: "utf-8", shell: true });
+        const stdout = execSync(cmd, /** @type {any} */ ({ cwd: args.cwd || ctx.root, timeout: args.timeoutMs || 30000, maxBuffer: 1024 * 1024, encoding: "utf-8", shell: true }));
         return { ok: true, data: { command: cmd, stdout, stderr: "", exitCode: 0 } };
       } catch (err) {
         return { ok: false, error: { code: "SHELL_ERROR", message: err.message, stdout: err.stdout || "", stderr: err.stderr || "", exitCode: err.status || 1 } };
@@ -176,10 +204,72 @@ const tools = {
   },
 
   "web.search": {
-    name: "web.search", description: "Search the web (requires search API key).",
-    inputSchema: { type: "object", required: ["query"], properties: { query: { type: "string" } } },
+    name: "web.search", description: "Search the web using DuckDuckGo (no API key needed).",
+    inputSchema: { type: "object", required: ["query"], properties: { query: { type: "string" }, maxResults: { type: "number", default: 8 } } },
     async execute(args) {
-      return { ok: true, data: { query: args.query, results: [{ title: "Web search requires API key", url: "", snippet: "Configure search API in settings." }], note: "Search API not configured. Set web.search.apiKey in settings." } };
+      const query = requireString(args.query, "query");
+      const maxResults = args.maxResults || 8;
+
+      try {
+        // Use DuckDuckGo HTML endpoint (no API key required)
+        const url = "https://html.duckduckgo.com/html/?q=" + encodeURIComponent(query);
+        const resp = await fetch(url, {
+          headers: {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+            "Accept": "text/html",
+          },
+        });
+        const html = await resp.text();
+
+        // Parse search results from DuckDuckGo HTML
+        const results = [];
+        // Match result blocks: <a class="result__a" href="...">title</a> + <a class="result__snippet">snippet</a>
+        const linkRegex = /<a[^>]+class="result__a"[^>]*href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/gi;
+        const snippetRegex = /<a[^>]+class="result__snippet"[^>]*>([\s\S]*?)<\/a>/gi;
+
+        const links = [];
+        let match;
+        while ((match = linkRegex.exec(html)) !== null) {
+          links.push({
+            url: _cleanDdgUrl(match[1]),
+            title: _stripHtml(match[2]),
+          });
+        }
+
+        const snippets = [];
+        while ((match = snippetRegex.exec(html)) !== null) {
+          snippets.push(_stripHtml(match[1]));
+        }
+
+        for (let i = 0; i < Math.min(links.length, maxResults); i++) {
+          results.push({
+            title: links[i].title,
+            url: links[i].url,
+            snippet: snippets[i] || "",
+          });
+        }
+
+        if (results.length === 0) {
+          // Fallback: try parsing from result__body blocks
+          const bodyRegex = /<div[^>]+class="result__body"[^>]*>([\s\S]*?)<\/div>/gi;
+          while ((match = bodyRegex.exec(html)) !== null && results.length < maxResults) {
+            const block = match[1];
+            const aMatch = /<a[^>]+href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/.exec(block);
+            const sMatch = /<a[^>]+class="result__snippet"[^>]*>([\s\S]*?)<\/a>/.exec(block);
+            if (aMatch) {
+              results.push({
+                title: _stripHtml(aMatch[2]),
+                url: _cleanDdgUrl(aMatch[1]),
+                snippet: sMatch ? _stripHtml(sMatch[1]) : "",
+              });
+            }
+          }
+        }
+
+        return { ok: true, data: { query, results, count: results.length } };
+      } catch (err) {
+        return { ok: false, error: { code: "SEARCH_ERROR", message: err.message } };
+      }
     },
     isReadOnly: () => true,
   },
