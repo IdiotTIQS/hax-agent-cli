@@ -27,7 +27,8 @@
     "src/core/**/*.js",
     "src/api/**/*.js",
     "src/engine/**/*.js",
-    "src/tools/**/*.js"
+    "src/tools/**/*.js",
+    "src/auth/**/*.js"
   ],
   "exclude": [
     "node_modules",
