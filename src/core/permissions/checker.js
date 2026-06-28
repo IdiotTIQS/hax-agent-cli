@@ -19,7 +19,7 @@ const path = require("path");
 // === Permission Modes ===
 
 const PermissionMode = {
-  DEFAULT: "default",
+  DEFAULT: "normal",
   PLAN: "plan",
   FULL_AUTO: "full_auto",
   YOLO: "yolo",
