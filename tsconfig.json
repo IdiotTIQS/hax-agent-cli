@@ -1,0 +1,36 @@
+{
+  // 类型护栏配置：仅做类型检查，不产出编译文件。
+  // 运行方式不变 —— 仍然 node src/cli.js 直接跑源码。
+  "compilerOptions": {
+    // allowJs+checkJs：用 JSDoc 校验 .js，无需把文件改成 .ts
+    "allowJs": true,
+    "checkJs": true,
+    "noEmit": true,
+
+    // 匹配项目实际运行环境：Node>=18 + CommonJS，不改模块系统
+    "target": "ES2022",
+    "module": "CommonJS",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2022"],
+    "types": ["node"],
+
+    // 渐进策略：首批不开 strict，先暴露明显类型错误，后续逐步收紧
+    "strict": false,
+    "noImplicitAny": false,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true
+  },
+  // 首批仅覆盖 core 和 api（多 Provider 适配层，最易出运行时错误处）
+  "include": [
+    "src/core/**/*.js",
+    "src/api/**/*.js"
+  ],
+  "exclude": [
+    "node_modules",
+    "desktop",
+    "dist",
+    "test"
+  ]
+}

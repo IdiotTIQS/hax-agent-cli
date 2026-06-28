@@ -1,7 +1,7 @@
 "use strict";
 
 /**
- * Standardized Message Types — ported from OpenHarness engine/messages.py
+ * Standardized Message Types - ported from OpenHarness engine/messages.py
  *
  * Provides typed message models (StandardMessage, ContentBlock discriminated unions)
  * and stream event types. Eliminates the "plain JS object" gap vs OpenHarness's
@@ -19,7 +19,7 @@ const ContentBlockType = {
 };
 
 /**
- * TextBlock — plain text content
+ * TextBlock - plain text content
  * @typedef {Object} TextBlock
  * @property {"text"} type
  * @property {string} text
@@ -29,12 +29,12 @@ function createTextBlock(text) {
 }
 
 /**
- * ImageBlock — base64-encoded image
+ * ImageBlock - base64-encoded image
  * @typedef {Object} ImageBlock
  * @property {"image"} type
- * @property {string} source_type — "base64"
- * @property {string} media_type — e.g. "image/png"
- * @property {string} data — base64-encoded data
+ * @property {string} source_type - "base64"
+ * @property {string} media_type - e.g. "image/png"
+ * @property {string} data - base64-encoded data
  */
 function createImageBlock(base64Data, mediaType = "image/png") {
   return {
@@ -46,24 +46,24 @@ function createImageBlock(base64Data, mediaType = "image/png") {
 }
 
 /**
- * ToolUseBlock — LLM requests a tool call
+ * ToolUseBlock - LLM requests a tool call
  * @typedef {Object} ToolUseBlock
  * @property {"tool_use"} type
- * @property {string} id — unique tool_use ID
- * @property {string} name — tool name
- * @property {Object} input — tool arguments
+ * @property {string} id - unique tool_use ID
+ * @property {string} name - tool name
+ * @property {Object} input - tool arguments
  */
 function createToolUseBlock(id, name, input = {}) {
   return { type: ContentBlockType.TOOL_USE, id, name, input };
 }
 
 /**
- * ToolResultBlock — result from a tool execution
+ * ToolResultBlock - result from a tool execution
  * @typedef {Object} ToolResultBlock
  * @property {"tool_result"} type
- * @property {string} tool_use_id — matches ToolUseBlock.id
- * @property {string} content — result text
- * @property {boolean} [is_error] — whether the tool call failed
+ * @property {string} tool_use_id - matches ToolUseBlock.id
+ * @property {string} content - result text
+ * @property {boolean} [is_error] - whether the tool call failed
  */
 function createToolResultBlock(toolUseId, content, isError = false) {
   return {
@@ -75,10 +75,10 @@ function createToolResultBlock(toolUseId, content, isError = false) {
 }
 
 /**
- * ThinkingBlock — reasoning/thinking content (Claude extended thinking)
+ * ThinkingBlock - reasoning/thinking content (Claude extended thinking)
  * @typedef {Object} ThinkingBlock
  * @property {"thinking"} type
- * @property {string} thinking — reasoning content
+ * @property {string} thinking - reasoning content
  */
 function createThinkingBlock(thinking) {
   return { type: ContentBlockType.THINKING, thinking: String(thinking) };
@@ -93,16 +93,15 @@ const MessageRole = {
 };
 
 /**
- * StandardMessage — typed conversation message
+ * StandardMessage - typed conversation message
  *
  * Mirrors OpenHarness's ConversationMessage(BaseModel):
  * - role: "user" | "assistant"
  * - content: list[ContentBlock] (discriminated by type)
  *
- * @typedef {Object} StandardMessage
  * @property {"user"|"assistant"} role
  * @property {Array<TextBlock|ImageBlock|ToolUseBlock|ToolResultBlock|ThinkingBlock>} content
- * @property {Object} [metadata] — optional metadata (model, usage, timestamp)
+ * @property {Object} [metadata] - optional metadata (model, usage, timestamp)
  */
 class StandardMessage {
   constructor(o = {}) {

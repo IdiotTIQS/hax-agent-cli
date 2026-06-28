@@ -1,7 +1,7 @@
 "use strict";
 
 /**
- * Provider Adapter — unified protocol for streaming LLM providers.
+ * Provider Adapter - unified protocol for streaming LLM providers.
  * Ported from OpenHarness api/client.py (SupportsStreamingMessages protocol).
  *
  * Decouples the Agent Loop from specific provider implementations.
@@ -15,14 +15,14 @@
  *     └── Custom Adapters...
  *
  * Stream returns ApiStreamEvent objects:
- *   - ApiTextDeltaEvent       — text chunk
- *   - ApiThinkingDeltaEvent   — thinking/reasoning content
- *   - ApiToolUseStartEvent    — tool call begins
- *   - ApiToolUseDeltaEvent    — tool input chunk
- *   - ApiMessageCompleteEvent — final message with all tool_uses
- *   - ApiErrorEvent           — error occurred
- *   - ApiRetryEvent           — retrying after error
- *   - ApiUsageEvent           — token usage info
+ *   - ApiTextDeltaEvent       - text chunk
+ *   - ApiThinkingDeltaEvent   - thinking/reasoning content
+ *   - ApiToolUseStartEvent    - tool call begins
+ *   - ApiToolUseDeltaEvent    - tool input chunk
+ *   - ApiMessageCompleteEvent - final message with all tool_uses
+ *   - ApiErrorEvent           - error occurred
+ *   - ApiRetryEvent           - retrying after error
+ *   - ApiUsageEvent           - token usage info
  */
 
 const EventEmitter = require("events");
@@ -61,10 +61,10 @@ class ApiToolUseDeltaEvent {
 class ApiMessageCompleteEvent {
   /**
    * @param {Object} options
-   * @param {Object[]} [options.toolUses] — [{ id, name, input }]
-   * @param {string} [options.text] — accumulated text
-   * @param {string} [options.stopReason] — "end_turn" | "max_tokens" | "tool_use" | "stop_sequence"
-   * @param {Object} [options.usage] — { inputTokens, outputTokens }
+   * @param {Object[]} [options.toolUses] - [{ id, name, input }]
+   * @param {string} [options.text] - accumulated text
+   * @param {string} [options.stopReason] - "end_turn" | "max_tokens" | "tool_use" | "stop_sequence"
+   * @param {Object} [options.usage] - { inputTokens, outputTokens }
    */
   constructor(o = {}) {
     this.type = ApiStreamEventType.MESSAGE_COMPLETE;
@@ -104,16 +104,21 @@ class ApiUsageEvent {
 
 // === API Message Request ===
 
+/**
+ * Union of all stream event types yielded by streamMessage().
+ * @typedef {ApiTextDeltaEvent|ApiThinkingDeltaEvent|ApiToolUseStartEvent|ApiToolUseDeltaEvent|ApiMessageCompleteEvent|ApiErrorEvent|ApiRetryEvent|ApiUsageEvent} ApiStreamEvent
+ */
+
 class ApiMessageRequest {
   /**
    * @param {Object} options
-   * @param {string} [options.model] — model name
-   * @param {Object[]} options.messages — conversation messages
-   * @param {string} [options.system] — system prompt
-   * @param {Object[]} [options.tools] — tool definitions [{ name, description, input_schema }]
-   * @param {number} [options.maxTokens] — max completion tokens
-   * @param {AbortSignal} [options.signal] — abort signal
-   * @param {Object} [options.metadata] — extra metadata for the request
+   * @param {string} [options.model] - model name
+   * @param {Object[]} options.messages - conversation messages
+   * @param {string} [options.system] - system prompt
+   * @param {Object[]} [options.tools] - tool definitions [{ name, description, input_schema }]
+   * @param {number} [options.maxTokens] - max completion tokens
+   * @param {AbortSignal} [options.signal] - abort signal
+   * @param {Object} [options.metadata] - extra metadata for the request
    */
   constructor(o = {}) {
     this.model = o.model || null;
@@ -149,7 +154,7 @@ class ProviderAdapter {
    * Must be implemented by subclasses.
    *
    * @param {ApiMessageRequest} request
-   * @yields {ApiStreamEvent}
+   * @returns {AsyncGenerator<ApiStreamEvent, void, unknown>}
    */
   async *streamMessage(request) {
     throw new Error("ProviderAdapter.streamMessage() must be implemented by subclass");
@@ -202,7 +207,7 @@ class AnthropicProviderAdapter extends ProviderAdapter {
       return;
     }
 
-    const Anthropic = require("@anthropic-ai/sdk").default || require("@anthropic-ai/sdk");
+    const Anthropic = /** @type {any} */ (require("@anthropic-ai/sdk").default || require("@anthropic-ai/sdk"));
     const client = new Anthropic({ apiKey: this.apiKey, baseURL: this.apiUrl });
 
     const model = request.model || this.model;
@@ -214,6 +219,7 @@ class AnthropicProviderAdapter extends ProviderAdapter {
     const toolUseMap = new Map(); // id → { name, input: "" }
 
     try {
+      /** @type {any} */
       const body = {
         model,
         max_tokens: maxTokens,
@@ -373,7 +379,7 @@ class OpenAIProviderAdapter extends ProviderAdapter {
       return;
     }
 
-    const OpenAI = require("openai").default || require("openai");
+    const OpenAI = /** @type {any} */ (require("openai").default || require("openai"));
     const client = new OpenAI({ apiKey: this.apiKey, baseURL: this.apiUrl });
 
     const model = request.model || this.model;
@@ -508,12 +514,13 @@ class OpenAIProviderAdapter extends ProviderAdapter {
 /**
  * Create a provider adapter from configuration.
  *
- * @param {Object} config
- * @param {string} config.provider — provider name (anthropic, openai, deepseek, etc.)
- * @param {string} [config.apiKey] — API key
- * @param {string} [config.apiUrl] — API base URL
- * @param {string} [config.model] — model name
- * @param {Object} [env] — environment variables (defaults to process.env)
+ * @param {Object} [config]
+ * @param {string} [config.provider] - provider name (anthropic, openai, deepseek, etc.); falls back to HAX_AGENT_PROVIDER env or "anthropic"
+ * @param {string} [config.apiKey] - API key
+ * @param {string} [config.apiUrl] - API base URL
+ * @param {string} [config.model] - model name
+ * @param {number} [config.maxTokens] - max completion tokens
+ * @param {Object} [env] - environment variables (defaults to process.env)
  * @returns {ProviderAdapter}
  */
 function createProviderAdapter(config = {}, env = process.env) {

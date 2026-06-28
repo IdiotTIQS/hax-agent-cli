@@ -1,15 +1,15 @@
 "use strict";
 
 /**
- * Conversation Compaction — ported from OpenHarness services/compact/
+ * Conversation Compaction - ported from OpenHarness services/compact/
  *
  * Provides multi-tier compaction strategies to manage token budget:
  *
- * 1. Micro Compact — cheap cleanup of stale tool results
- * 2. Context Collapse — deterministic text truncation
- * 3. Full Compact — LLM-based summarization of older messages
- * 4. Auto Compact — triggered before API calls when threshold exceeded
- * 5. Reactive Compact — triggered when API returns "context too long"
+ * 1. Micro Compact - cheap cleanup of stale tool results
+ * 2. Context Collapse - deterministic text truncation
+ * 3. Full Compact - LLM-based summarization of older messages
+ * 4. Auto Compact - triggered before API calls when threshold exceeded
+ * 5. Reactive Compact - triggered when API returns "context too long"
  *
  * Key invariants:
  * - Never split a tool_use/tool_result pair
@@ -33,12 +33,12 @@ const CompactionType = {
 class CompactionProgressEvent {
   /**
    * @param {Object} options
-   * @param {string} options.type — CompactionType
-   * @param {number} options.messagesBefore — message count before compaction
-   * @param {number} options.messagesAfter — message count after compaction
-   * @param {number} options.tokensBefore — estimated tokens before
-   * @param {number} options.tokensAfter — estimated tokens after
-   * @param {number} [options.durationMs] — time taken
+   * @param {string} options.type - CompactionType
+   * @param {number} options.messagesBefore - message count before compaction
+   * @param {number} options.messagesAfter - message count after compaction
+   * @param {number} options.tokensBefore - estimated tokens before
+   * @param {number} options.tokensAfter - estimated tokens after
+   * @param {number} [options.durationMs] - time taken
    */
   constructor(o = {}) {
     this.type = "compact_progress";
@@ -118,9 +118,9 @@ function estimateTotalTokens(messages) {
  * Clears tool_result content for tool calls older than `keepRecent` turns,
  * replacing them with a stub result to maintain pairing integrity.
  *
- * @param {Array} messages — conversation messages
+ * @param {Array} messages - conversation messages
  * @param {Object} options
- * @param {number} [options.keepRecent=6] — number of most recent messages to preserve
+ * @param {number} [options.keepRecent=6] - number of most recent messages to preserve
  * @returns {Object} { messages, removedCount, tokenSavings }
  */
 function microCompact(messages, options = {}) {
@@ -142,7 +142,7 @@ function microCompact(messages, options = {}) {
   // Compact: clear tool result content, keep stubs
   const compacted = compactTargets.map((group) => {
     if (Array.isArray(group)) {
-      // Tool pair group — clear result content, keep stubs
+      // Tool pair group - clear result content, keep stubs
       return group.map((msg) => {
         const content = Array.isArray(msg.content) ? msg.content : [msg.content];
         const newContent = content.map((block) => {
@@ -175,13 +175,13 @@ function microCompact(messages, options = {}) {
 // === Context Collapse ===
 
 /**
- * Deterministic text truncation — truncates older messages' text content
+ * Deterministic text truncation - truncates older messages' text content
  * to stay under a target token budget.
  *
  * @param {Array} messages
- * @param {Object} options
- * @param {number} options.maxTokens — target max tokens
- * @param {number} [options.keepRecent=6] — most recent messages preserved in full
+ * @param {Object} [options]
+ * @param {number} [options.maxTokens=100000] - target max tokens
+ * @param {number} [options.keepRecent=6] - most recent messages preserved in full
  * @returns {Object} { messages, truncated }
  */
 function contextCollapse(messages, options = {}) {
@@ -200,7 +200,7 @@ function contextCollapse(messages, options = {}) {
   const budget = maxTokens - preservedTokens;
 
   if (budget <= 0) {
-    // Even preserved messages exceed budget — must discard older entirely
+    // Even preserved messages exceed budget - must discard older entirely
     return { messages: preserved, truncated: true };
   }
 
@@ -238,7 +238,7 @@ function contextCollapse(messages, options = {}) {
  * Group messages into "rounds" where tool_use/tool_result pairs are kept together.
  *
  * @param {Array} messages
- * @returns {Array<Object|Array>} — each element is a single message or array of paired messages
+ * @returns {Array<Object|Array>} - each element is a single message or array of paired messages
  */
 function splitPreservingToolPairs(messages) {
   const groups = [];
@@ -253,7 +253,7 @@ function splitPreservingToolPairs(messages) {
       Array.isArray(msg.content) &&
       msg.content.some((c) => c.type === "tool_result" || c.tool_use_id)
     ) {
-      // This is a tool result message — find the preceding assistant message with tool_use
+      // This is a tool result message - find the preceding assistant message with tool_use
       const pair = [];
       if (i > 0 && groups.length > 0) {
         const prevGroup = groups[groups.length - 1];
@@ -317,7 +317,7 @@ function splitPreservingToolPairs(messages) {
  * Each round starts with a user message (not tool_result) and includes the assistant response.
  *
  * @param {Array} messages
- * @returns {Array<Array>} — array of rounds, each round is an array of messages
+ * @returns {Array<Array>} - array of rounds, each round is an array of messages
  */
 function groupByPromptRound(messages) {
   const rounds = [];
@@ -354,10 +354,10 @@ function isToolResultMessage(msg) {
  * Use LLM to summarize older messages, preserving key facts.
  *
  * @param {Array} messages
- * @param {Object} options
- * @param {Function} options.summarize — async fn(messagesToSummarize) => summary string
- * @param {number} [options.keepRecent=6] — most recent messages preserved
- * @param {number} [options.maxSummaryTokens=2000] — max tokens for the summary
+ * @param {Object} [options]
+ * @param {Function} [options.summarize] - async fn(messagesToSummarize) => summary string
+ * @param {number} [options.keepRecent=6] - most recent messages preserved
+ * @param {number} [options.maxSummaryTokens=2000] - max tokens for the summary
  * @returns {Promise<Object>} { messages, summary, tokenSavings }
  */
 async function fullCompact(messages, options = {}) {
@@ -417,9 +417,9 @@ async function fullCompact(messages, options = {}) {
  * Triggered when estimated tokens exceed a fraction of max context.
  *
  * @param {Array} messages
- * @param {Object} options
- * @param {CompactionState} options.state — compaction state
- * @param {Function} [options.summarize] — LLM summarize function (for full compact)
+ * @param {Object} [options]
+ * @param {CompactionState} [options.state] - compaction state
+ * @param {Function} [options.summarize] - LLM summarize function (for full compact)
  * @param {number} [options.maxContextTokens=200000]
  * @returns {Promise<Object>} { messages, event: CompactionProgressEvent | null }
  */

@@ -1,7 +1,7 @@
 "use strict";
 
 /**
- * Core Module — unified exports
+ * Core Module - unified exports
  *
  * Provides all core modules through a single entry point:
  * - messages: StandardMessage, ContentBlock types, stream events

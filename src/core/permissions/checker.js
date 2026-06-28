@@ -1,7 +1,7 @@
 "use strict";
 
 /**
- * Permission Checker — standalone module extracted from engine/agent.js
+ * Permission Checker - standalone module extracted from engine/agent.js
  * Ported from OpenHarness permissions/checker.py
  *
  * Supports:
@@ -120,12 +120,12 @@ class PermissionDecision {
 class PermissionChecker {
   /**
    * @param {Object} options
-   * @param {string} [options.mode="default"] — permission mode
-   * @param {string[]} [options.allowedTools] — always-allowed tool names
-   * @param {string[]} [options.deniedTools] — always-denied tool names
-   * @param {Object[]} [options.pathRules] — [{ pattern: string, allow: boolean }]
-   * @param {string[]} [options.deniedCommands] — additional denied command patterns
-   * @param {string[]} [options.sensitivePaths] — additional sensitive path patterns
+   * @param {string} [options.mode="default"] - permission mode
+   * @param {string[]} [options.allowedTools] - always-allowed tool names
+   * @param {string[]} [options.deniedTools] - always-denied tool names
+   * @param {Object[]} [options.pathRules] - [{ pattern: string, allow: boolean }]
+   * @param {string[]} [options.deniedCommands] - additional denied command patterns
+   * @param {string[]} [options.sensitivePaths] - additional sensitive path patterns
    */
   constructor(o = {}) {
     this.mode = o.mode || PermissionMode.DEFAULT;
@@ -139,11 +139,11 @@ class PermissionChecker {
   /**
    * Evaluate whether a tool call is permitted.
    *
-   * @param {string} toolName — tool name
+   * @param {string} toolName - tool name
    * @param {Object} options
-   * @param {Object} [options.args] — tool arguments
-   * @param {Function} [options.isReadOnly] — fn(args) => boolean (from tool definition)
-   * @param {string} [options.cwd] — working directory (for path resolution)
+   * @param {Object} [options.args] - tool arguments
+   * @param {Function} [options.isReadOnly] - fn(args) => boolean (from tool definition)
+   * @param {string} [options.cwd] - working directory (for path resolution)
    * @returns {PermissionDecision}
    */
   evaluate(toolName, opts = {}) {
@@ -178,7 +178,7 @@ class PermissionChecker {
     const cmdResult = this._checkDangerousCommands(args);
     if (cmdResult) return cmdResult;
 
-    // 6. Read-only check — accepts both boolean (from engine) and function
+    // 6. Read-only check - accepts both boolean (from engine) and function
     let isRO = false;
     if (typeof opts.isReadOnly === "function") {
       try { isRO = opts.isReadOnly(args); } catch (_) {}

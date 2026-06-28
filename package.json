@@ -12,7 +12,8 @@
     "desktop:start": "node desktop/scripts/start.js",
     "desktop:build": "vite build --config desktop/renderer/vite.config.js",
     "auth:team": "node src/cli.js team auth-refactor",
-    "lint": "node scripts/lint.js",
+    "typecheck": "tsc --noEmit",
+    "lint": "node scripts/lint.js && tsc --noEmit",
     "test": "node scripts/run-tests.js",
     "test:desktop": "npm run desktop:build && node scripts/run-tests.js test/desktop",
     "prepublishOnly": "npm test"
@@ -67,6 +68,7 @@
     "electron": "^37.5.1",
     "jsdom": "^24.1.3",
     "playwright-core": "^1.59.1",
+    "typescript": "^6.0.3",
     "vite": "^6.3.6",
     "vue": "^3.5.22"
   },

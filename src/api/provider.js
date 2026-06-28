@@ -1,7 +1,7 @@
 "use strict";
 
 /**
- * Provider Clients — full provider suite matching OpenHarness registry.
+ * Provider Clients - full provider suite matching OpenHarness registry.
  *
  * Supported: Anthropic, OpenAI, DeepSeek, Groq, Mistral, Google, Moonshot,
  *            Zhipu, DashScope, Ollama, vLLM, OpenRouter
@@ -15,7 +15,7 @@ class BaseOpenAICompatible {
   constructor(o = {}) { this.apiKey = o.apiKey; this.apiUrl = o.apiUrl; this.model = o.model; this.name = o.name; this.maxTokens = o.maxTokens || 8192; }
 
   async *stream(req = {}) {
-    const OpenAI = require("openai").default || require("openai");
+    const OpenAI = /** @type {any} */ (require("openai").default || require("openai"));
     const client = new OpenAI({ apiKey: this.apiKey, baseURL: this.apiUrl });
     const model = req.model || this.model;
     if (!model) throw new Error(`${this.name}: model is required`);
@@ -51,7 +51,7 @@ class BaseOpenAICompatible {
       for await (const chunk of stream) {
         const delta = chunk.choices?.[0]?.delta;
         if (delta?.content) { text += delta.content; yield { type: "text", delta: delta.content }; }
-        // DeepSeek V4 thinking content — check multiple possible field names
+        // DeepSeek V4 thinking content - check multiple possible field names
         var thinkDelta = delta?.reasoning_content || delta?.thinking || delta?.reasoning || delta?.think;
         if (thinkDelta) { yield { type: "thinking", delta: thinkDelta }; }
         if (delta?.tool_calls) {
@@ -107,7 +107,7 @@ class AnthropicProvider {
   get name() { return "anthropic"; }
 
   async *stream(req = {}) {
-    const Anthropic = require("@anthropic-ai/sdk").default || require("@anthropic-ai/sdk");
+    const Anthropic = /** @type {any} */ (require("@anthropic-ai/sdk").default || require("@anthropic-ai/sdk"));
     const client = new Anthropic({ apiKey: this.apiKey, baseURL: this.apiUrl });
     let text = "", usage = null;
 

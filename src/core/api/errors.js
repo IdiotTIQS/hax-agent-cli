@@ -1,7 +1,7 @@
 "use strict";
 
 /**
- * API Error Types — structured error classification for API calls.
+ * API Error Types - structured error classification for API calls.
  * Ported from OpenHarness api/errors.py pattern.
  *
  * Replaces string-based error detection (isPromptTooLongError, etc.)
@@ -10,15 +10,15 @@
  *
  * Error hierarchy:
  *   ApiError (base)
- *   ├── ContextTooLongError     — prompt exceeds context window (non-retryable)
- *   ├── RateLimitError          — rate limited (retryable with backoff)
- *   ├── ServerError             — 5xx server errors (retryable)
- *   ├── AuthError               — authentication failure (non-retryable)
- *   ├── BadRequestError         — malformed request (non-retryable)
- *   ├── TimeoutError            — request timed out (retryable)
- *   ├── NetworkError            — network failure (retryable)
- *   ├── AbortError              — request was aborted (non-retryable)
- *   └── UnknownError            — unclassified (retryable if transient)
+ *   ├── ContextTooLongError     - prompt exceeds context window (non-retryable)
+ *   ├── RateLimitError          - rate limited (retryable with backoff)
+ *   ├── ServerError             - 5xx server errors (retryable)
+ *   ├── AuthError               - authentication failure (non-retryable)
+ *   ├── BadRequestError         - malformed request (non-retryable)
+ *   ├── TimeoutError            - request timed out (retryable)
+ *   ├── NetworkError            - network failure (retryable)
+ *   ├── AbortError              - request was aborted (non-retryable)
+ *   └── UnknownError            - unclassified (retryable if transient)
  */
 
 // === Error Codes ===
@@ -37,14 +37,19 @@ const ApiErrorCode = {
 
 // === Base API Error ===
 
+/**
+ * @typedef {Object} ApiErrorOptions
+ * @property {string} [code] - ApiErrorCode
+ * @property {boolean} [retryable] - whether retrying may succeed
+ * @property {number} [status] - HTTP status code if applicable
+ * @property {Object} [details] - additional context (model, provider, etc.)
+ * @property {number} [retryAfterMs] - suggested retry delay from headers (rate limits)
+ */
+
 class ApiError extends Error {
   /**
-   * @param {string} message — human-readable error message
-   * @param {Object} options
-   * @param {string} [options.code] — ApiErrorCode
-   * @param {boolean} [options.retryable] — whether retrying may succeed
-   * @param {number} [options.status] — HTTP status code if applicable
-   * @param {Object} [options.details] — additional context (model, provider, etc.)
+   * @param {string} message - human-readable error message
+   * @param {ApiErrorOptions} options
    */
   constructor(message, options = {}) {
     super(message);
@@ -74,8 +79,7 @@ class ContextTooLongError extends ApiError {
 class RateLimitError extends ApiError {
   /**
    * @param {string} message
-   * @param {Object} options
-   * @param {number} [options.retryAfterMs] — suggested retry delay from headers
+   * @param {ApiErrorOptions} options
    */
   constructor(message, options = {}) {
     super(message, {
@@ -188,8 +192,8 @@ class UnknownError extends ApiError {
 /**
  * Classify a raw error into a typed ApiError.
  *
- * @param {Error|string|Object} err — raw error from API call
- * @param {Object} [context] — { provider, model }
+ * @param {Error|string|Object} err - raw error from API call
+ * @param {Object} [context] - { provider, model }
  * @returns {ApiError}
  */
 function classifyApiError(err, context = {}) {

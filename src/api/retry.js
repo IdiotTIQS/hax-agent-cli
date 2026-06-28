@@ -1,7 +1,7 @@
 "use strict";
 
 /**
- * API Retry — exponential backoff with jitter.
+ * API Retry - exponential backoff with jitter.
  * Ported from OpenHarness api/client.py.
  */
 
