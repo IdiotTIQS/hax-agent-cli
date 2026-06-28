@@ -27,6 +27,11 @@ function atomicWriteBytes(filePath, data) {
   }
 }
 
+/**
+ * @param {string} filePath
+ * @param {string} data
+ * @param {BufferEncoding} [encoding]
+ */
 function atomicWriteText(filePath, data, encoding = "utf-8") {
   atomicWriteBytes(filePath, Buffer.from(data, encoding));
 }

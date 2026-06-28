@@ -273,7 +273,7 @@ class McpClientManager extends EventEmitter {
         headers: { "Content-Type": "application/json", ...info._httpClient.headers },
         body: JSON.stringify({ jsonrpc: "2.0", id: Date.now(), method: "tools/list" }),
       });
-      const data = await r.json();
+      const data = /** @type {any} */ (await r.json());
       return (data?.tools || []).map(t => ({
         name: `mcp.${name}.${t.name}`,
         description: t.description || `MCP tool: ${t.name}`,
@@ -305,7 +305,7 @@ class McpClientManager extends EventEmitter {
             headers: { "Content-Type": "application/json", ...info._httpClient.headers },
             body: JSON.stringify(callParams),
           });
-          const data = await r.json();
+          const data = /** @type {any} */ (await r.json());
           if (data?.error) throw new Error(data.error.message);
           return { ok: true, data: data?.content || data };
         }

@@ -1,7 +1,7 @@
 "use strict";
 
 /**
- * Autodream — automated memory consolidation and cleanup.
+ * Autodream - automated memory consolidation and cleanup.
  * Ported from OpenHarness services/autodream/
  *
  * Periodically analyzes accumulated memories for:
@@ -42,8 +42,8 @@ const DEFAULT_CONFIG = {
 class AutodreamManager {
   /**
    * @param {Object} options
-   * @param {string} [options.memoryDir] — memory storage directory
-   * @param {Object} [options.config] — autodream config overrides
+   * @param {string} [options.memoryDir] - memory storage directory
+   * @param {Object} [options.config] - autodream config overrides
    */
   constructor(options = {}) {
     this._memoryDir = options.memoryDir || path.join(os.homedir(), ".haxagent", "memory");
@@ -75,8 +75,8 @@ class AutodreamManager {
   /**
    * Run the consolidation process.
    * @param {Object} options
-   * @param {Array} [options.memories] — current memory entries
-   * @param {Function} [options.onProgress] — progress callback
+   * @param {Array} [options.memories] - current memory entries
+   * @param {Function} [options.onProgress] - progress callback
    * @returns {Promise<Object>} { consolidated, removed, merged, backupPath }
    */
   async run(options = {}) {

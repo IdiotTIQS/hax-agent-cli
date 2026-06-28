@@ -22,18 +22,47 @@
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true
   },
-  // 首批仅覆盖 core 和 api（多 Provider 适配层，最易出运行时错误处）
+  // 类型护栏覆盖范围。采用「白名单 include」而非 src/** + exclude：
+  // TS 的 exclude 不能阻止被 include 文件引用的模块被连带检查，只有不
+  // 出现在 include 中、且不作为根文件，才真正不在本文件内报错。
+  // 暂未纳入的两类文件见末尾注释。
   "include": [
     "src/core/**/*.js",
     "src/api/**/*.js",
     "src/engine/**/*.js",
     "src/tools/**/*.js",
-    "src/auth/**/*.js"
+    "src/auth/**/*.js",
+    "src/channels/**/*.js",
+    "src/memory/**/*.js",
+    "src/hooks/**/*.js",
+    "src/plugins/**/*.js",
+    "src/skills/**/*.js",
+    "src/config/**/*.js",
+    "src/keybindings/**/*.js",
+    "src/personalization/**/*.js",
+    "src/coordinator/**/*.js",
+    "src/output-styles/**/*.js",
+    "src/prompts/**/*.js",
+    "src/shared/**/*.js",
+    "src/utils/**/*.js",
+    "src/vim/**/*.js",
+    "src/voice/**/*.js",
+    "src/state/**/*.js",
+    "src/tasks/**/*.js",
+    "src/bridge/**/*.js",
+    "src/autopilot/**/*.js",
+    "src/services/*.js"
   ],
   "exclude": [
     "node_modules",
     "desktop",
     "dist",
-    "test"
+    "test",
+    // 工作区内有未提交改动的半成品 services 文件
+    "src/services/session-memory.js"
   ]
+  // 暂未纳入 include（待处理，不影响上面已覆盖范围的类型检查）：
+  //  - 半成品（工作区 modified/未跟踪）：cli.js, session.js, commands/,
+  //    sandbox/, tui/, services/session-memory.js
+  //  - 已知真实 bug（缺失模块/导出，需功能修复）：context.js, swarm/in-process.js
 }

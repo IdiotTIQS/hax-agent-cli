@@ -1,7 +1,7 @@
 "use strict";
 
 /**
- * Plugin Installer — download, install, update, and uninstall plugins.
+ * Plugin Installer - download, install, update, and uninstall plugins.
  * Ported from OpenHarness plugins/installer.py pattern.
  *
  * Supports:
@@ -31,9 +31,9 @@ class PluginInstaller {
 
   /**
    * Install a plugin from a local directory.
-   * @param {string} sourceDir — path to plugin directory containing plugin.json
+   * @param {string} sourceDir - path to plugin directory containing plugin.json
    * @param {Object} options
-   * @param {boolean} [options.trust=false] — trust the plugin (skip security warnings)
+   * @param {boolean} [options.trust=false] - trust the plugin (skip security warnings)
    * @returns {Object} { ok, plugin, warnings }
    */
   installFromDir(sourceDir, options = {}) {
@@ -111,7 +111,7 @@ class PluginInstaller {
 
   /**
    * Install a plugin from a git repository.
-   * @param {string} repoUrl — git URL
+   * @param {string} repoUrl - git URL
    * @param {Object} options
    * @returns {Object}
    */
@@ -144,7 +144,7 @@ class PluginInstaller {
 
   /**
    * Install a plugin from an NPM package.
-   * @param {string} packageName — npm package name
+   * @param {string} packageName - npm package name
    * @param {Object} options
    * @returns {Object}
    */
