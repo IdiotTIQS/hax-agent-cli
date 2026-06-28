@@ -87,6 +87,7 @@ const PRICING = {
 };
 
 // Priority-ordered regex fallbacks for model name matching
+/** @type {Array<[RegExp, string]>} */
 const FALLBACKS = [
   [/claude.*opus/i,              "claude-opus-4-7"],
   [/claude.*haiku/i,             "claude-haiku-4-5-20251001"],

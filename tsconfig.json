@@ -25,7 +25,8 @@
   // 首批仅覆盖 core 和 api（多 Provider 适配层，最易出运行时错误处）
   "include": [
     "src/core/**/*.js",
-    "src/api/**/*.js"
+    "src/api/**/*.js",
+    "src/engine/**/*.js"
   ],
   "exclude": [
     "node_modules",
