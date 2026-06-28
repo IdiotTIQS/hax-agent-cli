@@ -8,6 +8,8 @@
   },
   "scripts": {
     "start": "node src/cli.js",
+    "dev": "tsx src/cli.js",
+    "build": "tsc -p tsconfig.build.json",
     "desktop:dev": "node desktop/scripts/dev.js",
     "desktop:start": "node desktop/scripts/start.js",
     "desktop:build": "vite build --config desktop/renderer/vite.config.js",
@@ -68,6 +70,7 @@
     "electron": "^37.5.1",
     "jsdom": "^24.1.3",
     "playwright-core": "^1.59.1",
+    "tsx": "^4.22.4",
     "typescript": "^6.0.3",
     "vite": "^6.3.6",
     "vue": "^3.5.22"

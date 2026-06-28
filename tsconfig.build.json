@@ -1,0 +1,38 @@
+{
+  // 构建配置（区别于根 tsconfig.json 的 checkJs/noEmit 护栏配置）。
+  // 阶段 A：先用 CommonJS 编译现有 .js，验证构建管线通。
+  // 阶段 B 把源码转为 ESM 后，再将 module/moduleResolution 切到 NodeNext。
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "CommonJS",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2022"],
+    "types": ["node"],
+
+    "outDir": "dist",
+    "rootDir": "src",
+    "sourceMap": true,
+    "declaration": false,
+
+    // 渐进迁移期：允许 .js 与 .ts 共存
+    "allowJs": true,
+    "checkJs": false,
+
+    "strict": false,
+    "noImplicitAny": false,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": [
+    "src/**/*.js",
+    "src/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "desktop",
+    "dist",
+    "test"
+  ]
+}
