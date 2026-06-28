@@ -62,6 +62,7 @@ module.exports = {
   sandbox: {
     session: require("./sandbox/session"),
     adapter: require("./sandbox/adapter"),
+    crossPlatform: require("./sandbox/cross-platform"),
     pathValidator: require("./sandbox/path-validator"),
     dockerBackend: require("./sandbox/docker-backend"),
     dockerImage: require("./sandbox/docker-image"),

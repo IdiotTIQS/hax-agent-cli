@@ -29,7 +29,7 @@ test("core/messages/types — StandardMessage and content blocks", () => {
 test("core/permissions/checker — PermissionChecker", () => {
   const { PermissionChecker, PermissionMode } = require("../src/core/permissions/checker");
   const pc = new PermissionChecker({ mode: PermissionMode.DEFAULT });
-  assert.equal(pc.mode, "default");
+  assert.equal(pc.mode, "normal");
 });
 
 test("core/api/provider-adapter — adapter protocol", () => {

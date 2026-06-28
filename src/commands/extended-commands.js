@@ -72,7 +72,7 @@ module.exports = function registerExtended(registerFn, styledFn, THEME, ANSI) {
     ctx.screen.write(`  Tokens: ${totalInput + totalOutput} (${totalInput} in / ${totalOutput} out)\n`);
     ctx.screen.write(`  Tool calls: ${ctx.session.toolCallCount}\n`);
     if (files.length) ctx.screen.write(`  Modified files: ${files.join(", ")}\n`);
-    ctx.screen.write(`  Mode: ${ctx.session.permissionManager?.mode || "default"}\n`);
+    ctx.screen.write(`  Mode: ${ctx.session.permissionManager?.mode || "normal"}\n`);
     ctx.rl?.prompt?.();
   }, "Show session summary");
 

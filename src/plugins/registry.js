@@ -96,14 +96,18 @@ class PluginRegistry {
   }
 }
 
-/** Load plugins from standard locations */
+/** Load plugins from standard locations (synchronous convenience wrapper). */
 function loadPluginRegistry(cwd = process.cwd()) {
   const registry = new PluginRegistry();
   const dirs = [
     path.join(os.homedir(), ".haxagent", "plugins"),
     path.join(cwd, ".hax-agent", "plugins"),
   ];
-  for (const d of dirs) registry.loadFromDir(d);
+  // Fire-and-forget async loads; plugins will be available once resolved.
+  // The registry is returned immediately so callers can use it synchronously.
+  for (const d of dirs) {
+    registry.loadFromDir(d).catch(() => {});
+  }
   return registry;
 }
 

@@ -66,7 +66,7 @@ class PlanModeState {
     }
 
     const saved = this._planSessions.get(sessionId);
-    const restoredMode = saved?.previousMode || "default";
+    const restoredMode = saved?.previousMode || "normal";
 
     permissionChecker.setMode(restoredMode);
     this._planSessions.delete(sessionId);

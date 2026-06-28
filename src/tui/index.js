@@ -163,9 +163,8 @@ class TUI {
     const model = s.provider.model || "?";
     const mode = (s.permissionManager && s.permissionManager.mode) || "normal";
     const total = (s.inputTokens || 0) + (s.outputTokens || 0);
-    const cost = s.provider.name === "anthropic"
-      ? " $" + (((s.inputTokens || 0) * 3 + (s.outputTokens || 0) * 15) / 1000000).toFixed(4)
-      : "";
+    const costVal = s.costTracker ? s.costTracker.getCost(s.provider?.model) : 0;
+    const cost = costVal > 0 ? " $" + costVal.toFixed(4) : (s.costTracker ? " $0" : "");
     const left = " " + model + " | " + mode + " | " + total.toLocaleString() + "t" + cost;
     return this._style(THEME.statusLine, left) + " > ";
   }

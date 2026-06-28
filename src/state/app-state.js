@@ -8,7 +8,7 @@
 class AppState {
   constructor(o = {}) {
     this.model = o.model || "";
-    this.permissionMode = o.permissionMode || "default";
+    this.permissionMode = o.permissionMode || "normal";
     this.theme = o.theme || "default";
     this.cwd = o.cwd || process.cwd();
     this.provider = o.provider || "unknown";

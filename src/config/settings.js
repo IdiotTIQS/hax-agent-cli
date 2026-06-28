@@ -16,6 +16,7 @@ const DEFAULTS = {
   agent: { provider: "anthropic", model: "claude-sonnet-4-6", maxTurns: 25 },
   permissions: { mode: "normal" },
   tools: { shell: { enabled: true } },
+  sandbox: { enabled: true, backend: "auto", image: "node:18-alpine", network: "none", cpus: 2, memory: "512m" },
   ui: { locale: "en", autoClearScreen: true },
   context: { compactionEnabled: false, compactionThreshold: 0.85 },
 };
