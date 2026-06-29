@@ -142,6 +142,24 @@ export interface ToolCallState {
 }
 
 // ---------------------------------------------------------------------------
+// CommittedTurn
+// ---------------------------------------------------------------------------
+
+/**
+ * A fully-completed conversation turn pushed into the Static history.
+ * Replaces ConversationMessage as the primary history unit; contains the
+ * full snapshot including tools and flags so ConversationTurn can render it.
+ */
+export interface CommittedTurn {
+  userText: string;
+  assistantText: string;
+  thinking: string;
+  tools: ToolCallState[];
+  interrupted: boolean;
+  error: string | null;
+}
+
+// ---------------------------------------------------------------------------
 // ConversationMessage
 // ---------------------------------------------------------------------------
 
@@ -174,8 +192,34 @@ export interface PendingApproval {
  * F5 will implement the reducer that mutates this via AppAction events.
  */
 export interface AppState {
-  /** Committed turns (user + assistant) shown in the message history. */
+  /**
+   * Fully-committed turns for the Static history pane.
+   * Each entry contains the complete snapshot of one user↔assistant exchange.
+   */
+  committedTurns: CommittedTurn[];
+
+  /**
+   * Committed turns (user + assistant) shown in the message history.
+   * @deprecated Use committedTurns for new rendering; messages retained for
+   * backward compatibility with existing code that reads role/text pairs.
+   */
   messages: ConversationMessage[];
+
+  /** When true, tool diffs and full input/output are shown in the history. */
+  detailMode: boolean;
+
+  /**
+   * Non-null when the slash-command palette is open.
+   * open is always true while the object is non-null (set to null to close).
+   */
+  commandPalette: { open: boolean; query: string } | null;
+
+  /**
+   * Text of the most-recently submitted user message.
+   * Stored on submit_input so turn.completed/interrupted can snapshot it
+   * into CommittedTurn.userText.
+   */
+  pendingUserText: string;
 
   /** True while the engine generator is running. */
   isStreaming: boolean;
@@ -278,6 +322,33 @@ export interface UpdateMetaAction {
   permissionMode?: string;
 }
 
+/** Manually commit the active turn into committedTurns (App may not need this). */
+export interface CommitTurnAction {
+  type: "commit_turn";
+}
+
+/** Toggle between collapsed and detailed tool/diff view. */
+export interface ToggleDetailAction {
+  type: "toggle_detail";
+}
+
+/** Open the slash-command palette with an initial query. */
+export interface OpenPaletteAction {
+  type: "open_palette";
+  query: string;
+}
+
+/** Update the query string while the palette is open. */
+export interface UpdatePaletteAction {
+  type: "update_palette";
+  query: string;
+}
+
+/** Close (dismiss) the command palette. */
+export interface ClosePaletteAction {
+  type: "close_palette";
+}
+
 /**
  * All actions the ink reducer handles.
  * Discriminated on the `type` field — exhaustive switches required.
@@ -290,7 +361,12 @@ export type AppAction =
   | ClearAction
   | InterruptAction
   | TurnStartAction
-  | UpdateMetaAction;
+  | UpdateMetaAction
+  | CommitTurnAction
+  | ToggleDetailAction
+  | OpenPaletteAction
+  | UpdatePaletteAction
+  | ClosePaletteAction;
 
 // ---------------------------------------------------------------------------
 // createInitialState helper
@@ -307,7 +383,11 @@ export type AppAction =
  */
 export function createInitialState(partial: Partial<AppState> = {}): AppState {
   return {
+    committedTurns: [],
     messages: [],
+    detailMode: false,
+    commandPalette: null,
+    pendingUserText: "",
     isStreaming: false,
     inputTokens: 0,
     outputTokens: 0,

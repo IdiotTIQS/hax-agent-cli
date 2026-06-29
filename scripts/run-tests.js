@@ -18,6 +18,7 @@ const nodeArgs = [
   'test/tui-ink-completions.test.ts',
   'test/tui-ink-reducer.test.ts',
   'test/tui-ink-select-state.test.ts',
+  'test/tui-ink-reducer-redesign.test.ts',
 ];
 
 const major = parseInt(process.versions.node.split('.')[0], 10);

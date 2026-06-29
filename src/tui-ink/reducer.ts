@@ -18,6 +18,7 @@ import type {
   AgentEvent,
   ToolCallState,
   ConversationMessage,
+  CommittedTurn,
 } from "./types.js";
 
 import { createInitialState } from "./types.js";
@@ -128,8 +129,17 @@ function handleEngineEvent(state: AppState, event: AgentEvent): AppState {
         | { inputTokens?: number; outputTokens?: number }
         | null
         | undefined;
+      const committed: CommittedTurn = {
+        userText: state.pendingUserText,
+        assistantText: state.currentTurnText,
+        thinking: state.currentThinking,
+        tools: state.currentTools,
+        interrupted: false,
+        error: null,
+      };
       return {
         ...state,
+        committedTurns: [...state.committedTurns, committed],
         messages: commitAssistant(state.messages, state.currentTurnText),
         isStreaming: false,
         isWaiting: false,
@@ -143,9 +153,18 @@ function handleEngineEvent(state: AppState, event: AgentEvent): AppState {
       };
     }
 
-    case "turn.interrupted":
+    case "turn.interrupted": {
+      const committed: CommittedTurn = {
+        userText: state.pendingUserText,
+        assistantText: state.currentTurnText,
+        thinking: state.currentThinking,
+        tools: state.currentTools,
+        interrupted: true,
+        error: null,
+      };
       return {
         ...state,
+        committedTurns: [...state.committedTurns, committed],
         isInterrupted: true,
         isStreaming: false,
         isWaiting: false,
@@ -154,14 +173,25 @@ function handleEngineEvent(state: AppState, event: AgentEvent): AppState {
         currentThinking: "",
         currentTools: [],
       };
+    }
 
-    case "turn.failed":
+    case "turn.failed": {
+      const committed: CommittedTurn = {
+        userText: state.pendingUserText,
+        assistantText: state.currentTurnText,
+        thinking: state.currentThinking,
+        tools: state.currentTools,
+        interrupted: false,
+        error: event.error.message,
+      };
       return {
         ...state,
+        committedTurns: [...state.committedTurns, committed],
         currentError: event.error.message,
         isStreaming: false,
         isWaiting: false,
       };
+    }
 
     case "tool.limit":
       return { ...state, statusMessage: "Tool limit reached" };
@@ -213,6 +243,7 @@ export function reducer(state: AppState, action: AppAction): AppState {
     case "submit_input":
       return {
         ...state,
+        pendingUserText: action.text,
         messages: [
           ...state.messages,
           { role: "user" as const, text: action.text },
@@ -250,6 +281,44 @@ export function reducer(state: AppState, action: AppAction): AppState {
         providerName: action.providerName ?? state.providerName,
         permissionMode: action.permissionMode ?? state.permissionMode,
       };
+
+    // ── Manual commit (App may not use this; kept for completeness) ──────────
+    case "commit_turn": {
+      const committed: CommittedTurn = {
+        userText: state.pendingUserText,
+        assistantText: state.currentTurnText,
+        thinking: state.currentThinking,
+        tools: state.currentTools,
+        interrupted: false,
+        error: null,
+      };
+      return {
+        ...state,
+        committedTurns: [...state.committedTurns, committed],
+        currentTurnText: "",
+        currentThinking: "",
+        currentTools: [],
+      };
+    }
+
+    // ── Detail mode toggle ───────────────────────────────────────────────────
+    case "toggle_detail":
+      return { ...state, detailMode: !state.detailMode };
+
+    // ── Command palette ──────────────────────────────────────────────────────
+    case "open_palette":
+      return { ...state, commandPalette: { open: true, query: action.query } };
+
+    case "update_palette":
+      return {
+        ...state,
+        commandPalette: state.commandPalette
+          ? { ...state.commandPalette, query: action.query }
+          : { open: true, query: action.query },
+      };
+
+    case "close_palette":
+      return { ...state, commandPalette: null };
 
     default: {
       const _exhaustive: never = action;
