@@ -43,6 +43,8 @@ export interface GlobalKeybindingOpts {
    * F5 decides the interrupt-vs-exit / double-Ctrl-C logic.
    */
   onInterrupt: () => void;
+  /** Ctrl+R → toggle detail mode (show/hide tool diffs and full I/O). */
+  onToggleDetail: () => void;
   /** When true the hook is active; when false all bindings are suspended. */
   isActive?: boolean;
 }
@@ -58,13 +60,15 @@ export interface GlobalKeybindingOpts {
  *     onCycleMode: () => dispatch({ type: "set_mode", mode: nextMode }),
  *     onClear: () => dispatch({ type: "clear" }),
  *     onInterrupt: () => dispatch({ type: "interrupt" }),
- *     isActive: !state.pendingApproval,
+ *     onToggleDetail: () => dispatch({ type: "toggle_detail" }),
+ *     isActive: !state.pendingApproval && !state.commandPalette?.open,
  *   });
  */
 export function useGlobalKeybindings({
   onCycleMode,
   onClear,
   onInterrupt,
+  onToggleDetail,
   isActive = true,
 }: GlobalKeybindingOpts): void {
   // isRawModeSupported is false when stdin is not a TTY (CI/pipe/debug).
@@ -91,6 +95,12 @@ export function useGlobalKeybindings({
       // ink reports this as key.ctrl + _input === "c".
       if (key.ctrl && _input === "c") {
         onInterrupt();
+        return;
+      }
+
+      // Ctrl+R — toggle detail mode (show/hide tool diffs and full I/O).
+      if (key.ctrl && _input === "r") {
+        onToggleDetail();
         return;
       }
     },

@@ -191,6 +191,7 @@ export function App({
       engine.interrupt();
       dispatch({ type: "interrupt" });
     },
+    onToggleDetail: () => dispatch({ type: "toggle_detail" }),
     isActive: !state.pendingApproval && !state.commandPalette?.open,
   });
 

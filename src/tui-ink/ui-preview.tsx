@@ -1,5 +1,5 @@
 /**
- * ui-preview.tsx — Task 2 + Task 3 + Task 5 preview harness.
+ * ui-preview.tsx — Task 2 + Task 3 + Task 5 + Task 6 + Task 7 preview harness.
  *
  * Task 2: Renders StatusBar in multiple states (normal/yolo/plan, various
  * context usage levels) plus a CJK sample row.
@@ -12,17 +12,23 @@
  *
  * Task 6: Renders CommandPalette with a mock "/" query and command/skill names.
  *
+ * Task 7: Renders ApprovalPrompt with Select menu — both plain (shell.run) and
+ * diff-bearing (file.edit) variants. Confirms resolvedRef + setImmediate bridge
+ * renders correctly; mock resolve logs answer to stderr.
+ *
  * Unmounts after 3 s.
  *
  * Run: npx tsx src/tui-ink/ui-preview.tsx
  */
 import React from "react";
+import { PassThrough } from "node:stream";
 import { render, Box, Text } from "ink";
 import { StatusBar } from "./components/StatusBar.js";
 import { ToolList } from "./components/ToolList.js";
 import { ConversationTurn } from "./components/ConversationTurn.js";
 import { CommandPalette } from "./components/CommandPalette.js";
-import type { ToolCallState, CommittedTurn } from "./types.js";
+import { ApprovalPrompt } from "./components/ApprovalPrompt.js";
+import type { ToolCallState, CommittedTurn, PendingApproval } from "./types.js";
 
 // ---------------------------------------------------------------------------
 // Mock tool data
@@ -134,6 +140,31 @@ const turnError: CommittedTurn = {
 };
 
 // ---------------------------------------------------------------------------
+// Mock approval data (Task 7)
+// ---------------------------------------------------------------------------
+
+const mockShellApproval: PendingApproval = {
+  toolName: "shell.run",
+  toolInput: { command: "rm -rf /tmp/demo", cwd: "/home/user/project" },
+  resolve: (answer) => {
+    console.error(`[ui-preview T7] shell.run resolved (deferred) with: ${answer}`);
+  },
+};
+
+const mockEditApproval: PendingApproval = {
+  toolName: "file.edit",
+  toolInput: {
+    path: "src/example.ts",
+    old_string: "const foo = 1;",
+    new_string: "const bar = 1;",
+    diff: "- const foo = 1;\n+ const bar = 1;\n  \n- export { foo };\n+ export { bar };",
+  },
+  resolve: (answer) => {
+    console.error(`[ui-preview T7] file.edit resolved (deferred) with: ${answer}`);
+  },
+};
+
+// ---------------------------------------------------------------------------
 // Preview component
 // ---------------------------------------------------------------------------
 
@@ -226,9 +257,46 @@ function Preview(): React.ReactElement {
         onPick={(v) => process.stdout.write("picked: " + v + "\n")}
         onClose={() => process.stdout.write("palette closed\n")}
       />
+
+      {/* ── Task 7: ApprovalPrompt Select menu ────────────────────────── */}
+      <Text>{"— ApprovalPrompt: shell.run (no diff, Select menu) —"}</Text>
+      <Text dimColor>{"  ↑↓ navigate, Enter confirm, y/a/n hotkeys; answer logged to stderr"}</Text>
+      <ApprovalPrompt approval={mockShellApproval} />
+
+      <Text>{"— ApprovalPrompt: file.edit (with embedded DiffView) —"}</Text>
+      <Text dimColor>{"  T7: diff lines shown inline above Select menu"}</Text>
+      <ApprovalPrompt approval={mockEditApproval} />
     </Box>
   );
 }
 
-const { unmount } = render(<Preview />);
+// When stdin is not a real TTY (CI, pipe, PowerShell non-interactive), ink's
+// App throws when any useInput hook tries to call setRawMode(true).
+// Solution: provide a PassThrough mock stdin with isTTY=true and a no-op
+// setRawMode.  useInput sees isRawModeSupported=true and registers listeners
+// (no-op) — but no actual keypresses arrive, so the harness proves mount
+// without crashing.  In a real interactive TTY, use process.stdin directly.
+const isInteractiveTTY = Boolean(process.stdin.isTTY);
+
+let stdinForInk: NodeJS.ReadStream | PassThrough;
+if (isInteractiveTTY) {
+  stdinForInk = process.stdin;
+} else {
+  const mockStdin = new PassThrough() as PassThrough & {
+    isTTY: boolean;
+    setRawMode: (mode: boolean) => void;
+    ref: () => void;
+    unref: () => void;
+  };
+  mockStdin.isTTY = true;
+  mockStdin.setRawMode = (_mode: boolean) => { /* no-op */ };
+  mockStdin.ref = () => { /* no-op */ };
+  mockStdin.unref = () => { /* no-op */ };
+  stdinForInk = mockStdin;
+}
+
+const { unmount } = render(<Preview />, {
+  stdin: stdinForInk as NodeJS.ReadStream,
+  debug: !isInteractiveTTY,
+});
 setTimeout(() => unmount(), 3000);

@@ -1,20 +1,23 @@
 /**
- * input-preview.tsx — F4 interaction component harness.
+ * input-preview.tsx — F4 / T7 interaction component harness.
  *
  * Run with: `npx tsx src/tui-ink/input-preview.tsx`
  *
- * Mounts UserInput + ApprovalPrompt with mock data to prove:
+ * Mounts UserInput + ApprovalPrompt (T7 Select-menu variant) with mock data
+ * to prove:
  *  1. Both components render without crashing.
  *  2. The deferred-resolve mechanism works: the mock resolve logs
  *     "resolved (deferred) with: <answer>" one event-loop tick after the
  *     setImmediate fires, confirming the deferral actually executed.
+ *  3. The Select menu (Approve/always/Deny with y/a/n hotkeys) renders.
+ *  4. A file.edit approval with a diff field shows DiffView inline.
  *
  * Interactive behaviour (arrow history, actual approval keypresses) requires
  * a live TTY — verify manually.  This harness auto-unmounts after 1 s so it
  * is safe to run in CI or from scripts.
  *
  * NOTE: The components are completely self-contained (no engine import).  The
- * mock PendingApproval below is the only wiring needed.
+ * mock PendingApproval objects below are the only wiring needed.
  */
 
 import React, { useState } from "react";
@@ -33,8 +36,8 @@ const MOCK_COMMANDS = ["help", "clear", "model", "provider", "skills", "goal", "
 const MOCK_SKILLS = ["deep-research", "code-review", "simplify", "run"];
 
 /**
- * Build a mock PendingApproval whose resolve logs the answer and the deferred
- * flag so we can confirm setImmediate actually deferred execution.
+ * Build a mock PendingApproval (plain shell.run — no diff) whose resolve logs
+ * the answer confirming the setImmediate deferral executed.
  */
 function makeMockApproval(): PendingApproval {
   return {
@@ -44,6 +47,26 @@ function makeMockApproval(): PendingApproval {
       // This function is called inside setImmediate in ApprovalPrompt.
       // The "deferred" label proves the setImmediate mechanism executed.
       console.error(`[preview] resolved (deferred) with: ${answer}`);
+    },
+  };
+}
+
+/**
+ * Build a mock PendingApproval for a file.edit tool — includes a `diff` field
+ * in toolInput so ApprovalPrompt's DiffView renders inline +/- lines.
+ * Validates the T7 requirement: file.edit approvals show embedded diff.
+ */
+function makeMockEditApproval(): PendingApproval {
+  return {
+    toolName: "file.edit",
+    toolInput: {
+      path: "src/example.ts",
+      old_string: "const foo = 1;",
+      new_string: "const bar = 1;",
+      diff: "- const foo = 1;\n+ const bar = 1;\n  \n- export { foo };\n+ export { bar };",
+    },
+    resolve: (answer) => {
+      console.error(`[preview] file.edit resolved (deferred) with: ${answer}`);
     },
   };
 }
@@ -59,6 +82,7 @@ function PreviewApp(): React.ReactElement {
   const completions = computeCompletions(inputValue, MOCK_COMMANDS, MOCK_SKILLS);
 
   const mockApproval = makeMockApproval();
+  const mockEditApproval = makeMockEditApproval();
 
   function handleSubmit(v: string): void {
     setSubmitted(v);
@@ -68,7 +92,7 @@ function PreviewApp(): React.ReactElement {
   return (
     <Box flexDirection="column" gap={1} padding={1}>
       <Text color="green" bold>
-        ── F4 Input Preview Harness ──
+        ── T7 Input + Approval Preview Harness ──
       </Text>
 
       <Box flexDirection="column">
@@ -85,8 +109,15 @@ function PreviewApp(): React.ReactElement {
       </Box>
 
       <Box flexDirection="column" marginTop={1}>
-        <Text color="gray">ApprovalPrompt (mock — press y/n/a to test deferred resolve):</Text>
+        <Text color="gray">ApprovalPrompt — shell.run (no diff, Select menu):</Text>
+        <Text color="gray" dimColor>  ↑↓ navigate, Enter confirm, y/a/n hotkeys; answer logged to stderr</Text>
         <ApprovalPrompt approval={mockApproval} />
+      </Box>
+
+      <Box flexDirection="column" marginTop={1}>
+        <Text color="gray">ApprovalPrompt — file.edit (with embedded DiffView):</Text>
+        <Text color="gray" dimColor>  T7 requirement: diff shown inline above Select menu</Text>
+        <ApprovalPrompt approval={mockEditApproval} />
       </Box>
 
       <Box marginTop={1}>
