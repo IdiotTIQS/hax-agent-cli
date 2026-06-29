@@ -3,18 +3,18 @@
   "version": "1.6.0",
   "type": "module",
   "description": "A professional AI coding assistant with Claude-like CLI experience. Explore codebases, read/write files, execute shell commands, and coordinate agent teams.",
-  "main": "src/index.js",
+  "main": "dist/index.js",
   "bin": {
-    "hax-agent": "./src/cli.js"
+    "hax-agent": "./dist/cli.js"
   },
   "scripts": {
-    "start": "node src/cli.js",
-    "dev": "tsx src/cli.js",
+    "start": "node dist/cli.js",
+    "dev": "tsx src/cli.ts",
     "build": "tsc -p tsconfig.build.json",
     "desktop:dev": "node desktop/scripts/dev.js",
     "desktop:start": "node desktop/scripts/start.js",
     "desktop:build": "vite build --config desktop/renderer/vite.config.js",
-    "auth:team": "node src/cli.js team auth-refactor",
+    "auth:team": "tsx src/cli.ts team auth-refactor",
     "typecheck": "tsc --noEmit",
     "lint": "node scripts/lint.js && tsc --noEmit",
     "test": "node scripts/run-tests.js",
