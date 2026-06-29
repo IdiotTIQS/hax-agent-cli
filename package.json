@@ -57,6 +57,7 @@
     "@google/generative-ai": "^0.24.1",
     "dompurify": "^3.4.2",
     "ink": "^7.1.0",
+    "ink-text-input": "^6.0.0",
     "markdown-it": "^14.1.1",
     "openai": "^6.35.0",
     "react": "^19.2.7"

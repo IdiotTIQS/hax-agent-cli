@@ -21,3 +21,9 @@ export type { FileDiffPreviewProps } from "./FileDiffPreview.js";
 
 export { ToolList } from "./ToolList.js";
 export type { ToolListProps } from "./ToolList.js";
+
+export { UserInput } from "./UserInput.js";
+export type { UserInputProps } from "./UserInput.js";
+
+export { ApprovalPrompt } from "./ApprovalPrompt.js";
+export type { ApprovalPromptProps } from "./ApprovalPrompt.js";

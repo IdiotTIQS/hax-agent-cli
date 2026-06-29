@@ -15,6 +15,7 @@ const nodeArgs = [
   'test/engine-system-prompt.test.ts',
   'test/engine-tool-result.test.ts',
   'test/tui-ink-markdown.test.ts',
+  'test/tui-ink-completions.test.ts',
 ];
 
 const major = parseInt(process.versions.node.split('.')[0], 10);
