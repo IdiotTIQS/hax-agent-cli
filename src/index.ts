@@ -10,7 +10,6 @@ import * as apiProvider from "./api/provider.js";
 import * as configSettings from "./config/settings.js";
 import * as skillsRegistry from "./skills/registry.js";
 import * as memoryStore from "./memory/store.js";
-import * as tuiIndex from "./tui/index.js";
 import * as commandsRegistry from "./commands/registry.js";
 
 // New core
@@ -180,7 +179,7 @@ export default {
   config: configSettings,
   skills: skillsRegistry,
   memory: memoryStore,
-  tui: tuiIndex,
+  // NOTE: `tui` namespace removed in F6 (breaking export change) — src/tui/index.ts was dead code.
   commands: commandsRegistry,
 
   // New core

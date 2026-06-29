@@ -565,3 +565,6 @@ export {
   Session, AgentEngine, HookExecutor, PermissionChecker,
   HookEvent, PermissionMode, SENSITIVE_PATH_PATTERNS,
 };
+
+// Named type exports so cli.ts / run.tsx can use real types instead of `as never`.
+export type { SessionProvider, SessionOptions, Sandbox, PluginRegistry };

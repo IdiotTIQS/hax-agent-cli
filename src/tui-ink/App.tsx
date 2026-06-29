@@ -63,7 +63,7 @@ export { reducer };
 
 /** Minimal engine interface — matches AgentEngine without importing it directly. */
 export interface EngineHandle {
-  sendMessage(text: string): AsyncIterable<{ type: string; [k: string]: unknown }>;
+  sendMessage(text: string): AsyncIterable<Record<string, unknown>>;
   interrupt(): void;
 }
 

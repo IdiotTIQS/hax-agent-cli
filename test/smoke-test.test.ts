@@ -32,7 +32,6 @@ import { Skill, SkillRegistry, parseFrontmatter } from "../src/skills/registry.j
 import { loadSettings, DEFAULTS } from "../src/config/settings.js";
 import { ProfileManager, BUILTIN } from "../src/config/profiles.js";
 import { loadProjectContext, buildEnvironmentContext, buildFullSystemPrompt } from "../src/prompts/manager.js";
-import { TUI } from "../src/tui/index.js";
 import { ANSI, THEME, stripAnsi, estimateStringTokens } from "../src/shared/utils.js";
 import * as cliMod from "../src/cli.js";
 import indexMod from "../src/index.js";
@@ -203,21 +202,6 @@ test("prompts/manager — prompt assembly", () => {
   assert.ok(prompt.includes("You are a helpful assistant."));
 });
 
-test("tui/index — Terminal UI", () => {
-  const tui = new TUI({ isTTY: false });
-  assert.equal(typeof tui.renderEvent, "function");
-  assert.equal(typeof tui.getPrompt, "function");
-  assert.equal(typeof tui.createApprovalCallback, "function");
-  tui._started = true;
-  tui.renderEvent({ type: "turn.started" });
-  tui.renderEvent({ type: "message.delta", delta: "Hello" });
-  tui.renderEvent({ type: "tool.start", name: "file.read", input: { path: "test.js" } });
-  tui.renderEvent({ type: "tool.result", name: "file.read", isError: false, durationMs: 5 });
-  tui.renderEvent({ type: "turn.completed" });
-  tui.renderEvent({ type: "turn.failed", error: { message: "test error" } });
-  tui.stop();
-});
-
 test("shared/utils — ANSI, THEME, helpers", () => {
   assert.ok(ANSI.reset);
   assert.ok(THEME.accent);
@@ -229,9 +213,10 @@ test("cli — CLI entry exports main()", () => {
   assert.equal(typeof cliMod.main, "function");
 });
 
-test("index — library exports all 8 subsystems", () => {
+test("index — library exports all 7 subsystems", () => {
   const lib = indexMod;
-  for (const key of ["engine", "tools", "api", "config", "skills", "memory", "tui", "commands"]) {
+  // NOTE: `tui` namespace was removed in F6 (src/tui/index.ts deleted as dead code)
+  for (const key of ["engine", "tools", "api", "config", "skills", "memory", "commands"]) {
     assert.ok(key in lib, `Missing export: ${key}`);
   }
 });

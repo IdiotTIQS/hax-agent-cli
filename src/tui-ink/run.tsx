@@ -26,7 +26,7 @@ import React, { createRef } from "react";
 import { render } from "ink";
 
 import { THEME, styled } from "../shared/utils.js";
-import { loadSettings } from "../config/settings.js";
+import { loadSettings, saveSettings } from "../config/settings.js";
 import { ProfileManager } from "../config/profiles.js";
 import { createProvider } from "../api/provider.js";
 import { createDefaultRegistry } from "../tools/registry.js";
@@ -37,6 +37,7 @@ import {
   HookExecutor,
   PermissionMode,
 } from "../engine/agent.js";
+import type { SessionProvider, PluginRegistry, Sandbox } from "../engine/agent.js";
 import { loadSkillRegistry } from "../skills/registry.js";
 import { loadPluginRegistry } from "../plugins/registry.js";
 import { SandboxAdapter } from "../sandbox/adapter.js";
@@ -113,7 +114,7 @@ export async function runInteractiveInk(flags: InkFlags): Promise<void> {
   // ── Provider ─────────────────────────────────────────────────────────────
   const provider = createProvider({ provider: providerName, model: modelName });
   if (flags.apiKey) {
-    (provider as unknown as Record<string, unknown>).apiKey = flags.apiKey;
+    provider.apiKey = flags.apiKey;
   }
 
   // ── Core infrastructure ──────────────────────────────────────────────────
@@ -169,12 +170,12 @@ export async function runInteractiveInk(flags: InkFlags): Promise<void> {
 
   // ── Session ──────────────────────────────────────────────────────────────
   const session = new Session({
-    provider: provider as never,
+    provider: provider as SessionProvider,
     toolRegistry,
     permissionManager: pm,
     hookExecutor: hooks,
-    pluginRegistry: pluginRegistry as never,
-    sandbox: sandbox as never,
+    pluginRegistry: pluginRegistry as PluginRegistry,
+    sandbox: sandbox as Sandbox | null,
   });
 
   // ── Restore saved permissions / thinking / theme ─────────────────────────
@@ -185,9 +186,8 @@ export async function runInteractiveInk(flags: InkFlags): Promise<void> {
     for (const t of permsSettings.deniedTools as string[]) pm.denyTool(t);
   }
   if (agentSettings?.thinking) {
-    (session as unknown as Record<string, unknown>)._thinking = true;
-    (session as unknown as Record<string, unknown>)._thinkIntensity =
-      agentSettings.thinkIntensity ?? null;
+    session._thinking = true;
+    session._thinkIntensity = agentSettings.thinkIntensity ?? null;
   }
   if (uiSettings?.theme) {
     try {
@@ -195,8 +195,30 @@ export async function runInteractiveInk(flags: InkFlags): Promise<void> {
     } catch (_) {}
   }
 
+  // ── saveActiveProfile — persist active profile to settings (mirrors runInteractive) ──
+  function saveActiveProfile(profilesRef: ProfileManager): void {
+    try {
+      const s = loadSettings();
+      if (!s.agent) s.agent = {};
+      s.agent._activeProfile = profilesRef.activeName;
+      s.agent.provider = profilesRef.active.provider;
+      s.agent.model = profilesRef.active.model;
+      saveSettings(s);
+    } catch (_) {}
+  }
+  // Persist the resolved active profile at startup so the next session restores it.
+  saveActiveProfile(profiles);
+
   // ── Approval bridge ───────────────────────────────────────────────────────
   // Create a ref that App will populate with its dispatch on first render.
+  // TIMING GUARANTEE: dispatchRef.current is null until App's first render.
+  // makeApprovalCallback wraps the ref — it must not be called before App
+  // mounts.  In practice the engine only calls approvalCallback from inside
+  // engine.sendMessage(), which is triggered by handleSubmit(), which only
+  // fires after App has mounted and the user submits input.  This structural
+  // guarantee means the null case in makeApprovalCallback is a safety net,
+  // not a normal code path.  If it ever fires, the Promise will hang — see
+  // makeApprovalCallback in App.tsx for the null guard comment.
   const dispatchRef: React.MutableRefObject<AppDispatch | null> = { current: null };
   const approvalCallback = makeApprovalCallback(dispatchRef);
 
@@ -206,15 +228,12 @@ export async function runInteractiveInk(flags: InkFlags): Promise<void> {
     session,
     projectRoot: process.cwd(),
     skillRegistry: skills,
-    approvalCallback: approvalCallback as never,
+    approvalCallback: approvalCallback,
     maxToolTurns: maxTurns,
   });
 
   // ── Command & skill names for completions ─────────────────────────────────
-  const commandNames = Object.keys(
-    ((commandsRegistryMod as unknown as Record<string, unknown>).commands ?? {}) as
-      Record<string, unknown>,
-  );
+  const commandNames = Object.keys(commandsRegistryMod.commands ?? {});
   const skillNames: string[] = [];
   try {
     for (const s of skills.list()) {
@@ -225,15 +244,11 @@ export async function runInteractiveInk(flags: InkFlags): Promise<void> {
   // ── Render ────────────────────────────────────────────────────────────────
   const { waitUntilExit } = render(
     <App
-      engine={engine as never}
+      engine={engine}
       pm={pm}
-      initialModel={
-        (provider as unknown as Record<string, unknown>).model as string ?? ""
-      }
+      initialModel={provider.model ?? ""}
       initialMode={pm.mode}
-      providerName={
-        (provider as unknown as Record<string, unknown>).name as string ?? ""
-      }
+      providerName={provider.name ?? ""}
       commandNames={commandNames}
       skillNames={skillNames}
       dispatchRef={dispatchRef}

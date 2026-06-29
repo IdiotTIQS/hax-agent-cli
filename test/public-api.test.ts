@@ -4,7 +4,8 @@ import test from 'node:test';
 import api from '../src/index.js';
 
 test('public API exposes core namespaces', () => {
-  for (const ns of ['engine', 'tools', 'api', 'config', 'skills', 'memory', 'tui', 'commands']) {
+  // NOTE: `tui` namespace was removed in F6 (src/tui/index.ts deleted as dead code)
+  for (const ns of ['engine', 'tools', 'api', 'config', 'skills', 'memory', 'commands']) {
     assert.equal(typeof api[ns], 'object', ns + ' should be object');
   }
 });
