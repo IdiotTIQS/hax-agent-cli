@@ -53,6 +53,7 @@ import {
 import { UserInput } from "./components/UserInput.js";
 import { ApprovalPrompt } from "./components/ApprovalPrompt.js";
 import { ConversationTurn } from "./components/ConversationTurn.js";
+import { CommandPalette } from "./components/CommandPalette.js";
 import { useGlobalKeybindings } from "./keybindings.js";
 import { computeCompletions } from "./completions.js";
 
@@ -182,6 +183,7 @@ export function App({
   );
 
   // ── Global keybindings ────────────────────────────────────────────────────
+  // Disable when approval prompt OR command palette is open (both are modal).
   useGlobalKeybindings({
     onCycleMode: handleCycleMode,
     onClear: () => dispatch({ type: "clear" }),
@@ -189,11 +191,30 @@ export function App({
       engine.interrupt();
       dispatch({ type: "interrupt" });
     },
-    isActive: !state.pendingApproval,
+    isActive: !state.pendingApproval && !state.commandPalette?.open,
   });
 
   // ── Completions ───────────────────────────────────────────────────────────
   const completions = computeCompletions(inputValue, commandNames, skillNames);
+
+  // ── Command palette input handler ─────────────────────────────────────────
+  const handleInputChange = useCallback(
+    (value: string) => {
+      setInputValue(value);
+      if (value.startsWith("/")) {
+        // Open or update the palette query as the user types.
+        if (state.commandPalette?.open) {
+          dispatch({ type: "update_palette", query: value });
+        } else {
+          dispatch({ type: "open_palette", query: value });
+        }
+      } else if (state.commandPalette?.open) {
+        // User cleared the "/" prefix — close the palette.
+        dispatch({ type: "close_palette" });
+      }
+    },
+    [state.commandPalette],
+  );
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
@@ -248,9 +269,22 @@ export function App({
 
       {/* ── Section 3: Bottom bar (input + status) ────────────────────────── */}
       <Box flexDirection="column">
+        {/* Command palette: shown above input when open and no approval pending */}
+        {state.commandPalette?.open && !state.pendingApproval ? (
+          <CommandPalette
+            query={state.commandPalette.query}
+            commandNames={commandNames}
+            skillNames={skillNames}
+            onPick={(value) => {
+              setInputValue(value + " ");
+              dispatch({ type: "close_palette" });
+            }}
+            onClose={() => dispatch({ type: "close_palette" })}
+          />
+        ) : null}
         <UserInput
           value={inputValue}
-          onChange={setInputValue}
+          onChange={handleInputChange}
           onSubmit={handleSubmit}
           disabled={state.isStreaming || !!state.pendingApproval}
           completions={completions}

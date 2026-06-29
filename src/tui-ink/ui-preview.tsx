@@ -10,6 +10,8 @@
  * Task 5: Renders ConversationTurn with mock committed turns including
  * tools, CJK text, interrupted flag, and error state.
  *
+ * Task 6: Renders CommandPalette with a mock "/" query and command/skill names.
+ *
  * Unmounts after 3 s.
  *
  * Run: npx tsx src/tui-ink/ui-preview.tsx
@@ -19,6 +21,7 @@ import { render, Box, Text } from "ink";
 import { StatusBar } from "./components/StatusBar.js";
 import { ToolList } from "./components/ToolList.js";
 import { ConversationTurn } from "./components/ConversationTurn.js";
+import { CommandPalette } from "./components/CommandPalette.js";
 import type { ToolCallState, CommittedTurn } from "./types.js";
 
 // ---------------------------------------------------------------------------
@@ -197,6 +200,32 @@ function Preview(): React.ReactElement {
 
       <Text>{"— ConversationTurn: normal turn in detail mode —"}</Text>
       <ConversationTurn turn={turnNormal} detail />
+
+      {/* ── Task 6: CommandPalette samples ────────────────────────── */}
+      <Text>{"— CommandPalette: query='/' (all commands) —"}</Text>
+      <CommandPalette
+        query="/"
+        commandNames={["help", "clear", "model", "provider", "skills", "goal", "yolo", "plan", "perms", "cost", "export", "history"]}
+        skillNames={["deep-research", "code-review", "simplify", "verify"]}
+        onPick={(v) => process.stdout.write("picked: " + v + "\n")}
+        onClose={() => process.stdout.write("palette closed\n")}
+      />
+      <Text>{"— CommandPalette: query='/mo' (filtered) —"}</Text>
+      <CommandPalette
+        query="/mo"
+        commandNames={["help", "clear", "model", "provider", "skills", "goal", "yolo", "plan", "perms", "cost", "export", "history"]}
+        skillNames={["deep-research", "code-review", "simplify", "verify"]}
+        onPick={(v) => process.stdout.write("picked: " + v + "\n")}
+        onClose={() => process.stdout.write("palette closed\n")}
+      />
+      <Text>{"— CommandPalette: query='/zzz' (no match → hidden) —"}</Text>
+      <CommandPalette
+        query="/zzz"
+        commandNames={["help", "clear", "model"]}
+        skillNames={[]}
+        onPick={(v) => process.stdout.write("picked: " + v + "\n")}
+        onClose={() => process.stdout.write("palette closed\n")}
+      />
     </Box>
   );
 }
