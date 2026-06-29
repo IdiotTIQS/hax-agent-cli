@@ -22,15 +22,11 @@
  *   - ApiRetryEvent           - retrying after error
  *   - ApiUsageEvent           - token usage info
  *
- * Optional-dep strategy: createRequire is used so that the lazy try-guarded
- * require() calls for @anthropic-ai/sdk and openai are preserved as-is inside
- * streamMessage(). This avoids making streamMessage() callers async and keeps
- * the optional-dependency semantics identical to the original CJS code.
+ * Optional-dep strategy: @anthropic-ai/sdk and openai are loaded via lazy
+ * `await import()` inside the async generator streamMessage() methods.
  */
 
 import EventEmitter from "events";
-import { createRequire } from "module";
-const require = createRequire(import.meta.url);
 
 // === API Stream Event Types ===
 
@@ -200,9 +196,11 @@ class AnthropicProviderAdapter extends ProviderAdapter {
   }
 
   async *streamMessage(request) {
+    let Anthropic;
     try {
-      const Anthropic = require("@anthropic-ai/sdk").default || require("@anthropic-ai/sdk");
-    } catch (e) {
+      const mod = /** @type {any} */ (await import("@anthropic-ai/sdk"));
+      Anthropic = mod.default || mod;
+    } catch {
       yield new ApiErrorEvent("@anthropic-ai/sdk is not installed. Run: npm install @anthropic-ai/sdk", "MISSING_DEPENDENCY", false);
       return;
     }
@@ -212,7 +210,6 @@ class AnthropicProviderAdapter extends ProviderAdapter {
       return;
     }
 
-    const Anthropic = /** @type {any} */ (require("@anthropic-ai/sdk").default || require("@anthropic-ai/sdk"));
     const client = new Anthropic({ apiKey: this.apiKey, baseURL: this.apiUrl });
 
     const model = request.model || this.model;
@@ -372,9 +369,11 @@ class OpenAIProviderAdapter extends ProviderAdapter {
   }
 
   async *streamMessage(request) {
+    let OpenAI;
     try {
-      require("openai");
-    } catch (e) {
+      const mod = /** @type {any} */ (await import("openai"));
+      OpenAI = mod.default || mod;
+    } catch {
       yield new ApiErrorEvent("openai package is not installed. Run: npm install openai", "MISSING_DEPENDENCY", false);
       return;
     }
@@ -384,7 +383,6 @@ class OpenAIProviderAdapter extends ProviderAdapter {
       return;
     }
 
-    const OpenAI = /** @type {any} */ (require("openai").default || require("openai"));
     const client = new OpenAI({ apiKey: this.apiKey, baseURL: this.apiUrl });
 
     const model = request.model || this.model;
