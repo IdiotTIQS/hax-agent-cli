@@ -1,5 +1,3 @@
-"use strict";
-
 /**
  * Image Tools — multimodal image processing for the agent.
  * Ported from OpenHarness tools/image_to_text_tool.py + image_generation_tool.py
@@ -9,8 +7,8 @@
  *   - image_generation — generate images from text descriptions
  */
 
-const fs = require("fs");
-const path = require("path");
+import fs from "fs";
+import path from "path";
 
 // === Image to Text (Vision) ===
 
@@ -229,12 +227,26 @@ function _getMediaType(ext) {
 }
 
 /**
+ * Try to dynamically import an optional dependency.
+ * Returns the module namespace or null if not installed.
+ * @param {string} name - package name
+ * @returns {Promise<any|null>}
+ */
+async function _tryRequire(name) {
+  try {
+    return await import(name);
+  } catch (_) {
+    return null;
+  }
+}
+
+/**
  * Call the vision API through the provider.
  * Tries Anthropic first (native image support), falls back to OpenAI.
  */
 async function _callVisionAPI(provider, base64Image, mediaType, prompt, maxTokens) {
-  const Anthropic = _tryRequire("@anthropic-ai/sdk");
-  const OpenAI = _tryRequire("openai");
+  const Anthropic = await _tryRequire("@anthropic-ai/sdk");
+  const OpenAI = await _tryRequire("openai");
 
   // Try Anthropic (native multimodal)
   if (Anthropic && provider.apiKey) {
@@ -309,7 +321,7 @@ async function _callVisionAPI(provider, base64Image, mediaType, prompt, maxToken
  * Generate an image using DALL-E (via OpenAI) or fallback.
  */
 async function _generateImage(prompt, options = {}) {
-  const OpenAI = _tryRequire("openai");
+  const OpenAI = await _tryRequire("openai");
 
   if (OpenAI) {
     const apiKey = process.env.OPENAI_API_KEY;
@@ -379,15 +391,7 @@ function _escapeXml(str) {
   return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
-function _tryRequire(name) {
-  try {
-    return require(name);
-  } catch (_) {
-    return null;
-  }
-}
-
-module.exports = {
+export {
   imageToTextTool,
   imageGenerationTool,
 };

@@ -1,5 +1,3 @@
-"use strict";
-
 /**
  * Plan Mode Tools — enter and exit planning mode.
  * Ported from OpenHarness tools/enter_plan_mode_tool.py + exit_plan_mode_tool.py
@@ -199,7 +197,7 @@ const exitPlanModeTool = {
   },
 };
 
-module.exports = {
+export {
   enterPlanModeTool,
   exitPlanModeTool,
   PlanModeState,

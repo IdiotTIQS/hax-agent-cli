@@ -1,5 +1,4 @@
-"use strict";
-const { ChannelAdapter } = require("../adapter");
+import { ChannelAdapter } from "../adapter.js";
 class DiscordAdapter extends ChannelAdapter {
   constructor(cfg={}) { super({name:"discord",...cfg}); this._token=cfg.token||""; }
   async send(target,message) {
@@ -8,4 +7,4 @@ class DiscordAdapter extends ChannelAdapter {
     catch(e) { return {ok:false,error:e.message}; }
   }
 }
-module.exports = { DiscordAdapter };
+export { DiscordAdapter };

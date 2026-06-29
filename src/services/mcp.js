@@ -1,5 +1,3 @@
-"use strict";
-
 /**
  * MCP Client — full Model Context Protocol client supporting
  * stdio and HTTP transports. Ported from OpenHarness mcp/client.py.
@@ -12,11 +10,11 @@
  *   toolRegistry.registerMCP(tools);
  */
 
-const { spawn } = require("child_process");
-const { EventEmitter } = require("events");
-const path = require("path");
-const fs = require("fs");
-const os = require("os");
+import { spawn } from "child_process";
+import { EventEmitter } from "events";
+import path from "path";
+import fs from "fs";
+import os from "os";
 
 // === MCP Server Config ===
 
@@ -360,4 +358,4 @@ class McpClientManager extends EventEmitter {
   }
 }
 
-module.exports = { McpClientManager, McpServerConfig };
+export { McpClientManager, McpServerConfig };

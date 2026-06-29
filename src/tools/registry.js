@@ -1,9 +1,10 @@
-"use strict";
-
-const fs = require("fs");
-const path = require("path");
-const { extendedTools } = require("./extended");
-const { validateWorkspacePath, isSensitivePath } = require("../sandbox/path-validator");
+import fs from "fs";
+import path from "path";
+import os from "os";
+import { globSync } from "glob";
+import { execSync } from "child_process";
+import { extendedTools } from "./extended.js";
+import { validateWorkspacePath, isSensitivePath } from "../sandbox/path-validator.js";
 
 class ToolRegistry {
   constructor(o = {}) { this.root = path.resolve(o.root || process.cwd()); this._tools = new Map(); }
@@ -20,7 +21,7 @@ function resolvePath(root, p) {
   var r = path.resolve(root, p);
   var home = path.join((process.env.HOME || process.env.USERPROFILE || ""), ".haxagent");
   // Allow project root, home .haxagent (tool_artifacts, memory, etc.), and temp dirs
-  if (r.startsWith(path.resolve(root)) || (home && r.startsWith(home)) || r.startsWith(require("os").tmpdir())) return r;
+  if (r.startsWith(path.resolve(root)) || (home && r.startsWith(home)) || r.startsWith(os.tmpdir())) return r;
   throw new Error("Path outside workspace: " + p);
 }
 function requireString(v, name) { if (typeof v !== "string" || !v.trim()) throw new Error(`${name} is required`); return v.trim(); }
@@ -51,7 +52,6 @@ const tools = {
     name: "file.glob", description: "Find files matching a glob pattern.",
     inputSchema: { type: "object", required: ["pattern"], properties: { pattern: { type: "string" }, maxResults: { type: "number", default: 100 } } },
     async execute(args, ctx) {
-      const { globSync } = require("glob");
       const matches = globSync(args.pattern, { cwd: ctx.root, nodir: true, ignore: ["node_modules/**", ".git/**"], absolute: false }).slice(0, args.maxResults || 100);
       return { ok: true, data: { pattern: args.pattern, matches, truncated: matches.length >= (args.maxResults || 100) } };
     },
@@ -65,7 +65,6 @@ const tools = {
       const dir = args.path ? resolvePath(ctx.root, args.path) : ctx.root;
       const pattern = new RegExp(args.query, "gi");
       const matches = []; const max = args.maxResults || 50;
-      const { globSync } = require("glob");
       const files = globSync(args.glob || "**/*.{js,ts,py,md,txt,json,yaml,yml,css,html}", { cwd: dir, nodir: true, ignore: ["node_modules/**", ".git/**"] });
       for (const f of files.slice(0, 200)) {
         if (matches.length >= max) break;
@@ -168,7 +167,6 @@ const tools = {
       }
 
       // Fallback: direct execution
-      const { execSync } = require("child_process");
       // Windows: convert common Unix commands
       if (process.platform === "win32") {
         if (/^(tail|head|grep|awk|sed)\s/.test(cmd)) {
@@ -281,4 +279,4 @@ function createDefaultRegistry(root) {
   for (const t of extendedTools) r.register(t);
   return r;
 }
-module.exports = { ToolRegistry, createDefaultRegistry, tools };
+export { ToolRegistry, createDefaultRegistry, tools };

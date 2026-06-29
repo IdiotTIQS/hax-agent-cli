@@ -1,5 +1,3 @@
-"use strict";
-
 /**
  * Worktree Tool — isolated git worktree management.
  * Ported from OpenHarness tools/enter_worktree_tool.py + swarm/worktree.py
@@ -8,9 +6,9 @@
  * conflicts on the same repository.
  */
 
-const { execSync } = require("child_process");
-const fs = require("fs");
-const path = require("path");
+import { execSync } from "child_process";
+import fs from "fs";
+import path from "path";
 
 // === Worktree Tool ===
 
@@ -374,7 +372,7 @@ function _generateBranchName(description) {
   return `${prefix}/worktree-${timestamp}`;
 }
 
-module.exports = {
+export {
   enterWorktreeTool,
   exitWorktreeTool,
   listWorktreesTool,

@@ -1,5 +1,4 @@
-"use strict";
-const { getCost } = require("../pricing");
+import { getCost } from "../pricing.js";
 
 class CostTracker {
   constructor() { this._turns = []; this._totalInput = 0; this._totalOutput = 0; }
@@ -21,4 +20,4 @@ class CostTracker {
     };
   }
 }
-module.exports = { CostTracker };
+export { CostTracker };

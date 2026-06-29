@@ -1,5 +1,7 @@
-"use strict";
-const fs = require("fs"); const path = require("path"); const os = require("os");
+import fs from "fs";
+import path from "path";
+import os from "os";
+
 const SESSION_DIR = path.join(os.homedir(), ".haxagent", "sessions");
 class SessionBackend {
   constructor() { if (!fs.existsSync(SESSION_DIR)) fs.mkdirSync(SESSION_DIR, { recursive: true }); }
@@ -7,4 +9,4 @@ class SessionBackend {
   load(filePath) { return JSON.parse(fs.readFileSync(filePath, "utf-8")); }
   list(sessionId) { if (!fs.existsSync(SESSION_DIR)) return []; return fs.readdirSync(SESSION_DIR).filter(f => f.startsWith(sessionId || "") && f.endsWith(".json")).sort().reverse().map(f => ({ path: path.join(SESSION_DIR, f), name: f })); }
 }
-module.exports = { SessionBackend };
+export { SessionBackend };

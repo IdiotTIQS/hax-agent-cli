@@ -1,12 +1,10 @@
-"use strict";
-
 /**
  * Path validator for sandbox operations.
  * Ported from OpenHarness sandbox/path_validator.py
  */
 
-const path = require("path");
-const fs = require("fs");
+import path from "path";
+import fs from "fs";
 
 const SENSITIVE_PATHS = [
   "/etc/passwd", "/etc/shadow", "/etc/sudoers", "/etc/ssh",
@@ -42,4 +40,4 @@ function validatePath(targetPath, workspaceRoot) {
   return resolved;
 }
 
-module.exports = { validateWorkspacePath, isSensitivePath, validatePath, PathViolationError, SENSITIVE_PATHS };
+export { validateWorkspacePath, isSensitivePath, validatePath, PathViolationError, SENSITIVE_PATHS };

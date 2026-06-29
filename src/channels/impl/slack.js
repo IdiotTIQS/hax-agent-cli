@@ -1,5 +1,4 @@
-"use strict";
-const { ChannelAdapter } = require("../adapter");
+import { ChannelAdapter } from "../adapter.js";
 class SlackAdapter extends ChannelAdapter {
   constructor(cfg={}) { super({name:"slack",...cfg}); this._botToken=cfg.botToken||""; }
   async send(target,message) {
@@ -8,4 +7,4 @@ class SlackAdapter extends ChannelAdapter {
     catch(e) { return {ok:false,error:e.message}; }
   }
 }
-module.exports = { SlackAdapter };
+export { SlackAdapter };

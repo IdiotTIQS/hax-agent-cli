@@ -1,5 +1,3 @@
-"use strict";
-
 /**
  * Personalization — extract environment facts from conversation.
  * Ported from OpenHarness personalization/extractor.py.
@@ -71,4 +69,4 @@ function factsToMarkdown(facts) {
   return lines.join("\n");
 }
 
-module.exports = { FACT_PATTERNS, extractFacts, extractLocalRules, factsToMarkdown };
+export { FACT_PATTERNS, extractFacts, extractLocalRules, factsToMarkdown };

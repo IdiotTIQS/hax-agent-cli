@@ -1,14 +1,12 @@
-"use strict";
-
 /**
  * QueryContext — shared context across a query run.
  * Tracks task focus, read files, invoked skills, work log, verified state.
  * Ported from OpenHarness engine/query.py QueryContext.
  */
 
-const path = require("path");
-const fs = require("fs");
-const os = require("os");
+import path from "path";
+import fs from "fs";
+import os from "os";
 
 const MAX_TRACKED_READ_FILES = 6;
 const MAX_TRACKED_SKILLS = 8;
@@ -144,7 +142,7 @@ function offloadToolOutput(toolName, toolUseId, output) {
 // === Prompt Too Long Detection ===
 
 // Import typed error classifier from core
-const { classifyApiError, isContextTooLongError } = require("../core/api/errors");
+import { classifyApiError, isContextTooLongError } from "../core/api/errors.js";
 
 /**
  * Check if an error indicates context/prompt is too long.
@@ -217,7 +215,7 @@ function rememberToolContext(ctx, toolName, toolInput, toolOutput) {
   }
 }
 
-module.exports = {
+export {
   QueryContext, offloadToolOutput, isPromptTooLongError,
   boundedCompletionTokens, hasImageBlocks, IMAGE_PREPROCESS_STATUS,
   rememberToolContext,

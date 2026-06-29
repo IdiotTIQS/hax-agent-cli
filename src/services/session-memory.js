@@ -1,5 +1,3 @@
-"use strict";
-
 /**
  * Session Memory - save and restore session snapshots.
  * Ported from OpenHarness services/session_memory/
@@ -8,9 +6,9 @@
  * for session resume, crash recovery, and auditing.
  */
 
-const fs = require("fs");
-const path = require("path");
-const os = require("os");
+import fs from "fs";
+import path from "path";
+import os from "os";
 
 // === Session Snapshot ===
 
@@ -197,4 +195,4 @@ class SessionMemoryStore {
   }
 }
 
-module.exports = { SessionSnapshot, SessionMemoryStore };
+export { SessionSnapshot, SessionMemoryStore };

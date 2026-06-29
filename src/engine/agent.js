@@ -1,19 +1,17 @@
-"use strict";
-
 /**
  * Agent Engine — core agent loop with QueryContext, parallel tool execution,
  * reactive compaction, and comprehensive permissions.
  * Based on OpenHarness engine/query_engine.py + engine/query.py pattern.
  */
 
-const { EventEmitter } = require("events");
-const path = require("path");
-const { ANSI, THEME, styled } = require("../shared/utils");
-const {
+import { EventEmitter } from "events";
+import path from "path";
+import { ANSI, THEME, styled } from "../shared/utils.js";
+import {
   QueryContext, offloadToolOutput, isPromptTooLongError,
   boundedCompletionTokens, rememberToolContext,
-} = require("./query");
-const { PermissionChecker: CorePermissionChecker, PermissionMode, SENSITIVE_PATH_PATTERNS } = require("../core/permissions/checker");
+} from "./query.js";
+import { PermissionChecker as CorePermissionChecker, PermissionMode, SENSITIVE_PATH_PATTERNS } from "../core/permissions/checker.js";
 
 
 // === Session ===
@@ -409,7 +407,7 @@ class AgentEngine extends EventEmitter {
   }
 }
 
-module.exports = {
+export {
   Session, AgentEngine, HookExecutor, PermissionChecker,
   HookEvent, PermissionMode, SENSITIVE_PATH_PATTERNS,
 };

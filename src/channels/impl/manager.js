@@ -1,4 +1,27 @@
-"use strict";
+import { TelegramAdapter } from "./telegram.js";
+import { SlackAdapter } from "./slack.js";
+import { DiscordAdapter } from "./discord.js";
+import { FeishuAdapter } from "./feishu.js";
+import { WechatAdapter } from "./wechat.js";
+import { DingtalkAdapter } from "./dingtalk.js";
+import { EmailAdapter } from "./email.js";
+import { QqAdapter } from "./qq.js";
+import { MatrixAdapter } from "./matrix.js";
+import { WhatsappAdapter } from "./whatsapp.js";
+
+const ADAPTER_MAP = {
+  telegram: TelegramAdapter,
+  slack: SlackAdapter,
+  discord: DiscordAdapter,
+  feishu: FeishuAdapter,
+  wechat: WechatAdapter,
+  dingtalk: DingtalkAdapter,
+  email: EmailAdapter,
+  qq: QqAdapter,
+  matrix: MatrixAdapter,
+  whatsapp: WhatsappAdapter,
+};
+
 class ChannelImplManager {
   constructor() { this._impls = new Map(); }
   register(adapter) { this._impls.set(adapter.name, adapter); return this; }
@@ -6,14 +29,13 @@ class ChannelImplManager {
   list() { return [...this._impls.values()]; }
   static fromConfig(configs = {}) {
     const mgr = new ChannelImplManager();
-    const names = ["telegram","slack","discord","feishu","wechat","dingtalk","email","qq","matrix","whatsapp"];
-    for (const name of names) {
+    for (const [name, AdapterClass] of Object.entries(ADAPTER_MAP)) {
       const cfg = configs[name];
       if (cfg && cfg.enabled) {
-        try { const mod = require("./"+name); const key = name.charAt(0).toUpperCase()+name.slice(1)+"Adapter"; if (mod[key]) mgr.register(new mod[key](cfg)); } catch (_) {}
+        try { if (AdapterClass) mgr.register(new AdapterClass(cfg)); } catch (_) {}
       }
     }
     return mgr;
   }
 }
-module.exports = { ChannelImplManager };
+export { ChannelImplManager };

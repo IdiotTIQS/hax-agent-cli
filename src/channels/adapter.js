@@ -1,4 +1,3 @@
-"use strict";
 /** Channel adapter base. Ported from OpenHarness channels/adapter.py */
 
 /**
@@ -41,4 +40,4 @@ class ChannelManager {
   async stopAll() { for (const a of this._adapters.values()) await a.stop(); }
 }
 
-module.exports = { ChannelAdapter, ChannelManager };
+export { ChannelAdapter, ChannelManager };

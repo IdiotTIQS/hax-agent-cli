@@ -1,5 +1,4 @@
-"use strict";
-const { EventEmitter } = require("events");
+import { EventEmitter } from "events";
 class MessageBus extends EventEmitter {
   constructor() { super(); this._inbound = []; this._outbound = []; }
   pushInbound(msg) { this._inbound.push(msg); this.emit("message", msg); }
@@ -7,4 +6,4 @@ class MessageBus extends EventEmitter {
   drainInbound() { const msgs = [...this._inbound]; this._inbound = []; return msgs; }
   drainOutbound() { const msgs = [...this._outbound]; this._outbound = []; return msgs; }
 }
-module.exports = { MessageBus };
+export { MessageBus };

@@ -1,5 +1,3 @@
-"use strict";
-
 /**
  * Memory Extract — LLM-based memory extraction from conversation.
  * Ported from OpenHarness services/memory_extract/
@@ -16,7 +14,7 @@
  * - Prompt template with existing memory context
  */
 
-const crypto = require("crypto");
+import crypto from "crypto";
 
 // === Memory Categories ===
 
@@ -281,7 +279,7 @@ function buildExtractionRequest(messages, existingMemories = []) {
   };
 }
 
-module.exports = {
+export {
   MemoryCategory,
   MemoryEntry,
   MemoryExtractor,

@@ -1,5 +1,4 @@
-"use strict";
-const { ChannelAdapter } = require("../adapter");
+import { ChannelAdapter } from "../adapter.js";
 class TelegramAdapter extends ChannelAdapter {
   constructor(cfg={}) { super({name:"telegram",...cfg}); this._token=cfg.token||""; }
   async send(target,message) {
@@ -8,4 +7,4 @@ class TelegramAdapter extends ChannelAdapter {
     catch(e) { return {ok:false,error:e.message}; }
   }
 }
-module.exports = { TelegramAdapter };
+export { TelegramAdapter };

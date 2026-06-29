@@ -1,5 +1,4 @@
-"use strict";
-const { ChannelAdapter } = require("../adapter");
+import { ChannelAdapter } from "../adapter.js";
 class FeishuAdapter extends ChannelAdapter {
   constructor(cfg={}) { super({name:"feishu",...cfg}); this._appId=cfg.appId||""; this._appSecret=cfg.appSecret||""; this._domain=cfg.domain||"https://open.feishu.cn"; }
   async send(target,message) {
@@ -14,4 +13,4 @@ class FeishuAdapter extends ChannelAdapter {
     } catch(e) { return {ok:false,error:e.message}; }
   }
 }
-module.exports = { FeishuAdapter };
+export { FeishuAdapter };

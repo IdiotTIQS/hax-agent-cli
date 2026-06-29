@@ -1,5 +1,3 @@
-"use strict";
-
 /**
  * SendMessage Tool — inter-agent message passing.
  * Ported from OpenHarness tools/send_message_tool.py
@@ -333,7 +331,7 @@ class TeamMessageCoordinator {
   }
 }
 
-module.exports = {
+export {
   sendMessageTool,
   AgentMessageStore,
   TeamMessageCoordinator,

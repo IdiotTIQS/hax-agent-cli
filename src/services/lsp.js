@@ -1,13 +1,11 @@
-"use strict";
-
 /**
  * LSP (Lightweight Symbol Parser) — read-only code intelligence.
  * Provides symbol extraction, go-to-definition, find-references for JS/TS/Python.
  * Ported from OpenHarness services/lsp/.
  */
 
-const fs = require("fs");
-const path = require("path");
+import fs from "fs";
+import path from "path";
 
 const SKIP = new Set([".git", "node_modules", ".venv", "venv", "__pycache__", ".hax-agent"]);
 const EXT_MAP = { ".js": "js", ".mjs": "js", ".cjs": "js", ".jsx": "js", ".ts": "ts", ".tsx": "ts", ".py": "python", ".pyw": "python" };
@@ -105,4 +103,4 @@ function workspaceSearch(root, query) {
 
 function _line(code, idx) { return (code.slice(0, idx).match(/\n/g) || []).length + 1; }
 
-module.exports = { Symbol, listSymbols, goToDefinition, findReferences, workspaceSearch, detectLanguage, iterFiles };
+export { Symbol, listSymbols, goToDefinition, findReferences, workspaceSearch, detectLanguage, iterFiles };

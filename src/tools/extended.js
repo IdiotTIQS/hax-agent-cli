@@ -1,5 +1,3 @@
-"use strict";
-
 /**
  * Extended Tools — multi-agent, workflow, and infrastructure tools.
  * Ported from OpenHarness tools directory.
@@ -13,12 +11,14 @@
  *   F) MCP: list_mcp_resources, read_mcp_resource, list_mcp_tools
  */
 
-const fs = require("fs");
-const path = require("path");
-const crypto = require("crypto");
-const os = require("os");
-const { listMcpResourcesTool, readMcpResourceTool, listMcpToolsTool } = require("./mcp-tools");
-const { imageToTextTool, imageGenerationTool } = require("./image-tools");
+import fs from "fs";
+import path from "path";
+import crypto from "crypto";
+import os from "os";
+import { globSync } from "glob";
+import { execSync } from "child_process";
+import { listMcpResourcesTool, readMcpResourceTool, listMcpToolsTool } from "./mcp-tools.js";
+import { imageToTextTool, imageGenerationTool } from "./image-tools.js";
 
 // === Helpers ===
 const resolvePath = (root, p) => {
@@ -57,12 +57,12 @@ const agentTool = {
 
     // Actually run sub-agent via hax-agent --batch
     try {
-      var cliPath = require("path").join(ctx.root || process.cwd(), "src", "cli.js");
+      var cliPath = path.join(ctx.root || process.cwd(), "src", "cli.js");
       var escaped = args.prompt.replace(/"/g, '\\"').replace(/\n/g, " ");
       var cmd = '"' + process.execPath + '" "' + cliPath + '" --batch "' + escaped + '"';
       var timeout = Math.min(args.maxTurns || 10, 20) * 60000;
 
-      var stdout = require("child_process").execSync(cmd, /** @type {any} */ ({
+      var stdout = execSync(cmd, /** @type {any} */ ({
         cwd: ctx.root, timeout: timeout, encoding: "utf-8", maxBuffer: 500 * 1024, shell: true,
       })).trim().slice(0, 30000);
 
@@ -241,7 +241,7 @@ const enterPlanModeTool = {
   async execute(args, ctx) {
     const pm = ctx.session?.permissionManager;
     if (pm) {
-      const { PermissionMode } = require("../engine/agent");
+      const { PermissionMode } = await import("../engine/agent.js");
       pm.mode = PermissionMode.PLAN;
       return { ok: true, data: { mode: "plan", message: "Entered plan mode. All mutating tools are blocked." } };
     }
@@ -257,7 +257,7 @@ const exitPlanModeTool = {
   async execute(args, ctx) {
     const pm = ctx.session?.permissionManager;
     if (pm) {
-      const { PermissionMode } = require("../engine/agent");
+      const { PermissionMode } = await import("../engine/agent.js");
       pm.mode = PermissionMode.DEFAULT;
       return { ok: true, data: { mode: "normal", message: "Exited plan mode. Tools restored." } };
     }
@@ -274,7 +274,6 @@ const enterWorktreeTool = {
     properties: { branch: { type: "string" }, path: { type: "string" } },
   },
   async execute(args, ctx) {
-    const { execSync } = require("child_process");
     const branch = args.branch || `hax-worktree-${Date.now().toString(36)}`;
     const wp = args.path || path.join(os.tmpdir(), "hax-worktree", branch);
     try {
@@ -292,7 +291,6 @@ const exitWorktreeTool = {
   description: "Remove an isolated git worktree.",
   inputSchema: { type: "object", required: ["path"], properties: { path: { type: "string" } } },
   async execute(args, ctx) {
-    const { execSync } = require("child_process");
     try {
       execSync(`git worktree remove "${args.path}"`, { cwd: ctx.root || process.cwd(), encoding: "utf-8" });
       return { ok: true, data: { removed: args.path } };
@@ -456,7 +454,8 @@ const configTool = {
     },
   },
   async execute(args, ctx) {
-    const settings = ctx.session?.settings || require("../config/settings").loadSettings();
+    const { loadSettings } = await import("../config/settings.js");
+    const settings = ctx.session?.settings || loadSettings();
     if (args.action === "set" && args.key && args.value !== undefined) {
       const keys = args.key.split(".");
       let obj = settings;
@@ -484,7 +483,6 @@ const globTool = {
     },
   },
   async execute(args, ctx) {
-    const { globSync } = require("glob");
     const ignore = args.ignore || ["node_modules/**", ".git/**", "**/__pycache__/**", "**/.venv/**"];
     const dir = args.path ? resolvePath(ctx.root, args.path) : ctx.root;
     const matches = globSync(args.pattern, { cwd: dir, nodir: true, ignore, absolute: false }).slice(0, args.maxResults || 500);
@@ -511,7 +509,6 @@ const grepTool = {
     },
   },
   async execute(args, ctx) {
-    const { globSync } = require("glob");
     const dir = args.path ? resolvePath(ctx.root, args.path) : ctx.root;
     const include = args.include || "**/*.{js,ts,py,md,json,yaml,yml,toml,rs,go,java,c,cpp,h,hpp,css,html,sh,bat,xml,svg}";
     const ignore = args.exclude ? [args.exclude, "node_modules/**", ".git/**"] : ["node_modules/**", ".git/**"];
@@ -553,7 +550,7 @@ const skillTool = {
   },
   async execute(args, ctx) {
     try {
-      const reg = require("../skills/registry").loadSkillRegistry(ctx.root || process.cwd());
+      const reg = (await import("../skills/registry.js")).loadSkillRegistry(ctx.root || process.cwd());
       const skill = reg.get(args.name);
       if (!skill) return { ok: false, error: { code: "NOT_FOUND", message: `Skill ${args.name} not found` } };
       return { ok: true, data: { name: args.name, content: skill.content, description: skill.description } };
@@ -578,7 +575,7 @@ const lspTool = {
   },
   async execute(args, ctx) {
     try {
-      const lsp = require("../services/lsp");
+      const lsp = await import("../services/lsp.js");
       const root = ctx.root || process.cwd();
       if (args.action === "search") {
         return { ok: true, data: lsp.workspaceSearch(root, args.symbol || "").slice(0, 30) };
@@ -703,4 +700,4 @@ const extendedTools = [
   askUserQuestionTool, notebookEditTool,
 ];
 
-module.exports = { extendedTools };
+export { extendedTools };

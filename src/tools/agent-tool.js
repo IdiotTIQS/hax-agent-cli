@@ -1,5 +1,3 @@
-"use strict";
-
 /**
  * Agent Tool — spawn sub-agents for independent tasks.
  * Ported from OpenHarness tools/agent_tool.py
@@ -11,8 +9,9 @@
  * - Result collection and error handling
  */
 
-const { execSync } = require("child_process");
-const path = require("path");
+import { execSync } from "child_process";
+import fs from "fs";
+import path from "path";
 
 // === Agent Tool ===
 
@@ -221,7 +220,6 @@ function _findHaxAgentPath() {
 
     for (const candidate of candidates) {
       try {
-        const fs = require("fs");
         if (fs.existsSync(candidate)) return candidate;
       } catch (_) {}
     }
@@ -239,4 +237,4 @@ function _findHaxAgentPath() {
   }
 }
 
-module.exports = { agentTool };
+export { agentTool };

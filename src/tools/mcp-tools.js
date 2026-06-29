@@ -1,5 +1,3 @@
-"use strict";
-
 /**
  * MCP Tools — bridge MCP servers to the Agent tool system.
  *
@@ -312,7 +310,7 @@ async function _readResource(manager, serverName, info, uri) {
   throw new Error("Server has no active transport");
 }
 
-module.exports = {
+export {
   listMcpResourcesTool,
   readMcpResourceTool,
   listMcpToolsTool,

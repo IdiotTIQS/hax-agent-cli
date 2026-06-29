@@ -1,5 +1,3 @@
-"use strict";
-
 /**
  * Autodream - automated memory consolidation and cleanup.
  * Ported from OpenHarness services/autodream/
@@ -21,10 +19,10 @@
  * - Runs non-blocking (spawned in background)
  */
 
-const fs = require("fs");
-const path = require("path");
-const os = require("os");
-const crypto = require("crypto");
+import fs from "fs";
+import path from "path";
+import os from "os";
+import crypto from "crypto";
 
 // === Autodream Config ===
 
@@ -418,4 +416,4 @@ class AutodreamScheduler {
   }
 }
 
-module.exports = { AutodreamManager, AutodreamScheduler, DEFAULT_CONFIG };
+export { AutodreamManager, AutodreamScheduler, DEFAULT_CONFIG };

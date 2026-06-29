@@ -1,4 +1,3 @@
-"use strict";
 /** Base channel configurations. Ported from OpenHarness channels/impl/base.py */
 
 const BaseChannelConfig = { enabled: false, allowFrom: [] };
@@ -15,4 +14,4 @@ const ChannelConfigs = {
   whatsapp: { ...BaseChannelConfig, accessToken: "", phoneNumberId: "" },
 };
 
-module.exports = { BaseChannelConfig, ChannelConfigs };
+export { BaseChannelConfig, ChannelConfigs };
