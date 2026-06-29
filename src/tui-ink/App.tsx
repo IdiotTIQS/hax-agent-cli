@@ -282,6 +282,7 @@ export function App({
         inputTokens={state.inputTokens}
         outputTokens={state.outputTokens}
         cost={state.cost}
+        turnCount={state.turnCount}
       />
 
       {/* ── Chat input ────────────────────────────────────────────────── */}
