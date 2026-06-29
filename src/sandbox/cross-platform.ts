@@ -4,7 +4,7 @@
  * without requiring Docker.
  */
 
-import { spawn } from "child_process";
+import { spawn, execSync } from "child_process";
 import fs from "fs";
 import path from "path";
 import os from "os";
@@ -16,14 +16,12 @@ function detectBestBackend(): string {
   const p = process.platform;
   if (p === "linux") {
     try {
-      const { execSync } = require("child_process") as typeof import("child_process");
       execSync("which bwrap", { encoding: "utf-8", timeout: 3000, stdio: "pipe" });
       return "bwrap";
     } catch (_) {}
   }
   if (p === "darwin") {
     try {
-      const { execSync } = require("child_process") as typeof import("child_process");
       execSync("which sandbox-exec", { encoding: "utf-8", timeout: 3000, stdio: "pipe" });
       return "macos";
     } catch (_) {}
@@ -69,7 +67,6 @@ class BwrapSandbox {
   static isAvailable(): boolean {
     if (process.platform !== "linux") return false;
     try {
-      const { execSync } = require("child_process") as typeof import("child_process");
       execSync("which bwrap", { encoding: "utf-8", timeout: 3000, stdio: "pipe" });
       return true;
     } catch (_) { return false; }
@@ -126,7 +123,6 @@ class MacOSSandbox {
   static isAvailable(): boolean {
     if (process.platform !== "darwin") return false;
     try {
-      const { execSync } = require("child_process") as typeof import("child_process");
       execSync("which sandbox-exec", { encoding: "utf-8", timeout: 3000, stdio: "pipe" });
       return true;
     } catch (_) { return false; }
@@ -198,7 +194,6 @@ class WinSandbox {
 
     if (this._network) {
       try {
-        const { execSync } = require("child_process") as typeof import("child_process");
         execSync(
           `netsh advfirewall firewall add rule name="${this._ruleName}" dir=out action=block`,
           { encoding: "utf-8", timeout: 5000, stdio: "pipe" }
@@ -257,7 +252,6 @@ class WinSandbox {
   stop(): void {
     if (this._hasFirewall) {
       try {
-        const { execSync } = require("child_process") as typeof import("child_process");
         execSync(`netsh advfirewall firewall delete rule name="${this._ruleName}"`, { encoding: "utf-8", timeout: 5000, stdio: "pipe" });
       } catch (_) {}
       this._hasFirewall = false;

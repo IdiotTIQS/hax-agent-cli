@@ -4,7 +4,7 @@
  * Supports: auto, docker, bwrap, macos, windows, none
  */
 
-import { spawn } from "child_process";
+import { spawn, execSync } from "child_process";
 import { PlatformSandbox, detectBestBackend } from "./cross-platform.js";
 import { DockerSandbox } from "./session.js";
 
@@ -110,9 +110,7 @@ class SandboxAdapter {
   /** Sync exec — backward-compatible. */
   exec(command: string, opts: ExecOptions = {}): string {
     if (this._impl?.exec) return this._impl.exec(command, opts) as string;
-    // Fallback: use child_process.execSync via dynamic require
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { execSync } = require("child_process") as typeof import("child_process");
+    // Fallback: use child_process.execSync (imported at top — ESM has no require).
     return execSync(command, { encoding: "utf-8", cwd: opts.cwd || process.cwd(), timeout: opts.timeoutMs || 30000 }) as string;
   }
 }
