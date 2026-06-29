@@ -1,27 +1,331 @@
-import React from "react";
-import { Box, Text } from "ink";
-
 /**
- * Minimal ink App skeleton (Stage E).
+ * App.tsx — ink TUI root component (Stage F5).
  *
- * This is the seed of the ink-based TUI that will replace the readline +
- * ResponseRenderer + TUI stack in Stage F. It is intentionally NOT wired into
- * cli.ts yet — the existing readline loop remains the live interface. This
- * component only proves the ink + React + TS(NodeNext, jsx:react-jsx)
- * toolchain runs under both dev (tsx) and build (tsc -> node).
+ * Responsibilities:
+ *  1. Owns the AppState via useReducer(reducer, createInitialState()).
+ *  2. Drives the engine's async-generator event stream per submitted turn.
+ *  3. Bridges the engine approvalCallback → React state via a Promise/dispatch
+ *     pattern (RISK 1 — see approval bridge section below).
+ *  4. Composes all F3 / F4 components into the full TUI layout.
+ *  5. Wires global keybindings (F4 useGlobalKeybindings).
+ *
+ * ─── Approval Bridge (RISK 1) ─────────────────────────────────────────────
+ *
+ * The engine's approvalCallback is constructed BEFORE App renders (in
+ * run.tsx).  It needs to dispatch set_approval into App's reducer.  Since
+ * App owns the dispatch via useReducer internally, we expose it through an
+ * optional `dispatchRef` prop:  App assigns dispatchRef.current = dispatch
+ * during render (safe: this is a ref mutation, not a state mutation).
+ *
+ * run.tsx creates a makeApprovalCallback(dispatchRef) and passes the same
+ * dispatchRef to App.  On first render App populates the ref; thereafter the
+ * approval callback always targets the current dispatch.
+ *
+ * The wrappedResolve given to ApprovalPrompt:
+ *   (answer) => {
+ *     engineResolve(answer);          // unblock the engine generator
+ *     dispatch(set_approval(null));   // unmount ApprovalPrompt
+ *   }
+ * ApprovalPrompt fires it via setImmediate (F4) — after ink's render cycle.
+ *
+ * ─── TextStream optimisation note ─────────────────────────────────────────
+ *
+ * For F5 we accept the simple full-text re-render on every message.delta.
+ * In practice ink batches renders within a single event-loop tick, so
+ * per-delta re-renders are fast for typical token rates.  No line-buffer
+ * optimisation added; documented here for F6 if needed.
  */
-export interface AppProps {
-  name?: string;
+
+import React, { useReducer, useState, useRef, useCallback } from "react";
+import { Box, Text, Static } from "ink";
+
+import { reducer } from "./reducer.js";
+import { createInitialState } from "./types.js";
+import type { AppState, PendingApproval, ConversationMessage } from "./types.js";
+
+import {
+  StatusBar,
+  SpinnerLine,
+  ThinkingBlock,
+  TextStream,
+  ToolList,
+} from "./components/index.js";
+import { UserInput } from "./components/UserInput.js";
+import { ApprovalPrompt } from "./components/ApprovalPrompt.js";
+import { useGlobalKeybindings } from "./keybindings.js";
+import { computeCompletions } from "./completions.js";
+
+export { reducer };
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+/** Minimal engine interface — matches AgentEngine without importing it directly. */
+export interface EngineHandle {
+  sendMessage(text: string): AsyncIterable<{ type: string; [k: string]: unknown }>;
+  interrupt(): void;
 }
 
-export function App({ name = "HaxAgent" }: AppProps): React.ReactElement {
+export type AppDispatch = React.Dispatch<Parameters<typeof reducer>[1]>;
+
+export interface AppProps {
+  engine: EngineHandle;
+  /** Permission manager for mode cycling (pm.mode is mutated for readline compat). */
+  pm: { mode: string };
+  initialModel?: string;
+  initialMode?: string;
+  providerName?: string;
+  /** Slash command names for completions (no leading /). */
+  commandNames?: string[];
+  /** Skill names for completions (no leading /). */
+  skillNames?: string[];
+  /**
+   * Optional external ref that App will populate with its dispatch function.
+   * Used by run.tsx to wire the approvalCallback (constructed before render)
+   * into the reducer after first render.
+   */
+  dispatchRef?: React.MutableRefObject<AppDispatch | null>;
+}
+
+// ---------------------------------------------------------------------------
+// CommittedMessage — rendered inside <Static> for perf
+// ---------------------------------------------------------------------------
+
+function CommittedMessage({ msg }: { msg: ConversationMessage }): React.ReactElement {
+  if (msg.role === "user") {
+    return (
+      <Box flexDirection="row" marginBottom={1}>
+        <Text color="cyan" bold>{"You  "}</Text>
+        <Text>{msg.text}</Text>
+      </Box>
+    );
+  }
+  // assistant — TextStream handles markdown rendering
   return (
-    <Box flexDirection="column">
-      <Text color="green">
-        ink TUI online — {name}
-      </Text>
+    <Box flexDirection="column" marginBottom={1}>
+      <TextStream text={msg.text} />
     </Box>
   );
+}
+
+// ---------------------------------------------------------------------------
+// App
+// ---------------------------------------------------------------------------
+
+export function App({
+  engine,
+  pm,
+  initialModel = "",
+  initialMode = "normal",
+  providerName = "",
+  commandNames = [],
+  skillNames = [],
+  dispatchRef,
+}: AppProps): React.ReactElement {
+  // ── Reducer ───────────────────────────────────────────────────────────────
+  const [state, dispatch] = useReducer(
+    reducer,
+    createInitialState({
+      model: initialModel,
+      permissionMode: initialMode,
+      providerName,
+    }),
+  );
+
+  // Expose dispatch to the external dispatchRef (for approval bridge).
+  // Safe: ref mutations during render don't cause re-renders.
+  if (dispatchRef) {
+    dispatchRef.current = dispatch;
+  }
+
+  // ── Controlled input value ────────────────────────────────────────────────
+  const [inputValue, setInputValue] = useState("");
+
+  // ── Turn-overlap guard ────────────────────────────────────────────────────
+  const isStreamingRef = useRef(false);
+
+  // ── Spinner start time ────────────────────────────────────────────────────
+  const spinnerStartRef = useRef(Date.now());
+
+  // ── Permission mode cycling ───────────────────────────────────────────────
+  const modes = ["normal", "yolo", "plan", "full_auto"] as const;
+
+  const handleCycleMode = useCallback(() => {
+    const idx = modes.indexOf(state.permissionMode as typeof modes[number]);
+    const next = modes[(idx + 1) % modes.length];
+    pm.mode = next;
+    dispatch({ type: "set_mode", mode: next });
+  }, [state.permissionMode, pm]);
+
+  // ── Submit handler ────────────────────────────────────────────────────────
+  const handleSubmit = useCallback(
+    async (text: string) => {
+      const trimmed = text.trim();
+      if (!trimmed) return;
+      if (isStreamingRef.current) return;
+
+      setInputValue("");
+      spinnerStartRef.current = Date.now();
+
+      // Optimistic: push user message + start spinner immediately.
+      dispatch({ type: "submit_input", text: trimmed });
+      dispatch({ type: "turn_start" });
+
+      isStreamingRef.current = true;
+
+      try {
+        for await (const event of engine.sendMessage(trimmed)) {
+          // Cast via unknown to satisfy the discriminated union.
+          // The engine yields objects matching AgentEvent shapes exactly.
+          dispatch({
+            type: "engine_event",
+            event: event as unknown as Parameters<typeof reducer>[1] extends
+              { type: "engine_event"; event: infer E } ? E : never,
+          });
+        }
+      } catch (err) {
+        dispatch({
+          type: "engine_event",
+          event: {
+            type: "turn.failed",
+            error: { message: (err as Error).message ?? "Unknown error" },
+          },
+        });
+      } finally {
+        isStreamingRef.current = false;
+      }
+    },
+    [engine],
+  );
+
+  // ── Global keybindings ────────────────────────────────────────────────────
+  useGlobalKeybindings({
+    onCycleMode: handleCycleMode,
+    onClear: () => dispatch({ type: "clear" }),
+    onInterrupt: () => {
+      engine.interrupt();
+      dispatch({ type: "interrupt" });
+    },
+    isActive: !state.pendingApproval,
+  });
+
+  // ── Completions ───────────────────────────────────────────────────────────
+  const completions = computeCompletions(inputValue, commandNames, skillNames);
+
+  // ── Render ────────────────────────────────────────────────────────────────
+  return (
+    <Box flexDirection="column">
+      {/* ── Committed turns (Static prevents re-rendering old messages) ── */}
+      <Static items={state.messages}>
+        {(msg, i) => <CommittedMessage key={i} msg={msg} />}
+      </Static>
+
+      {/* ── Active turn chrome ─────────────────────────────────────────── */}
+      {(state.isStreaming || state.isWaiting) && (
+        <Box flexDirection="column">
+          {state.currentThinking ? (
+            <ThinkingBlock text={state.currentThinking} />
+          ) : null}
+
+          {state.currentTurnText ? (
+            <TextStream text={state.currentTurnText} />
+          ) : null}
+
+          {state.currentTools.length > 0 ? (
+            <ToolList tools={state.currentTools} />
+          ) : null}
+
+          {state.isWaiting && (
+            <SpinnerLine
+              startTime={spinnerStartRef.current}
+              tokenCount={state.inputTokens + state.outputTokens}
+            />
+          )}
+        </Box>
+      )}
+
+      {/* ── Tool approval prompt ───────────────────────────────────────── */}
+      {state.pendingApproval ? (
+        <ApprovalPrompt approval={state.pendingApproval} />
+      ) : null}
+
+      {/* ── Error line ────────────────────────────────────────────────── */}
+      {state.currentError ? (
+        <Box marginTop={1}>
+          <Text color="red">Error: {state.currentError}</Text>
+        </Box>
+      ) : null}
+
+      {/* ── Interrupted notice ────────────────────────────────────────── */}
+      {state.isInterrupted && !state.isStreaming ? (
+        <Box marginTop={1}>
+          <Text color="yellow" dimColor>
+            ⚡ Interrupted
+          </Text>
+        </Box>
+      ) : null}
+
+      {/* ── Transient status message ──────────────────────────────────── */}
+      {state.statusMessage ? (
+        <Box>
+          <Text color="gray" dimColor>
+            {state.statusMessage}
+          </Text>
+        </Box>
+      ) : null}
+
+      {/* ── Status bar ────────────────────────────────────────────────── */}
+      <StatusBar
+        model={state.model}
+        mode={state.permissionMode}
+        inputTokens={state.inputTokens}
+        outputTokens={state.outputTokens}
+        cost={state.cost}
+      />
+
+      {/* ── Chat input ────────────────────────────────────────────────── */}
+      <UserInput
+        value={inputValue}
+        onChange={setInputValue}
+        onSubmit={handleSubmit}
+        disabled={state.isStreaming || !!state.pendingApproval}
+        completions={completions}
+        promptLabel={state.isStreaming ? "… " : "> "}
+      />
+    </Box>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// makeApprovalCallback
+// ---------------------------------------------------------------------------
+
+/**
+ * Build an approvalCallback for AgentEngine that bridges through App's reducer.
+ *
+ * Call this BEFORE render(<App dispatchRef={ref} />) and pass the callback to
+ * AgentEngine.  App populates `ref.current = dispatch` on first render so the
+ * callback always targets the live dispatch.
+ *
+ * @param dispatchRef - mutable ref that App will populate with its dispatch.
+ * @returns approvalCallback matching AgentEngine's expected signature.
+ */
+export function makeApprovalCallback(
+  dispatchRef: React.MutableRefObject<AppDispatch | null>,
+): (toolName: string, toolInput: Record<string, unknown>) => Promise<"approve" | "always" | "deny"> {
+  return (toolName: string, toolInput: Record<string, unknown>) =>
+    new Promise<"approve" | "always" | "deny">((engineResolve) => {
+      const wrappedResolve = (answer: "approve" | "always" | "deny") => {
+        // Unblock the engine generator.
+        engineResolve(answer);
+        // Clear pendingApproval to unmount ApprovalPrompt.
+        dispatchRef.current?.({ type: "set_approval", approval: null });
+      };
+
+      const approval: PendingApproval = { toolName, toolInput, resolve: wrappedResolve };
+      dispatchRef.current?.({ type: "set_approval", approval });
+    });
 }
 
 export default App;

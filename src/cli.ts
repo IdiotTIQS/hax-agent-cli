@@ -28,6 +28,7 @@ interface ParsedFlags {
   version?: boolean;
   noColor?: boolean;
   sandbox?: boolean;
+  ink?: boolean;
   provider?: string;
   model?: string;
   profile?: string;
@@ -54,6 +55,7 @@ function parseArgs(argv: string[]): ParsedFlags {
     if (a === "--version" || a === "-v") { flags.version = true; continue; }
     if (a === "--no-color") { flags.noColor = true; continue; }
     if (a === "--sandbox") { flags.sandbox = true; continue; }
+    if (a === "--ink") { flags.ink = true; continue; }
 
     // Value-taking flags
     const valFlags = [
@@ -116,6 +118,7 @@ function printHelp() {
     "  --max-turns <n>           Maximum tool execution turns (default: 200)",
     "  --sandbox                 Enable Docker sandbox isolation for shell commands",
     "  --no-color                Disable ANSI colors",
+    "  --ink                     Use experimental ink TUI (default: readline)",
     "",
     "Batch Mode:",
     "  --batch <prompt>          Run a single non-interactive turn and exit",
@@ -526,6 +529,11 @@ function main(argv?: string[]) {
 
   if (flags.batch) {
     runBatch(flags).catch(function (err) { console.error((err as Error).message); process.exit(1); });
+  } else if (flags.ink || process.env["HAXAGENT_INK"] === "1") {
+    // Lazy import so the readline path pays no cost for ink's React deps.
+    import("./tui-ink/run.js").then(function (mod) {
+      return mod.runInteractiveInk(flags);
+    }).catch(function (err) { console.error((err as Error).message); process.exit(1); });
   } else {
     runInteractive(flags).catch(function (err) { console.error((err as Error).message); process.exit(1); });
   }
