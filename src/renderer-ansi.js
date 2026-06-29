@@ -104,4 +104,4 @@ function stripAnsi(text) {
   return text.replace(/\x1B\[[0-?]*[ -/]*[@-~]/g, '');
 }
 
-module.exports = { ANSI, THEME, stripAnsi };
+export { ANSI, THEME, stripAnsi };

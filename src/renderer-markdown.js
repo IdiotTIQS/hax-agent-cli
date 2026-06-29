@@ -1,6 +1,4 @@
-'use strict';
-
-const { ANSI, THEME } = require('./renderer-ansi');
+import { ANSI, THEME } from './renderer-ansi.js';
 
 // Hoisted regexes for _renderInline -- compiled once, reused on every text token.
 const RE_BOLD = /^\*\*(.+?)\*\*/;
@@ -279,4 +277,4 @@ function styled(color, text) {
   return `${color}${text}${ANSI.reset}`;
 }
 
-module.exports = { MarkdownRenderer, styled };
+export { MarkdownRenderer, styled };

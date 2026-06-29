@@ -1,20 +1,19 @@
-"use strict";
-
 /**
  * Backend registry for teammate execution.
  * Ported from OpenHarness swarm/registry.py
  */
 
-const { BackendType } = require("./types");
-const { getPlatform, getPlatformCapabilities } = require("../platforms");
+import { execSync } from "child_process";
+import { BackendType } from "./types.js";
+import { getPlatform, getPlatformCapabilities } from "../platforms.js";
 
 function _detectTmux() {
   if (!process.env.TMUX) return false;
-  try { require("child_process").execSync("which tmux 2>/dev/null || where tmux 2>nul", { encoding: "utf-8", timeout: 5000 }); return true; } catch (_) { return false; }
+  try { execSync("which tmux 2>/dev/null || where tmux 2>nul", { encoding: "utf-8", timeout: 5000 }); return true; } catch (_) { return false; }
 }
 function _detectIterm2() { return !!process.env.ITERM_SESSION_ID; }
 function _isTmuxAvailable() {
-  try { require("child_process").execSync("tmux -V", { encoding: "utf-8", timeout: 5000, stdio: "pipe" }); return true; } catch (_) { return false; }
+  try { execSync("tmux -V", { encoding: "utf-8", timeout: 5000, stdio: "pipe" }); return true; } catch (_) { return false; }
 }
 function _getTmuxInstallInstructions() {
   const p = getPlatform();
@@ -88,4 +87,4 @@ class BackendRegistry {
 let _registry = null;
 function getBackendRegistry() { if (!_registry) _registry = new BackendRegistry(); return _registry; }
 
-module.exports = { BackendRegistry, getBackendRegistry };
+export { BackendRegistry, getBackendRegistry };

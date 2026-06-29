@@ -1,4 +1,3 @@
-"use strict";
 /** Coordinator mode — agent team orchestration. Ported from OpenHarness coordinator/coordinator_mode.py */
 
 class CoordinatorMode {
@@ -28,4 +27,4 @@ class CoordinatorMode {
   }
 }
 
-module.exports = { CoordinatorMode };
+export { CoordinatorMode };

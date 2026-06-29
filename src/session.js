@@ -1,5 +1,5 @@
-const crypto = require('crypto');
-const { getPricing, getCost: calcCost } = require('./pricing');
+import crypto from 'crypto';
+import { getPricing, getCost as calcCost } from './pricing.js';
 
 /**
  * Generate a unique, file-safe session id (timestamp + random suffix).
@@ -221,7 +221,7 @@ function formatTokenCount(value) {
   return String(Math.max(0, Math.round(tokens)));
 }
 
-module.exports = {
+export {
   InputHistory,
   CostTracker,
   Session,

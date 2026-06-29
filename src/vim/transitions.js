@@ -1,5 +1,3 @@
-"use strict";
-
 /**
  * Vim mode — key transition definitions.
  * Ported from OpenHarness vim/transitions.py
@@ -58,4 +56,4 @@ function resolveAction(mode, key) {
   return modeTransitions[key] || null;
 }
 
-module.exports = { VimMode, TRANSITIONS, resolveAction };
+export { VimMode, TRANSITIONS, resolveAction };

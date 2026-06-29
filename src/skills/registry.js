@@ -1,13 +1,11 @@
-"use strict";
-
 /**
  * Skills System — SKILL.md loading, registration, and intent matching.
  * Ported from OpenHarness skills/loader.py + registry.py.
  */
 
-const fs = require("fs");
-const path = require("path");
-const os = require("os");
+import fs from "fs";
+import path from "path";
+import os from "os";
 
 // === Skill Definition ===
 
@@ -164,4 +162,4 @@ function loadSkillRegistry(cwd = process.cwd()) {
   return registry;
 }
 
-module.exports = { Skill, SkillRegistry, loadSkillsFromDir, loadSkillRegistry, parseFrontmatter };
+export { Skill, SkillRegistry, loadSkillsFromDir, loadSkillRegistry, parseFrontmatter };

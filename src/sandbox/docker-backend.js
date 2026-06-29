@@ -1,8 +1,7 @@
-"use strict";
 /** Docker-based sandbox backend. Ported from OpenHarness sandbox/docker_backend.py */
-const { execSync } = require("child_process");
-const { getPlatformCapabilities } = require("../platforms");
-const { DockerSandbox } = require("./session");
+import { execSync } from "child_process";
+import { getPlatformCapabilities } from "../platforms.js";
+import { DockerSandbox } from "./session.js";
 
 class SandboxAvailability {
   constructor(o = {}) { this.enabled = !!o.enabled; this.available = !!o.available; this.reason = o.reason || ""; this.command = o.command || null; }
@@ -18,6 +17,6 @@ function getDockerAvailability(settings = {}) {
   catch (_) { return new SandboxAvailability({ enabled: true, available: false, reason: "Docker daemon not running", command: docker }); }
 }
 
-function _which(cmd) { try { return require("child_process").execSync(process.platform === "win32" ? `where ${cmd} 2>nul` : `which ${cmd} 2>/dev/null`, { encoding: "utf-8", timeout: 5000 }).trim().split("\n")[0]; } catch (_) { return null; } }
+function _which(cmd) { try { return execSync(process.platform === "win32" ? `where ${cmd} 2>nul` : `which ${cmd} 2>/dev/null`, { encoding: "utf-8", timeout: 5000 }).trim().split("\n")[0]; } catch (_) { return null; } }
 
-module.exports = { SandboxAvailability, getDockerAvailability };
+export { SandboxAvailability, getDockerAvailability };

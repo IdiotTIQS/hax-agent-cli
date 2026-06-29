@@ -1,5 +1,3 @@
-"use strict";
-
 /**
  * Swarm backend type definitions.
  * Ported from OpenHarness swarm/types.py
@@ -33,7 +31,7 @@ class TeammateMessage {
 
 function isPaneBackend(type) { return type === BackendType.TMUX || type === BackendType.ITERM2; }
 
-module.exports = {
+export {
   BackendType, PaneBackendType, TaskType, TaskStatus,
   TeammateIdentity, TeammateSpawnConfig, SpawnResult, TeammateMessage, isPaneBackend,
 };

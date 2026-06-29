@@ -1,5 +1,4 @@
 // @ts-nocheck — sandbox 子系统开发中（半成品）；暂不做类型检查，待其稳定后移除本行并纳入护栏。
-"use strict";
 
 /**
  * Cross-platform sandbox module.
@@ -7,10 +6,11 @@
  * without requiring Docker.
  */
 
-const { spawn, execSync } = require("child_process");
-const fs = require("fs");
-const path = require("path");
-const os = require("os");
+import { spawn, execSync } from "child_process";
+import fs from "fs";
+import path from "path";
+import os from "os";
+import net from "net";
 
 // === Platform Detection ===
 
@@ -177,7 +177,6 @@ class WinSandbox {
         this._hasFirewall = true;
       } catch (_) {
         // Fallback: local block proxy (blocks curl, wget, node, etc.)
-        const net = require("net");
         this._proxyServer = net.createServer((socket) => { socket.destroy(); });
         await new Promise((resolve) => {
           this._proxyServer.listen(0, "127.0.0.1", () => {
@@ -300,7 +299,7 @@ class PlatformSandbox {
   }
 }
 
-module.exports = {
+export {
   PlatformSandbox,
   BwrapSandbox,
   MacOSSandbox,

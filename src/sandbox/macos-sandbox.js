@@ -1,14 +1,12 @@
-"use strict";
-
 /**
  * macOS sandbox-exec (Seatbelt) backend.
  * Uses the built-in sandbox-exec command to restrict file/network access.
  */
 
-const { spawn } = require("child_process");
-const fs = require("fs");
-const path = require("path");
-const os = require("os");
+import { spawn, execSync } from "child_process";
+import fs from "fs";
+import path from "path";
+import os from "os";
 
 class MacOSSandbox {
   constructor(opts = {}) {
@@ -22,7 +20,6 @@ class MacOSSandbox {
 
   static isAvailable() {
     try {
-      const { execSync } = require("child_process");
       execSync("which sandbox-exec", { encoding: "utf-8", timeout: 3000, stdio: "pipe" });
       return true;
     } catch (_) { return false; }
@@ -91,4 +88,4 @@ class MacOSSandbox {
   }
 }
 
-module.exports = { MacOSSandbox };
+export { MacOSSandbox };

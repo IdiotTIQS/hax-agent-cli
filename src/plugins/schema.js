@@ -1,5 +1,3 @@
-"use strict";
-
 /**
  * Plugin Schema — JSON Schema validation for plugin.json manifests.
  * Ported from OpenHarness plugins/schemas.py pattern.
@@ -330,7 +328,7 @@ function securityAudit(manifest) {
   return { risk, reasons };
 }
 
-module.exports = {
+export {
   PLUGIN_SCHEMA,
   ValidationResult,
   validatePluginManifest,

@@ -1,4 +1,3 @@
-"use strict";
 /** Bridge configuration types. Ported from OpenHarness bridge/types.py */
 const DEFAULT_SESSION_TIMEOUT_MS = 24 * 60 * 60 * 1000;
 
@@ -14,4 +13,4 @@ class BridgeConfig {
   constructor(o = {}) { this.dir = o.dir || ""; this.machineName = o.machineName || ""; this.maxSessions = o.maxSessions || 1; this.verbose = !!o.verbose; this.sessionTimeoutMs = o.sessionTimeoutMs || DEFAULT_SESSION_TIMEOUT_MS; }
 }
 
-module.exports = { DEFAULT_SESSION_TIMEOUT_MS, WorkData, WorkSecret, BridgeConfig };
+export { DEFAULT_SESSION_TIMEOUT_MS, WorkData, WorkSecret, BridgeConfig };

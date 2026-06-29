@@ -1,5 +1,4 @@
 // @ts-nocheck — sandbox 子系统开发中（半成品）；暂不做类型检查，待其稳定后移除本行并纳入护栏。
-"use strict";
 
 /**
  * Sandbox adapter — unified interface for sandbox backends.
@@ -7,8 +6,9 @@
  * Supports: auto, docker, bwrap, macos, windows, none
  */
 
-const { PlatformSandbox, detectBestBackend } = require("./cross-platform");
-const { DockerSandbox } = require("./session");
+import { spawn, execSync } from "child_process";
+import { PlatformSandbox, detectBestBackend } from "./cross-platform.js";
+import { DockerSandbox } from "./session.js";
 
 class SandboxAdapter {
   constructor(opts = {}) {
@@ -64,7 +64,6 @@ class SandboxAdapter {
     if (this._impl) return this._impl.execAsync(command, opts);
     // Fallback: direct execution
     return new Promise((resolve, reject) => {
-      const { spawn } = require("child_process");
       const timeout = opts.timeoutMs || 30000;
       let stdout = "", stderr = "";
       const child = spawn(command, [], { shell: true, cwd: opts.cwd || process.cwd(), timeout: timeout + 1000 });
@@ -79,9 +78,8 @@ class SandboxAdapter {
   /** Sync exec — backward-compatible. */
   exec(command, opts = {}) {
     if (this._impl?.exec) return this._impl.exec(command, opts);
-    const { execSync } = require("child_process");
     return execSync(command, { encoding: "utf-8", cwd: opts.cwd || process.cwd(), timeout: opts.timeoutMs || 30000 });
   }
 }
 
-module.exports = { SandboxAdapter, detectBestBackend };
+export { SandboxAdapter, detectBestBackend };

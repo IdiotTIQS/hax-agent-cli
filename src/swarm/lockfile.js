@@ -1,4 +1,3 @@
-"use strict";
 /** Swarm lockfile — re-exports from utils/file-lock. Ported from OpenHarness swarm/lockfile.py */
-const { exclusiveFileLock, SwarmLockError, SwarmLockUnavailableError } = require("../utils/file-lock");
-module.exports = { exclusiveFileLock, SwarmLockError, SwarmLockUnavailableError };
+import { exclusiveFileLock, SwarmLockError, SwarmLockUnavailableError } from "../utils/file-lock.js";
+export { exclusiveFileLock, SwarmLockError, SwarmLockUnavailableError };

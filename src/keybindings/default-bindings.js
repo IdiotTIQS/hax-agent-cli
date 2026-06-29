@@ -1,4 +1,3 @@
-"use strict";
 /** Default keybinding definitions. Ported from OpenHarness keybindings/default_bindings.py */
 
 const CHORD_BINDINGS = {
@@ -27,4 +26,4 @@ const VIM_NORMAL_BINDINGS = {
 
 function getDefaultBindings(vimMode = false) { return vimMode ? { ...CHORD_BINDINGS, ...VIM_NORMAL_BINDINGS } : { ...CHORD_BINDINGS }; }
 
-module.exports = { CHORD_BINDINGS, VIM_NORMAL_BINDINGS, getDefaultBindings };
+export { CHORD_BINDINGS, VIM_NORMAL_BINDINGS, getDefaultBindings };

@@ -1,4 +1,3 @@
-"use strict";
 /** Autopilot type definitions. Ported from OpenHarness autopilot/types.py */
 
 const AutopilotTaskStatus = { PENDING: "pending", RUNNING: "running", COMPLETED: "completed", FAILED: "failed", CANCELLED: "cancelled" };
@@ -13,4 +12,4 @@ class AutopilotTask {
   }
 }
 
-module.exports = { AutopilotTaskStatus, AutopilotTriggerType, AutopilotTask };
+export { AutopilotTaskStatus, AutopilotTriggerType, AutopilotTask };

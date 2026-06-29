@@ -1,18 +1,4 @@
-"use strict";
-
-/**
- * TUI — Terminal UI integrated with readline.
- *
- * Two-tier design:
- *   Tier 1 (TTY + readline): writes events above the prompt via rl.output.
- *     Uses rl.question() for non-blocking approval.
- *   Tier 2 (non-TTY / pipe / --no-color): plain text, no ANSI codes.
- *
- * Key principle: does NOT try to manage the screen. Works WITH readline,
- * not against it. No cursor positioning, no scroll regions, no alt-screen.
- */
-
-const { ANSI, THEME, styled, stripAnsi } = require("../shared/utils");
+import { ANSI, THEME, styled, stripAnsi } from "../shared/utils.js";
 const SPINNER = ["-", "\\", "|", "/"];
 const SPINNER_MS = 100;
 
@@ -227,4 +213,4 @@ class TUI {
   }
 }
 
-module.exports = { TUI };
+export { TUI };

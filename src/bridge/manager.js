@@ -1,9 +1,8 @@
-"use strict";
 /** Bridge session manager. Ported from OpenHarness bridge/manager.py */
-const { spawn } = require("child_process");
-const fs = require("fs");
-const path = require("path");
-const { getDataDir } = require("../config/paths");
+import { spawn } from "child_process";
+import fs from "fs";
+import path from "path";
+import { getDataDir } from "../config/paths.js";
 
 class BridgeSessionRecord {
   constructor(o = {}) { this.sessionId = o.sessionId || ""; this.command = o.command || ""; this.cwd = o.cwd || ""; this.pid = o.pid || 0; this.status = o.status || "pending"; this.startedAt = o.startedAt || Date.now(); this.outputPath = o.outputPath || ""; }
@@ -49,4 +48,4 @@ class BridgeSessionManager {
   }
 }
 
-module.exports = { BridgeSessionRecord, BridgeSessionManager };
+export { BridgeSessionRecord, BridgeSessionManager };

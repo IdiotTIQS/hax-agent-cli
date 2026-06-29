@@ -1,12 +1,10 @@
-"use strict";
-
 /**
  * Windows process containment sandbox.
  * Uses Job Objects for process cleanup and resource limits,
  * combined with path validation for filesystem safety.
  */
 
-const { spawn } = require("child_process");
+import { spawn } from "child_process";
 
 class WinSandbox {
   constructor(opts = {}) {
@@ -68,4 +66,4 @@ class WinSandbox {
   }
 }
 
-module.exports = { WinSandbox };
+export { WinSandbox };

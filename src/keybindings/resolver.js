@@ -1,12 +1,10 @@
-"use strict";
-
 /**
  * Keybinding resolver — resolves keypresses to actions.
  * Ported from OpenHarness keybindings/resolver.py
  */
 
-const { loadKeybindings } = require("./loader");
-const { matchesBinding } = require("./parser");
+import { loadKeybindings } from "./loader.js";
+import { matchesBinding } from "./parser.js";
 
 class KeybindingResolver {
   constructor(opts = {}) {
@@ -45,4 +43,4 @@ class KeybindingResolver {
   removeBinding(keyExpr) { delete this._bindings[keyExpr]; }
 }
 
-module.exports = { KeybindingResolver };
+export { KeybindingResolver };

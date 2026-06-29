@@ -1,9 +1,8 @@
-"use strict";
 /** Autopilot service. Ported from OpenHarness autopilot/service.py */
-const fs = require("fs");
-const path = require("path");
-const { AutopilotTask, AutopilotTaskStatus } = require("./types");
-const { getDataDir } = require("../config/paths");
+import fs from "fs";
+import path from "path";
+import { AutopilotTask, AutopilotTaskStatus } from "./types.js";
+import { getDataDir } from "../config/paths.js";
 
 class AutopilotService {
   constructor(opts = {}) { this._tasks = new Map(); this._registryPath = opts.registryPath || path.join(getDataDir(), "autopilot", "registry.json"); this._running = false; }
@@ -29,4 +28,4 @@ class AutopilotService {
   cancelTask(id) { const task = this._tasks.get(id); if (task) { task.status = AutopilotTaskStatus.CANCELLED; task.completedAt = Date.now(); this._save(); } return task; }
 }
 
-module.exports = { AutopilotService };
+export { AutopilotService };

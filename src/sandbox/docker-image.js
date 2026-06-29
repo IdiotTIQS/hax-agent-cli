@@ -1,6 +1,5 @@
-"use strict";
 /** Docker image management. Ported from OpenHarness sandbox/docker_image.py */
-const { execSync } = require("child_process");
+import { execSync } from "child_process";
 
 const DEFAULT_IMAGE = "node:18-alpine";
 const IMAGE_TAG = "hax-sandbox:latest";
@@ -13,4 +12,4 @@ function buildSandboxImage(opts = {}) {
 
 function getImageName() { return process.env.HAX_SANDBOX_IMAGE || DEFAULT_IMAGE; }
 
-module.exports = { DEFAULT_IMAGE, IMAGE_TAG, buildSandboxImage, getImageName };
+export { DEFAULT_IMAGE, IMAGE_TAG, buildSandboxImage, getImageName };

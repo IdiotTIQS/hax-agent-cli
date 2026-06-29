@@ -1,8 +1,6 @@
-'use strict';
-
-const { ANSI, THEME, stripAnsi } = require('./renderer-ansi');
-const { TerminalScreen } = require('./renderer-terminal');
-const { MarkdownRenderer, styled } = require('./renderer-markdown');
+import { ANSI, THEME, stripAnsi } from './renderer-ansi.js';
+import { TerminalScreen } from './renderer-terminal.js';
+import { MarkdownRenderer, styled } from './renderer-markdown.js';
 
 const SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 const SPINNER_INTERVAL = 80;
@@ -12,7 +10,9 @@ const SPINNER_VERBS = [
   'Evaluating', 'Generating', 'Considering', 'Examining', 'Planning',
 ];
 
-const VERSION = require('../package.json').version;
+import { createRequire } from 'module';
+const _require = createRequire(import.meta.url);
+const VERSION = _require('../package.json').version;
 
 const CLAUDE_BANNER = [
   '',
@@ -638,7 +638,7 @@ function formatProviderError(error, provider) {
   return message;
 }
 
-module.exports = {
+export {
   ANSI,
   THEME,
   SPINNER_FRAMES,

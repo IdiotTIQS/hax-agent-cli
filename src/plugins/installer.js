@@ -1,5 +1,3 @@
-"use strict";
-
 /**
  * Plugin Installer - download, install, update, and uninstall plugins.
  * Ported from OpenHarness plugins/installer.py pattern.
@@ -13,10 +11,10 @@
  * - Install/uninstall lifecycle
  */
 
-const fs = require("fs");
-const path = require("path");
-const { execSync } = require("child_process");
-const { validatePluginManifest, securityAudit } = require("./schema");
+import fs from "fs";
+import path from "path";
+import { execSync } from "child_process";
+import { validatePluginManifest, securityAudit } from "./schema.js";
 
 // === Plugin Installer ===
 
@@ -328,4 +326,4 @@ class PluginInstaller {
   }
 }
 
-module.exports = { PluginInstaller };
+export { PluginInstaller };

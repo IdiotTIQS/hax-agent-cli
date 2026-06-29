@@ -1,17 +1,14 @@
-"use strict";
-
-/**
- * Docker sandbox session management.
+/** Docker sandbox session management.
  * Ported from OpenHarness sandbox/ directory.
  *
  * Provides isolated execution via Docker containers for security.
  * Falls back gracefully when Docker is unavailable.
  */
 
-const { execSync, spawn } = require("child_process");
-const fs = require("fs");
-const path = require("path");
-const os = require("os");
+import { execSync, spawn } from "child_process";
+import fs from "fs";
+import path from "path";
+import os from "os";
 
 class SandboxUnavailableError extends Error { constructor(m) { super(m); this.name = "SandboxUnavailableError"; } }
 
@@ -117,4 +114,4 @@ class DockerSandbox {
   }
 }
 
-module.exports = { DockerSandbox, SandboxUnavailableError };
+export { DockerSandbox, SandboxUnavailableError };

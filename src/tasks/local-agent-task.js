@@ -1,6 +1,7 @@
-"use strict";
 /** Local agent task facade. Ported from OpenHarness tasks/local_agent_task.py */
-const { BackgroundTaskManager } = require("./manager");
+// default-import-destructure: tasks/manager.js is still CJS until B5 (ESM named-import of CJS fails under plain node)
+import taskManagerMod from "./manager.js";
+const { BackgroundTaskManager } = taskManagerMod;
 
 let _defaultMgr = null;
 function getDefaultTaskManager() { if (!_defaultMgr) _defaultMgr = new BackgroundTaskManager(); return _defaultMgr; }
@@ -12,4 +13,4 @@ function spawnLocalAgentTask(opts = {}) {
   });
 }
 
-module.exports = { spawnLocalAgentTask, getDefaultTaskManager };
+export { spawnLocalAgentTask, getDefaultTaskManager };

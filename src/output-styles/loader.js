@@ -1,4 +1,3 @@
-"use strict";
 /** Output style definitions. Ported from OpenHarness output_styles/loader.py */
 
 const BUILTIN_STYLES = {
@@ -12,4 +11,4 @@ const BUILTIN_STYLES = {
 function listStyles() { return Object.values(BUILTIN_STYLES); }
 function getStyle(name) { return BUILTIN_STYLES[name] || BUILTIN_STYLES.default; }
 
-module.exports = { BUILTIN_STYLES, listStyles, getStyle };
+export { BUILTIN_STYLES, listStyles, getStyle };

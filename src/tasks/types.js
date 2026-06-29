@@ -1,5 +1,3 @@
-"use strict";
-
 /**
  * Task data models.
  * Ported from OpenHarness tasks/types.py
@@ -28,4 +26,4 @@ class TaskRecord {
   }
 }
 
-module.exports = { TaskType, TaskStatus, TaskRecord };
+export { TaskType, TaskStatus, TaskRecord };

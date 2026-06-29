@@ -1,14 +1,12 @@
-"use strict";
-
 /**
  * Persistent team lifecycle management.
  * Ported from OpenHarness swarm/team_lifecycle.py
  */
 
-const fs = require("fs");
-const path = require("path");
-const os = require("os");
-const { getTeamDir } = require("./mailbox");
+import fs from "fs";
+import path from "path";
+import os from "os";
+import { getTeamDir } from "./mailbox.js";
 
 const TEAM_FILE_NAME = "team.json";
 
@@ -123,7 +121,7 @@ class TeamLifecycleManager {
   }
 }
 
-module.exports = {
+export {
   sanitizeName, sanitizeAgentName, AllowedPath, TeamMember, TeamFile,
   readTeamFile, writeTeamFile, teamFilePath, TeamLifecycleManager,
 };

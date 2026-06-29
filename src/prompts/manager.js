@@ -1,12 +1,11 @@
-"use strict";
-
 /**
  * Prompt Management — CLAUDE.md / system prompt assembly.
  * Ported from OpenHarness prompts/ pattern.
  */
 
-const fs = require("fs");
-const path = require("path");
+import fs from "fs";
+import path from "path";
+import { execSync } from "child_process";
 
 const PROMPT_FILES = ["CLAUDE.md", "AGENTS.md", "HAX.md", "README.md"];
 const MAX_PROMPT_CHARS = 20000;
@@ -43,7 +42,6 @@ function buildEnvironmentContext() {
   if (process.env.CONDA_DEFAULT_ENV) parts.push(`conda: ${process.env.CONDA_DEFAULT_ENV}`);
 
   try {
-    const { execSync } = require("child_process");
     const gitBranch = execSync("git branch --show-current 2>/dev/null", { encoding: "utf-8", timeout: 3000 }).trim();
     if (gitBranch) parts.push(`Git branch: ${gitBranch}`);
   } catch (_) {}
@@ -88,4 +86,4 @@ function buildFullSystemPrompt(basePrompt, options = {}) {
   return sections.filter(Boolean).join("\n");
 }
 
-module.exports = { loadProjectContext, buildEnvironmentContext, buildFullSystemPrompt, PROMPT_FILES };
+export { loadProjectContext, buildEnvironmentContext, buildFullSystemPrompt, PROMPT_FILES };

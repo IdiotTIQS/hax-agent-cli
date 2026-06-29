@@ -1,4 +1,3 @@
-"use strict";
 /** Agent role definitions. Ported from OpenHarness coordinator/agent_definitions.py */
 
 const BUILTIN_AGENTS = {
@@ -18,4 +17,4 @@ class AgentDefinition {
 function getBuiltinAgent(name) { return BUILTIN_AGENTS[name] ? new AgentDefinition(BUILTIN_AGENTS[name]) : null; }
 function listBuiltinAgents() { return Object.values(BUILTIN_AGENTS).map(a => new AgentDefinition(a)); }
 
-module.exports = { BUILTIN_AGENTS, AgentDefinition, getBuiltinAgent, listBuiltinAgents };
+export { BUILTIN_AGENTS, AgentDefinition, getBuiltinAgent, listBuiltinAgents };

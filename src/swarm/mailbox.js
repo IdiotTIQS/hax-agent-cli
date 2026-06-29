@@ -1,5 +1,3 @@
-"use strict";
-
 /**
  * File-based message queue for leader-worker communication.
  * Ported from OpenHarness swarm/mailbox.py
@@ -10,10 +8,10 @@
  * Atomic writes use a .tmp file followed by fs.rename.
  */
 
-const fs = require("fs");
-const path = require("path");
-const os = require("os");
-const { exclusiveFileLock } = require("../utils/file-lock");
+import fs from "fs";
+import path from "path";
+import os from "os";
+import { exclusiveFileLock } from "../utils/file-lock.js";
 
 const MessageType = {
   USER_MESSAGE: "user_message",
@@ -135,7 +133,7 @@ function createPermissionResponse(sender, recipient, responseData) {
   return new MailboxMessage({ type: MessageType.PERMISSION_RESPONSE, sender, recipient, payload: { type: "permission_response", ...responseData }, timestamp: Date.now() / 1000 });
 }
 
-module.exports = {
+export {
   MessageType, MailboxMessage, TeammateMailbox,
   getTeamDir, getAgentMailboxDir,
   createUserMessage, createShutdownRequest, createPermissionRequest, createPermissionResponse,

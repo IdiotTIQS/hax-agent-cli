@@ -1,14 +1,12 @@
-"use strict";
-
 /**
  * First-run setup wizard.
  * Runs when no settings file exists or no provider env vars are set.
  */
 
-const readline = require("readline");
-const os = require("os");
-const path = require("path");
-const fs = require("fs");
+import readline from "readline";
+import os from "os";
+import path from "path";
+import fs from "fs";
 
 function _question(rl, prompt) {
   return new Promise(function (resolve) {
@@ -112,4 +110,4 @@ function shouldRunSetup() {
   return true;
 }
 
-module.exports = { runSetup, shouldRunSetup };
+export { runSetup, shouldRunSetup };

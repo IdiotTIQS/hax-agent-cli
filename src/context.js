@@ -215,7 +215,7 @@ function truncate(value, maxLength) {
   return `${text.slice(0, maxLength - 1)}…`;
 }
 
-module.exports = {
+export {
   assembleSystemPrompt,
   buildMessages,
   buildPromptContext,

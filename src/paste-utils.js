@@ -1,4 +1,4 @@
-const { ANSI } = require('./renderer-ansi');
+import { ANSI } from './renderer-ansi.js';
 
 function shouldRunPasteAsCommandBatch(input) {
   const lines = String(input || '').split(/\r?\n/).map((entry) => entry.trim()).filter(Boolean);
@@ -17,7 +17,7 @@ function formatPastedInputBadge(input) {
   return `${ANSI.bgBrightBlack}${ANSI.brightWhite}${label}${ANSI.reset}`;
 }
 
-module.exports = {
+export {
   formatPastedInputBadge,
   formatPastedInputSummary,
   shouldRunPasteAsCommandBatch,

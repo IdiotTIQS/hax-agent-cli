@@ -1,6 +1,5 @@
-"use strict";
 /** Voice mode controller. Ported from OpenHarness voice/voice_mode.py */
-const { isWakeWord, isStopPhrase } = require("./keyterms");
+import { isWakeWord, isStopPhrase } from "./keyterms.js";
 
 class VoiceMode {
   constructor(opts = {}) { this._enabled = false; this._listening = false; this._onTranscript = opts.onTranscript || (() => {}); this._onCommand = opts.onCommand || (() => {}); }
@@ -20,4 +19,4 @@ class VoiceMode {
   }
 }
 
-module.exports = { VoiceMode };
+export { VoiceMode };

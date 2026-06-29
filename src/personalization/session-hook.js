@@ -1,9 +1,7 @@
-"use strict";
-const path = require("path");
+import { extractLocalRules, factsToMarkdown } from "./personalization.js";
+import { saveRules } from "./rules.js";
+
 function createPersonalizationHook(cwd) {
-  const { extractLocalRules } = require("./personalization");
-  const { factsToMarkdown } = require("./personalization");
-  const { saveRules } = require("./rules");
   return { onSessionEnd: async (session) => { const facts = extractLocalRules(session.messages || []); if (facts.length > 0) { saveRules(cwd, factsToMarkdown(facts)); } return { facts: facts.length }; } };
 }
-module.exports = { createPersonalizationHook };
+export { createPersonalizationHook };

@@ -1,13 +1,11 @@
-"use strict";
-
 /**
  * Keyboard shortcut system.
  * Ported from OpenHarness keybindings/ directory.
  */
 
-const fs = require("fs");
-const path = require("path");
-const os = require("os");
+import fs from "fs";
+import path from "path";
+import os from "os";
 
 const DEFAULT_BINDINGS = {
   "ctrl+c": "interrupt",
@@ -41,4 +39,4 @@ function saveKeybindings(bindings, configDir) {
   fs.writeFileSync(filePath, JSON.stringify(bindings, null, 2));
 }
 
-module.exports = { DEFAULT_BINDINGS, loadKeybindings, saveKeybindings };
+export { DEFAULT_BINDINGS, loadKeybindings, saveKeybindings };

@@ -1,7 +1,6 @@
-"use strict";
 /** In-process teammate execution backend. Ported from OpenHarness swarm/in_process.py */
-const { TaskType, TaskStatus, SpawnResult, BackendType } = require("./types");
-const { TeammateMailbox } = require("./mailbox");
+import { TaskType, TaskStatus, SpawnResult, BackendType } from "./types.js";
+import { TeammateMailbox } from "./mailbox.js";
 
 class TeammateAbortController {
   constructor() { this._aborted = false; this._forceAborted = false; this.signal = { get aborted() { return false; } }; }
@@ -53,4 +52,4 @@ class InProcessBackend {
   listAgents() { return [...this._tasks.entries()].map(([id, e]) => ({ agentId: id, name: e.config.name, status: e.ctx.status })); }
 }
 
-module.exports = { TeammateAbortController, TeammateContext, getTeammateContext, setTeammateContext, removeTeammateContext, InProcessBackend };
+export { TeammateAbortController, TeammateContext, getTeammateContext, setTeammateContext, removeTeammateContext, InProcessBackend };

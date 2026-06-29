@@ -1,7 +1,8 @@
-"use strict";
 /** Subprocess teammate execution backend. Ported from OpenHarness swarm/subprocess_backend.py */
-const { BackendType, SpawnResult } = require("./types");
-const { BackgroundTaskManager } = require("../tasks/manager");
+import { BackendType, SpawnResult } from "./types.js";
+// default-import-destructure: tasks/manager.js is still CJS until B5 (ESM named-import of CJS fails under plain node)
+import taskManagerMod from "../tasks/manager.js";
+const { BackgroundTaskManager } = taskManagerMod;
 
 class SubprocessBackend {
   constructor() { this.type = BackendType.SUBPROCESS; this._taskMgr = new BackgroundTaskManager(); this._agentTasks = new Map(); }
@@ -31,4 +32,4 @@ class SubprocessBackend {
   listAgents() { return [...this._agentTasks.entries()].map(([id, e]) => ({ agentId: id, taskId: e.taskId })); }
 }
 
-module.exports = { SubprocessBackend };
+export { SubprocessBackend };

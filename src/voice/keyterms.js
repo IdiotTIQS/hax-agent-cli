@@ -1,4 +1,3 @@
-"use strict";
 /** Voice keyterms — wake words and command phrases. Ported from OpenHarness voice/keyterms.py */
 
 const WAKE_WORDS = ["hey claude", "hey hax", "ok claude", "computer", "agent"];
@@ -8,4 +7,4 @@ const COMMAND_PREFIXES = ["run", "execute", "search for", "find", "show me", "te
 function isWakeWord(text) { const t = text.toLowerCase().trim(); return WAKE_WORDS.some(w => t.includes(w)); }
 function isStopPhrase(text) { const t = text.toLowerCase().trim(); return STOP_PHRASES.some(p => t.includes(p)); }
 
-module.exports = { WAKE_WORDS, STOP_PHRASES, COMMAND_PREFIXES, isWakeWord, isStopPhrase };
+export { WAKE_WORDS, STOP_PHRASES, COMMAND_PREFIXES, isWakeWord, isStopPhrase };

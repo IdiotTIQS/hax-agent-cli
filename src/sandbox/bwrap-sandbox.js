@@ -1,11 +1,9 @@
-"use strict";
-
 /**
  * Bubblewrap (bwrap) sandbox backend for Linux.
  * Uses lightweight Linux namespaces without root.
  */
 
-const { spawn } = require("child_process");
+import { spawn, execSync } from "child_process";
 
 class BwrapSandbox {
   constructor(opts = {}) {
@@ -19,7 +17,6 @@ class BwrapSandbox {
   static isAvailable() {
     if (process.platform !== "linux") return false;
     try {
-      const { execSync } = require("child_process");
       execSync("which bwrap", { encoding: "utf-8", timeout: 3000, stdio: "pipe" });
       return true;
     } catch (_) { return false; }
@@ -73,4 +70,4 @@ class BwrapSandbox {
   }
 }
 
-module.exports = { BwrapSandbox };
+export { BwrapSandbox };

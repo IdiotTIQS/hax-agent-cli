@@ -1,5 +1,3 @@
-"use strict";
-
 /**
  * Observable application state store.
  * Ported from OpenHarness state/app_state.py + state/store.py
@@ -54,4 +52,4 @@ class AppStateStore {
   }
 }
 
-module.exports = { AppState, AppStateStore };
+export { AppState, AppStateStore };

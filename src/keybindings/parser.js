@@ -1,5 +1,3 @@
-"use strict";
-
 /**
  * Keybinding parser — parses keybinding expressions.
  * Ported from OpenHarness keybindings/parser.py
@@ -54,4 +52,4 @@ function matchesBinding(event, binding) {
   return true;
 }
 
-module.exports = { parseKeybinding, matchesBinding, MODIFIERS, SPECIAL_KEYS };
+export { parseKeybinding, matchesBinding, MODIFIERS, SPECIAL_KEYS };

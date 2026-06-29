@@ -1,6 +1,4 @@
-'use strict';
-
-const { ANSI, stripAnsi } = require('./renderer-ansi');
+import { ANSI, stripAnsi } from './renderer-ansi.js';
 
 class TerminalScreen {
   constructor(stream = process.stdout) {
@@ -95,4 +93,4 @@ class TerminalScreen {
   }
 }
 
-module.exports = { TerminalScreen };
+export { TerminalScreen };
