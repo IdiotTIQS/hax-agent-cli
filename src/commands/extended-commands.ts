@@ -11,7 +11,12 @@ import { PluginRegistry } from "../plugins/registry.js";
 import { MemoryExtractor } from "../services/memory-extract.js";
 import { execSync } from "child_process";
 
-export default function registerExtended(registerFn, styledFn, THEME, ANSI) {
+export default function registerExtended(
+  registerFn: (name: string, handler: (args: string[], ctx: any) => void | Promise<void>, desc?: string) => void,
+  styledFn: (color: string, text: string) => string,
+  THEME: Record<string, string>,
+  ANSI: Record<string, string>
+): void {
   const register = registerFn;
   const styled = styledFn;
 
@@ -95,11 +100,11 @@ export default function registerExtended(registerFn, styledFn, THEME, ANSI) {
     let manager = ctx.mcpManager;
     if (!manager) {
       try { manager = new McpClientManager(); manager.loadConfig(); ctx.mcpManager = manager; }
-      catch (err) { ctx.screen.write(`${styled(THEME.error, `MCP not available: ${err.message}`)}\n`); ctx.rl?.prompt?.(); return; }
+      catch (err) { ctx.screen.write(`${styled(THEME.error, `MCP not available: ${(err as Error).message}`)}\n`); ctx.rl?.prompt?.(); return; }
     }
 
     if (args[0] === "status" || !args[0]) {
-      const status = manager.getStatus();
+      const status = manager.getStatus() as Record<string, { status: string; tools: number }>;
       if (!status || Object.keys(status).length === 0) { ctx.screen.write(`${styled(THEME.dim, "No MCP servers configured.")}\n`); }
       else {
         for (const [name, s] of Object.entries(status)) {
@@ -109,7 +114,7 @@ export default function registerExtended(registerFn, styledFn, THEME, ANSI) {
       }
     } else if (args[0] === "start") {
       try { await manager.startAll(); ctx.screen.write(`${styled(THEME.success, "MCP servers started.")}\n`); }
-      catch (err) { ctx.screen.write(`${styled(THEME.error, err.message)}\n`); }
+      catch (err) { ctx.screen.write(`${styled(THEME.error, (err as Error).message)}\n`); }
     } else if (args[0] === "stop") {
       manager.stopAll(); ctx.screen.write(`${styled(THEME.info, "MCP servers stopped.")}\n`);
     } else if (args[0] === "tools") {
@@ -138,7 +143,7 @@ export default function registerExtended(registerFn, styledFn, THEME, ANSI) {
       } else {
         ctx.screen.write("Usage: /plugin [list|load <path>]\n");
       }
-    } catch (err) { ctx.screen.write(`${styled(THEME.error, `Plugin error: ${err.message}`)}\n`); }
+    } catch (err) { ctx.screen.write(`${styled(THEME.error, `Plugin error: ${(err as Error).message}`)}\n`); }
     ctx.rl?.prompt?.();
   }, "Manage plugins");
 
@@ -189,7 +194,7 @@ export default function registerExtended(registerFn, styledFn, THEME, ANSI) {
         }
       }
     } catch (err) {
-      ctx.screen.write(`${styled(THEME.warning, `Extraction skipped: ${err.message}`)}\n`);
+      ctx.screen.write(`${styled(THEME.warning, `Extraction skipped: ${(err as Error).message}`)}\n`);
     }
     ctx.rl?.prompt?.();
   }, "Extract durable memories from conversation");
@@ -212,7 +217,7 @@ export default function registerExtended(registerFn, styledFn, THEME, ANSI) {
       const output = execSync("git branch", { cwd, encoding: "utf-8", timeout: 10000 });
       ctx.screen.write(output);
     } catch (err) {
-      const msg = (err.stderr || err.message || "").trim();
+      const msg = ((err as NodeJS.ErrnoException & { stderr?: string }).stderr || (err as Error).message || "").trim();
       ctx.screen.write(`${styled(THEME.error, msg || "git command failed")}\n`);
     }
     ctx.rl?.prompt?.();
@@ -292,7 +297,7 @@ export default function registerExtended(registerFn, styledFn, THEME, ANSI) {
       const registry = new PluginRegistry();
       registry.loadFromDir(path.join(ctx.settings?.projectRoot || process.cwd(), ".hax-agent", "plugins"));
       ctx.screen.write(`${styled(THEME.success, "Plugins reloaded.")}\n`);
-    } catch (err) { ctx.screen.write(`${styled(THEME.error, `Reload failed: ${err.message}`)}\n`); }
+    } catch (err) { ctx.screen.write(`${styled(THEME.error, `Reload failed: ${(err as Error).message}`)}\n`); }
     ctx.rl?.prompt?.();
   }, "Reload plugins");
 

@@ -7,7 +7,7 @@ import fs from "fs";
 import path from "path";
 import os from "os";
 
-const DEFAULT_BINDINGS = {
+const DEFAULT_BINDINGS: Record<string, string> = {
   "ctrl+c": "interrupt",
   "ctrl+d": "exit",
   "ctrl+l": "clear_screen",
@@ -22,7 +22,7 @@ const DEFAULT_BINDINGS = {
   "tab": "autocomplete",
 };
 
-function loadKeybindings(configDir) {
+function loadKeybindings(configDir?: string): Record<string, string> {
   const dir = configDir || path.join(os.homedir(), ".haxagent");
   const filePath = path.join(dir, "keybindings.json");
   if (!fs.existsSync(filePath)) return { ...DEFAULT_BINDINGS };
@@ -32,7 +32,7 @@ function loadKeybindings(configDir) {
   } catch (_) { return { ...DEFAULT_BINDINGS }; }
 }
 
-function saveKeybindings(bindings, configDir) {
+function saveKeybindings(bindings: Record<string, string>, configDir?: string): void {
   const dir = configDir || path.join(os.homedir(), ".haxagent");
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
   const filePath = path.join(dir, "keybindings.json");

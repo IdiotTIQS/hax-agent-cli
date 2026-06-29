@@ -23,10 +23,28 @@ import * as commandsRegistryMod from "./commands/registry.js";
 
 // === Argument Parser ===
 
-function parseArgs(argv) {
+interface ParsedFlags {
+  help?: boolean;
+  version?: boolean;
+  noColor?: boolean;
+  sandbox?: boolean;
+  provider?: string;
+  model?: string;
+  profile?: string;
+  permissionMode?: string;
+  maxTurns?: string;
+  batch?: string;
+  input?: string;
+  output?: string;
+  apiKey?: string;
+  _: string[];
+  [key: string]: unknown;
+}
+
+function parseArgs(argv: string[]): ParsedFlags {
   const args = argv.slice(2);
-  const flags = {};
-  const positional = [];
+  const flags: ParsedFlags = { _: [] };
+  const positional: string[] = [];
 
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
@@ -48,8 +66,8 @@ function parseArgs(argv) {
         console.error(`Error: ${a} requires a value`);
         process.exit(1);
       }
-      const key = a.slice(2).replace(/-([a-z])/g, (_, c) => c.toUpperCase());
-      flags[key] = next;
+      const key = a.slice(2).replace(/-([a-z])/g, (_: string, c: string) => c.toUpperCase());
+      (flags as Record<string, unknown>)[key] = next;
       i++;
       continue;
     }
@@ -57,8 +75,8 @@ function parseArgs(argv) {
     // --key=value form
     if (a.startsWith("--") && a.includes("=")) {
       const [key, ...rest] = a.slice(2).split("=");
-      const camelKey = key.replace(/-([a-z])/g, (_, c) => c.toUpperCase());
-      flags[camelKey] = rest.join("=");
+      const camelKey = key.replace(/-([a-z])/g, (_: string, c: string) => c.toUpperCase());
+      (flags as Record<string, unknown>)[camelKey] = rest.join("=");
       continue;
     }
 
@@ -117,7 +135,7 @@ function printHelp() {
 
 // === Batch Mode ===
 
-async function runBatch(flags) {
+async function runBatch(flags: ParsedFlags) {
   let prompt = flags.batch;
   if (flags.input) {
     if (!fs.existsSync(flags.input)) {
@@ -134,13 +152,13 @@ async function runBatch(flags) {
   // Setup if needed
   if (shouldRunSetup()) { await runSetup(); reloadSettings(); }
 
-  const settings = loadSettings();
+  const settings = loadSettings() ?? {};
   const profiles = new ProfileManager();
 
   // CLI flag overrides
-  let providerName = flags.provider || settings.agent?.provider;
-  let modelName = flags.model || settings.agent?.model;
-  let permMode = flags.permissionMode || settings.permissions?.mode || PermissionMode.DEFAULT;
+  let providerName = flags.provider || (settings as any).agent?.provider;
+  let modelName = flags.model || (settings as any).agent?.model;
+  let permMode = flags.permissionMode || (settings as any).permissions?.mode || PermissionMode.DEFAULT;
 
   if (flags.profile) {
     if (profiles.use(flags.profile)) {
@@ -153,15 +171,15 @@ async function runBatch(flags) {
     }
   }
 
-  const maxTurns = parseInt(flags.maxTurns, 10) || 200;
+  const maxTurns = parseInt(flags.maxTurns as string, 10) || 200;
   const provider = createProvider({ provider: providerName, model: modelName });
   const pm = new PermissionChecker({ mode: permMode });
   const hooks = new HookExecutor();
   const toolRegistry = createDefaultRegistry(process.cwd());
   const skills = loadSkillRegistry();
-  const session = new Session({ provider, toolRegistry, permissionManager: pm, hookExecutor: hooks });
+  const session = new Session({ provider: provider as never, toolRegistry, permissionManager: pm, hookExecutor: hooks });
 
-  if (flags.apiKey) { provider.apiKey = flags.apiKey; }
+  if (flags.apiKey) { (provider as any).apiKey = flags.apiKey; }
 
   const engine = new AgentEngine({ session, projectRoot: process.cwd(), skillRegistry: skills, maxToolTurns: maxTurns });
 
@@ -170,11 +188,11 @@ async function runBatch(flags) {
     for await (const event of engine.sendMessage(prompt)) {
       switch (event.type) {
         case "message.delta":
-          process.stdout.write(event.delta || "");
-          output += event.delta || "";
+          process.stdout.write((event.delta as string) || "");
+          output += (event.delta as string) || "";
           break;
         case "thinking":
-          if (event.thinking) { process.stdout.write(ANSI.dim + event.thinking + ANSI.reset); }
+          if (event.thinking) { process.stdout.write(ANSI.dim + (event.thinking as string) + ANSI.reset); }
           break;
         case "tool.start":
           process.stderr.write(ANSI.dim + `[tool: ${event.name}]` + ANSI.reset + "\n");
@@ -182,12 +200,12 @@ async function runBatch(flags) {
         case "tool.result":
           break;
         case "turn.failed":
-          console.error(`\nError: ${event.error?.message || "unknown"}`);
+          console.error(`\nError: ${(event.error as any)?.message || "unknown"}`);
           break;
       }
     }
   } catch (err) {
-    console.error(`\nError: ${err.message}`);
+    console.error(`\nError: ${(err as Error).message}`);
   }
 
   if (flags.output) {
@@ -195,18 +213,18 @@ async function runBatch(flags) {
     process.stderr.write(`\nOutput written to ${flags.output}\n`);
   }
 
-  const cost = session.costTracker ? "$" + session.costTracker.getCost(provider.model).toFixed(4) : "$0";
+  const cost = "$0"; // engine Session tracks tokens but not cost; use turnCount/toolCallCount directly
   process.stderr.write(`\n${session.turnCount} turns / ${session.toolCallCount} tools / ${cost}\n`);
   process.exit(0);
 }
 
 // === Interactive Mode ===
 
-async function runInteractive(flags) {
+async function runInteractive(flags: ParsedFlags) {
   // First-run setup wizard — reload after setup saves to disk
   if (shouldRunSetup()) { await runSetup(); reloadSettings(); }
 
-  var settings = loadSettings();
+  var settings = loadSettings() ?? {} as any;
   var profiles = new ProfileManager();
 
   // CLI flag overrides
@@ -233,7 +251,7 @@ async function runInteractive(flags) {
   }
 
   var provider = createProvider({ provider: providerName, model: modelName });
-  if (flags.apiKey) { provider.apiKey = flags.apiKey; }
+  if (flags.apiKey) { (provider as any).apiKey = flags.apiKey; }
 
   var pm = new PermissionChecker({ mode: permMode });
   var hooks = new HookExecutor();
@@ -242,39 +260,39 @@ async function runInteractive(flags) {
 
   // Wire plugin system
   var pluginRegistry = loadPluginRegistry(process.cwd());
-  var pluginHooks = pluginRegistry.getAllHooks();
+  var pluginHooks = (pluginRegistry.getAllHooks() as Array<{ event?: string; matcher?: string; priority?: number }>);
   for (const h of pluginHooks) {
     hooks.register(h.event || "pre.tool_use", async () => {}, { matcher: h.matcher, priority: h.priority || 0 });
   }
 
   // Sandbox setup
-  var sandbox = null;
+  var sandbox: SandboxAdapter | null = null;
   var explicitSandbox = !!flags.sandbox;
-  var sandboxEnabled = explicitSandbox || settings.sandbox?.enabled;
+  var sandboxEnabled = explicitSandbox || (settings as any).sandbox?.enabled;
   if (sandboxEnabled) {
     sandbox = new SandboxAdapter({
-      backend: settings.sandbox?.backend || "docker",
-      image: settings.sandbox?.image || "node:18-alpine",
-      network: settings.sandbox?.network || "none",
-      cpus: settings.sandbox?.cpus || 2,
-      memory: settings.sandbox?.memory || "512m",
+      backend: (settings as any).sandbox?.backend || "docker",
+      image: (settings as any).sandbox?.image || "node:18-alpine",
+      network: (settings as any).sandbox?.network || "none",
+      cpus: (settings as any).sandbox?.cpus || 2,
+      memory: (settings as any).sandbox?.memory || "512m",
       hostDir: process.cwd(),
     });
     try {
       await sandbox.start();
       if (sandbox.isRunning) process.stdout.write(styled(THEME.success, "Sandbox: docker (running)") + "\n");
     } catch (err) {
-      if (explicitSandbox) process.stdout.write(styled(THEME.warning, "Sandbox unavailable: " + err.message) + "\n");
+      if (explicitSandbox) process.stdout.write(styled(THEME.warning, "Sandbox unavailable: " + (err as Error).message) + "\n");
       sandbox = null;
     }
   }
 
-  var session = new Session({ provider, toolRegistry, permissionManager: pm, hookExecutor: hooks, pluginRegistry: pluginRegistry, sandbox: sandbox });
+  var session = new Session({ provider: provider as never, toolRegistry, permissionManager: pm, hookExecutor: hooks, pluginRegistry: pluginRegistry as never, sandbox: sandbox as never });
 
   // Approval callback — uses readline.question for non-YOLO confirmations
-  var approvalCallback = function(toolName, toolInput) {
+  var approvalCallback = function(toolName: string, toolInput: Record<string, unknown>) {
     var detail = JSON.stringify(toolInput || {}).slice(0, 80);
-    return new Promise(function(resolve) {
+    return new Promise<string>(function(resolve) {
       rl.question("\n" + styled(THEME.warning, "  ? Approve ") + styled(THEME.accent, toolName) + " " + THEME.dim + detail + ANSI.reset + " [Y/n/a]? ", function(a) {
         a = a.trim().toLowerCase();
         if (a === "n" || a === "no") resolve("deny");
@@ -284,12 +302,12 @@ async function runInteractive(flags) {
     });
   };
 
-  var maxTurns = parseInt(flags.maxTurns, 10) || undefined;
+  var maxTurns = parseInt(flags.maxTurns as string, 10) || undefined;
   var engine = new AgentEngine({ session, projectRoot: process.cwd(), skillRegistry: skills, approvalCallback: approvalCallback, maxToolTurns: maxTurns });
 
   // Restore saved settings: permission mode, thinking, theme
-  if (settings.permissions?.allowedTools) { for (var t of settings.permissions.allowedTools) pm.allowTool(t); }
-  if (settings.permissions?.deniedTools) { for (var t of settings.permissions.deniedTools) pm.denyTool(t); }
+  if (settings.permissions?.allowedTools) { for (const allowedTool of settings.permissions.allowedTools) pm.allowTool(allowedTool); }
+  if (settings.permissions?.deniedTools) { for (const deniedTool of settings.permissions.deniedTools) pm.denyTool(deniedTool); }
   if (settings.agent?.thinking) { session._thinking = true; session._thinkIntensity = settings.agent.thinkIntensity || null; }
   if (settings.ui?.theme) { try { applyTheme(settings.ui.theme, THEME); } catch (_) {} }
 
@@ -300,20 +318,20 @@ async function runInteractive(flags) {
 
   var rl = readline.createInterface({
     input: process.stdin, output: process.stdout, terminal: isTTY,
-    completer: function (line) {
-      var hits = [];
+    completer: function (line: string): readline.CompleterResult {
+      var hits: string[] = [];
       if (line.startsWith("/")) {
         var partial = line.slice(1).toLowerCase();
-        var cmdNames = Object.keys(commands.commands || {});
+        var cmdNames = Object.keys((commands as any).commands || {});
         try { for (var s of skills.list()) { cmdNames.push(s.name); } } catch (_) {}
-        hits = cmdNames.filter(function (c) { return c.startsWith(partial); }).map(function (c) { return "/" + c; });
+        hits = cmdNames.filter(function (c: string) { return c.startsWith(partial); }).map(function (c: string) { return "/" + c; });
       }
       return [hits.length ? hits : [], line];
     }
   });
 
   // Old proven renderer
-  var screen = { isTTY: function() { return isTTY; }, columns: process.stdout.columns || 80, write: function(t) { process.stdout.write(t); }, clear: function() { process.stdout.write(ANSI.clearScreen); } };
+  var screen = { isTTY: function() { return isTTY; }, columns: process.stdout.columns || 80, write: function(t: string) { process.stdout.write(t); }, clear: function() { process.stdout.write(ANSI.clearScreen); } };
   var renderer = new ResponseRenderer(screen, new MarkdownRenderer(screen.columns));
   var markdown = new MarkdownRenderer(screen.columns);
 
@@ -327,32 +345,32 @@ async function runInteractive(flags) {
   // Banner
   function banner() {
     return "\n" + styled(THEME.heading, "Hax Agent v" + VERSION) + "\n" +
-      styled(THEME.dim, provider.name + " / " + provider.model + " | /help for commands | /exit to quit") + "\n\n";
+      styled(THEME.dim, (provider as any).name + " / " + (provider as any).model + " | /help for commands | /exit to quit") + "\n\n";
   }
   // Restore saved profile from last session
   function getSavedProfile() {
-    try { const s = loadSettings(); return s.agent?._activeProfile || null; } catch (_) { return null; }
+    try { const s = loadSettings(); return (s as any)?.agent?._activeProfile || null; } catch (_) { return null; }
   }
   function saveActiveProfile() {
     try {
-      const s = loadSettings();
+      const s = loadSettings() ?? {} as any;
       if (!s.agent) s.agent = {};
-      s.agent._activeProfile = pm.activeName;
-      s.agent.provider = pm.active.provider;
-      s.agent.model = pm.active.model;
+      s.agent._activeProfile = (pm as any).activeName;
+      s.agent.provider = (pm as any).active?.provider;
+      s.agent.model = (pm as any).active?.model;
       saveSettings(s);
     } catch (_) {}
   }
   var saved = getSavedProfile();
   if (saved && profiles.use(saved)) {
     provider = createProvider({ ...profiles.active });
-    session.provider = provider;
+    session.provider = provider as never;
   }
 
   process.stdout.write(banner());
   refreshPrompt();
 
-  rl.on("line", async function (line) {
+  rl.on("line", async function (line: string) {
     var trimmed = line.trim();
 
     if (!trimmed) { refreshPrompt(); rl.prompt(); return; }
@@ -369,8 +387,8 @@ async function runInteractive(flags) {
       // Extract command name
       var cmdName = trimmed.slice(1).trim().split(/\s+/)[0].toLowerCase();
       // Check if it's a known command
-      if (commands.commands[cmdName]) {
-        await commands.execute(trimmed, { screen: { write: function(t) { process.stdout.write(t); } }, session: session, rl: rl, settings: settings });
+      if ((commands as any).commands[cmdName]) {
+        await (commands as any).execute(trimmed, { screen: { write: function(t: string) { process.stdout.write(t); } }, session: session, rl: rl, settings: settings });
       } else {
         // Check if it's a skill
         var skill = skills.get(cmdName);
@@ -380,20 +398,20 @@ async function runInteractive(flags) {
           try {
             for await (var event of engine.sendMessage(skillPrompt)) {
               switch (event.type) {
-                case "turn.started": renderer.startWaiting?.(); break;
-                case "message.delta": renderer.writeText?.(event.delta); break;
-                case "thinking": renderer.thinking?.(event); break;
-                case "tool.start": renderer.startTool?.(event); break;
-                case "tool.result": renderer.finishTool?.(event); break;
-                case "tool.limit": renderer.notice?.("Tool limit reached"); break;
-                case "turn.completed": renderer.complete?.(event.usage); break;
-                case "turn.interrupted": renderer.interrupt?.(); break;
-                case "turn.failed": renderer.fail?.(event.error?.message); break;
+                case "turn.started": (renderer as any).startWaiting?.(); break;
+                case "message.delta": (renderer as any).writeText?.((event as any).delta); break;
+                case "thinking": (renderer as any).thinking?.(event); break;
+                case "tool.start": (renderer as any).startTool?.(event); break;
+                case "tool.result": (renderer as any).finishTool?.(event); break;
+                case "tool.limit": (renderer as any).notice?.("Tool limit reached"); break;
+                case "turn.completed": (renderer as any).complete?.((event as any).usage); break;
+                case "turn.interrupted": (renderer as any).interrupt?.(); break;
+                case "turn.failed": (renderer as any).fail?.((event as any).error?.message); break;
               }
             }
-          } catch (err) { process.stdout.write(styled(THEME.error, "Error: " + err.message) + "\n"); }
+          } catch (err) { process.stdout.write(styled(THEME.error, "Error: " + (err as Error).message) + "\n"); }
         } else {
-          await commands.execute(trimmed, { screen: { write: function(t) { process.stdout.write(t); } }, session: session, rl: rl, settings: settings });
+          await (commands as any).execute(trimmed, { screen: { write: function(t: string) { process.stdout.write(t); } }, session: session, rl: rl, settings: settings });
         }
       }
       refreshPrompt();
@@ -409,19 +427,19 @@ async function runInteractive(flags) {
     try {
       for await (var event of engine.sendMessage(trimmed)) {
         switch (event.type) {
-          case "turn.started": renderer.startWaiting?.(); break;
-          case "message.delta": renderer.writeText?.(event.delta); break;
-          case "thinking": renderer.thinking?.(event); break;
-          case "tool.start": renderer.startTool?.(event); break;
-          case "tool.result": renderer.finishTool?.(event); break;
-          case "tool.limit": renderer.notice?.("Tool limit reached"); break;
-          case "turn.completed": renderer.complete?.(event.usage); break;
-          case "turn.interrupted": renderer.interrupt?.(); break;
-          case "turn.failed": renderer.fail?.(event.error?.message); break;
+          case "turn.started": (renderer as any).startWaiting?.(); break;
+          case "message.delta": (renderer as any).writeText?.((event as any).delta); break;
+          case "thinking": (renderer as any).thinking?.(event); break;
+          case "tool.start": (renderer as any).startTool?.(event); break;
+          case "tool.result": (renderer as any).finishTool?.(event); break;
+          case "tool.limit": (renderer as any).notice?.("Tool limit reached"); break;
+          case "turn.completed": (renderer as any).complete?.((event as any).usage); break;
+          case "turn.interrupted": (renderer as any).interrupt?.(); break;
+          case "turn.failed": (renderer as any).fail?.((event as any).error?.message); break;
         }
       }
     } catch (err) {
-      process.stdout.write(styled(THEME.error, "Error: " + err.message) + "\n");
+      process.stdout.write(styled(THEME.error, "Error: " + (err as Error).message) + "\n");
     }
     refreshPrompt();
     rl.prompt();
@@ -429,12 +447,12 @@ async function runInteractive(flags) {
 
   // Ctrl+L = clear screen, Shift+Tab = cycle permission mode
   if (isTTY) {
-    process.stdin.on("keypress", function (str, key) {
+    process.stdin.on("keypress", function (str: unknown, key: { shift?: boolean; ctrl?: boolean; name?: string }) {
       if (key && key.shift && key.name === "tab") {
         var modes = ["normal", "yolo", "plan", "full_auto"];
         var idx = modes.indexOf(pm.mode);
         pm.mode = modes[(idx + 1) % modes.length];
-        try { var s = loadSettings(); if (!s.permissions) s.permissions = {}; s.permissions.mode = pm.mode; saveSettings(s); } catch (_) {}
+        try { var s = loadSettings() ?? {} as any; if (!s.permissions) s.permissions = {}; s.permissions.mode = pm.mode; saveSettings(s); } catch (_) {}
         process.stdout.write("\r" + ANSI.clearLine + styled(THEME.warning, "[" + pm.mode.toUpperCase() + "]") + " ");
         refreshPrompt();
       }
@@ -449,7 +467,7 @@ async function runInteractive(flags) {
 
   rl.on("close", function () {
     if (sandbox) { try { sandbox.stop(); } catch (_) {} }
-    var cost = session.costTracker ? "$" + session.costTracker.getCost(session.provider?.model).toFixed(4) : "$0";
+    var cost = (session as any).costTracker ? "$" + (session as any).costTracker.getCost(session.provider?.model).toFixed(4) : "$0";
     process.stdout.write("\n" + ANSI.dim + "Session: " + session.turnCount + " turns / " + session.toolCallCount + " tools / " + cost + " / " + (session.inputTokens + session.outputTokens).toLocaleString() + " tokens" + ANSI.reset + "\n");
     process.exit(0);
   });
@@ -477,19 +495,19 @@ async function runInteractive(flags) {
     try {
       for await (var event of engine.sendMessage(autoPrompt)) {
         switch (event.type) {
-          case "turn.started": renderer.startWaiting?.(); break;
-          case "message.delta": renderer.writeText?.(event.delta); break;
-          case "thinking": renderer.thinking?.(event); break;
-          case "tool.start": renderer.startTool?.(event); break;
-          case "tool.result": renderer.finishTool?.(event); break;
-          case "tool.limit": renderer.notice?.("Tool limit reached"); break;
-          case "turn.completed": renderer.complete?.(event.usage); break;
-          case "turn.interrupted": renderer.interrupt?.(); break;
-          case "turn.failed": renderer.fail?.(event.error?.message); break;
+          case "turn.started": (renderer as any).startWaiting?.(); break;
+          case "message.delta": (renderer as any).writeText?.((event as any).delta); break;
+          case "thinking": (renderer as any).thinking?.(event); break;
+          case "tool.start": (renderer as any).startTool?.(event); break;
+          case "tool.result": (renderer as any).finishTool?.(event); break;
+          case "tool.limit": (renderer as any).notice?.("Tool limit reached"); break;
+          case "turn.completed": (renderer as any).complete?.((event as any).usage); break;
+          case "turn.interrupted": (renderer as any).interrupt?.(); break;
+          case "turn.failed": (renderer as any).fail?.((event as any).error?.message); break;
         }
       }
     } catch (err) {
-      process.stdout.write(styled(THEME.error, "Error: " + err.message) + "\n");
+      process.stdout.write(styled(THEME.error, "Error: " + (err as Error).message) + "\n");
     }
     refreshPrompt();
   }
@@ -499,7 +517,7 @@ async function runInteractive(flags) {
 
 // === Main ===
 
-function main(argv) {
+function main(argv?: string[]) {
   if (!argv) argv = process.argv;
   const flags = parseArgs(argv);
 
@@ -507,9 +525,9 @@ function main(argv) {
   if (flags.help) { printHelp(); return; }
 
   if (flags.batch) {
-    runBatch(flags).catch(function (err) { console.error(err.message); process.exit(1); });
+    runBatch(flags).catch(function (err) { console.error((err as Error).message); process.exit(1); });
   } else {
-    runInteractive(flags).catch(function (err) { console.error(err.message); process.exit(1); });
+    runInteractive(flags).catch(function (err) { console.error((err as Error).message); process.exit(1); });
   }
 }
 

@@ -8,13 +8,18 @@ import { getPricing, getCost as calcCost } from './pricing.js';
  * @param {Date} [date]
  * @returns {string}
  */
-function createSessionId(date = new Date()) {
+function createSessionId(date = new Date()): string {
   const timestamp = date.toISOString().replace(/[:.]/g, '-');
   const suffix = crypto.randomBytes(4).toString('hex');
   return `${timestamp}-${suffix}`;
 }
 
 class InputHistory {
+  entries: string[];
+  maxSize: number;
+  index: number;
+  partial: string;
+
   constructor(maxSize = 1000) {
     this.entries = [];
     this.maxSize = maxSize;
@@ -22,7 +27,7 @@ class InputHistory {
     this.partial = '';
   }
 
-  add(entry) {
+  add(entry: string): void {
     const trimmed = entry.trim();
     if (!trimmed) return;
     if (this.entries.length > 0 && this.entries[0] === trimmed) return;
@@ -32,7 +37,7 @@ class InputHistory {
     this.partial = '';
   }
 
-  up(current) {
+  up(current: string): string {
     if (this.entries.length === 0) return current;
     if (this.index === -1) {
       this.partial = current;
@@ -43,7 +48,7 @@ class InputHistory {
     return this.entries[this.index];
   }
 
-  down(current) {
+  down(current: string): string {
     if (this.index === -1) return current;
     if (this.index === 0) {
       this.index = -1;
@@ -53,12 +58,12 @@ class InputHistory {
     return this.entries[this.index];
   }
 
-  reset() {
+  reset(): void {
     this.index = -1;
     this.partial = '';
   }
 
-  search(query) {
+  search(query: string): string[] {
     if (!query) return [];
     const lower = query.toLowerCase();
     return this.entries.filter(e => e.toLowerCase().includes(lower)).slice(0, 10);
@@ -68,7 +73,7 @@ class InputHistory {
    * Interactive reverse-i-search. Returns { match, query } or null.
    * Call repeatedly as user types; caller handles the display.
    */
-  rsearch(query) {
+  rsearch(query: string): { match: string; query: string } | null {
     if (!query) return null;
     const lower = query.toLowerCase();
     for (const e of this.entries) {
@@ -79,6 +84,14 @@ class InputHistory {
 }
 
 class CostTracker {
+  inputTokens: number;
+  outputTokens: number;
+  cacheCreationTokens: number;
+  cacheReadTokens: number;
+  turnCount: number;
+  toolCallCount: number;
+  startTime: number;
+
   constructor() {
     this.inputTokens = 0;
     this.outputTokens = 0;
@@ -89,7 +102,7 @@ class CostTracker {
     this.startTime = Date.now();
   }
 
-  addUsage(usage, model) {
+  addUsage(usage: Record<string, unknown>, model: string): void {
     if (!usage) return;
     this.inputTokens += readUsageNumber(usage, 'input_tokens', 'inputTokens', 'prompt_tokens', 'promptTokens') || 0;
     this.outputTokens += readUsageNumber(usage, 'output_tokens', 'outputTokens', 'completion_tokens', 'completionTokens') || 0;
@@ -98,19 +111,19 @@ class CostTracker {
     this.turnCount += 1;
   }
 
-  addToolCall() {
+  addToolCall(): void {
     this.toolCallCount += 1;
   }
 
-  getCost(model) {
+  getCost(model: string): number {
     return calcCost(model, this.inputTokens, this.outputTokens, this.cacheCreationTokens, this.cacheReadTokens);
   }
 
-  getPricing(model) {
+  getPricing(model: string): unknown {
     return getPricing(model);
   }
 
-  formatSummary(model) {
+  formatSummary(model: string): string {
     const cost = this.getCost(model);
     const elapsed = Math.floor((Date.now() - this.startTime) / 1000);
     const minutes = Math.floor(elapsed / 60);
@@ -132,23 +145,76 @@ class CostTracker {
   }
 }
 
-function readUsageNumber(usage, ...keys) {
+function readUsageNumber(usage: Record<string, unknown>, ...keys: string[]): number {
   for (const key of keys) {
     if (Number.isFinite(usage[key])) {
-      return usage[key];
+      return usage[key] as number;
     }
   }
 
   return 0;
 }
 
+interface SessionProvider {
+  name?: string;
+  model?: string;
+  apiKey?: string;
+  apiUrl?: string;
+  [key: string]: unknown;
+}
+
+interface SessionPermissionManager {
+  mode: string;
+  _alwaysAllow?: Set<string>;
+  _alwaysDeny?: Set<string>;
+}
+
+interface SessionGoal {
+  enabled?: boolean;
+  text?: string;
+  maxContinuations?: number;
+}
+
+interface SessionContextStats {
+  inputTokens: number;
+  budgetTokens: number;
+}
+
+interface SessionOptions {
+  provider?: SessionProvider | null;
+  settings?: Record<string, unknown> | null;
+  toolRegistry?: unknown | null;
+  permissionManager?: SessionPermissionManager | null;
+  pluginRegistry?: unknown | null;
+}
+
 class Session {
-  constructor(options = {}) {
+  id: string;
+  messages: unknown[];
+  provider: SessionProvider | null;
+  settings: Record<string, unknown> | null;
+  toolRegistry: unknown | null;
+  permissionManager: SessionPermissionManager | null;
+  costTracker: CostTracker;
+  shouldExit: boolean;
+  isStreaming: boolean;
+  pendingExit: boolean;
+  responseAbortController: AbortController | null;
+  responseRenderer: unknown | null;
+  responseInterrupted: boolean;
+  availableModels: unknown;
+  startTime: number;
+  modifiedFiles: Set<string>;
+  goal: SessionGoal | null;
+  pluginRegistry: unknown | null;
+  contextStats: SessionContextStats | null;
+
+  constructor(options: SessionOptions = {}) {
     this.id = createSessionId();
     this.messages = [];
-    this.provider = options.provider;
-    this.settings = options.settings;
-    this.toolRegistry = options.toolRegistry;
+    this.provider = options.provider ?? null;
+    this.settings = options.settings ?? null;
+    this.toolRegistry = options.toolRegistry ?? null;
     this.permissionManager = options.permissionManager || null;
     this.costTracker = new CostTracker();
     this.shouldExit = false;
@@ -166,17 +232,17 @@ class Session {
     this.contextStats = null;
   }
 
-  getElapsedTime() {
+  getElapsedTime(): string {
     const elapsed = Math.floor((Date.now() - this.startTime) / 1000);
     const minutes = Math.floor(elapsed / 60);
     const seconds = elapsed % 60;
     return minutes > 0 ? `${minutes}m${seconds}s` : `${seconds}s`;
   }
 
-  getStatusLine() {
+  getStatusLine(): string {
     const provider = this.provider?.name || 'provider';
     const model = this.provider?.model || 'model';
-    const cost = this.costTracker.getCost(model);
+    const cost = this.costTracker.getCost(model as string);
     const turns = this.costTracker.turnCount;
     const elapsed = this.getElapsedTime();
 
@@ -191,7 +257,7 @@ class Session {
     const dim = '\x1B[2m';
     const reset = '\x1B[0m';
     const costColor = '\x1B[93m';
-    const cwd = this.settings?.projectRoot || process.cwd();
+    const cwd = (this.settings?.projectRoot as string | undefined) || process.cwd();
     const cwdShort = cwd.length > 30 ? '...' + cwd.slice(-27) : cwd;
 
     // Context window usage meter
@@ -214,7 +280,7 @@ class Session {
   }
 }
 
-function formatTokenCount(value) {
+function formatTokenCount(value: unknown): string {
   const tokens = Number(value) || 0;
   if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(1)}m`;
   if (tokens >= 1_000) return `${(tokens / 1_000).toFixed(1)}k`;

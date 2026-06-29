@@ -2,15 +2,59 @@ import { ANSI, THEME, styled, stripAnsi } from "../shared/utils.js";
 const SPINNER = ["-", "\\", "|", "/"];
 const SPINNER_MS = 100;
 
+interface RLInterface {
+  output: { isTTY?: boolean; write(s: string): void };
+  question(q: string, cb: (a: string) => void): void;
+}
+
+interface SessionLike {
+  provider?: { model?: string };
+  permissionManager?: { mode?: string };
+  inputTokens?: number;
+  outputTokens?: number;
+  costTracker?: { getCost(m: string | undefined): number };
+}
+
+interface TUIOptions {
+  rl?: RLInterface | null;
+  session?: SessionLike | null;
+  isTTY?: boolean;
+  noColor?: boolean;
+}
+
+interface EngineEvent {
+  type: string;
+  delta?: string;
+  thinking?: string;
+  name?: string;
+  input?: Record<string, unknown>;
+  isError?: boolean;
+  error?: { code?: string; message?: string };
+  data?: Record<string, unknown>;
+  durationMs?: number;
+  maxToolTurns?: number;
+  message?: string;
+  [key: string]: unknown;
+}
+
 class TUI {
+  _rl: RLInterface | null;
+  _session: SessionLike | null;
+  _isTTY: boolean;
+  _noColor: boolean;
+  _output: { write(s: string): void };
+  _spinnerTimer: ReturnType<typeof setInterval> | null;
+  _spinnerIdx: number;
+  _started: boolean;
+
   /**
-   * @param {Object} o
-   * @param {Object} [o.rl] — readline interface
-   * @param {Object} [o.session] — agent session
+   * @param {TUIOptions} o
+   * @param {RLInterface} [o.rl] — readline interface
+   * @param {SessionLike} [o.session] — agent session
    * @param {boolean} [o.isTTY] — force TTY mode
    * @param {boolean} [o.noColor] — disable colors
    */
-  constructor(o = {}) {
+  constructor(o: TUIOptions = {}) {
     this._rl = o.rl || null;
     this._session = o.session || null;
     this._isTTY = o.isTTY !== false;
@@ -28,7 +72,7 @@ class TUI {
 
   // === Internal: write a line above the readline prompt ===
 
-  _line(text) {
+  _line(text: string) {
     if (!this._started) return;
     const s = this._noColor ? stripAnsi(String(text)) : String(text);
     if (this._rl) {
@@ -38,7 +82,7 @@ class TUI {
     }
   }
 
-  _style(ansi, text) { return this._noColor ? text : styled(ansi, text); }
+  _style(ansi: string, text: string) { return this._noColor ? text : styled(ansi, text); }
 
   // === Spinner ===
 
@@ -62,7 +106,7 @@ class TUI {
   // === Event Renderer ===
 
   /** Render a single engine event. Called from the async generator loop. */
-  renderEvent(event) {
+  renderEvent(event: EngineEvent) {
     if (!event) return;
     switch (event.type) {
       case "turn.started":
@@ -71,7 +115,7 @@ class TUI {
 
       case "message.delta":
         this._spinnerStop();
-        this._output.write(event.delta);
+        this._output.write(event.delta || "");
         break;
 
       case "thinking":
@@ -79,7 +123,7 @@ class TUI {
 
       case "tool.start": {
         this._spinnerStop();
-        const name = this._fmtName(event.name);
+        const name = this._fmtName(event.name || "");
         const detail = this._fmtInput(event);
         this._line("  " + this._style(THEME.accent, name) + " " + this._style(THEME.dim, detail));
         break;
@@ -91,16 +135,16 @@ class TUI {
         const dur = event.durationMs ? " " + this._style(THEME.dim, event.durationMs + "ms") : "";
         this._output.write(mark + dur + "\n");
 
-        if (ok && event.data && event.name === "file.read" && event.data.content) {
-          const lines = event.data.content.split("\n");
+        if (ok && event.data && event.name === "file.read" && (event.data as Record<string, unknown>).content) {
+          const lines = String((event.data as Record<string, unknown>).content).split("\n");
           for (const l of lines.slice(0, 3)) {
             this._line("  " + this._style(THEME.dim, "| ") + l.slice(0, 120));
           }
           if (lines.length > 3) {
             this._line("  " + this._style(THEME.dim, "| ... " + (lines.length - 3) + " more lines"));
           }
-        } else if (ok && event.data && event.name === "shell.run" && event.data.stdout) {
-          const lines = event.data.stdout.trim().split("\n");
+        } else if (ok && event.data && event.name === "shell.run" && (event.data as Record<string, unknown>).stdout) {
+          const lines = String((event.data as Record<string, unknown>).stdout).trim().split("\n");
           for (const l of lines.slice(0, 5)) {
             this._line("  " + this._style(THEME.dim, "| ") + l.slice(0, 120));
           }
@@ -108,7 +152,7 @@ class TUI {
             this._line("  " + this._style(THEME.dim, "| ... " + (lines.length - 5) + " more lines"));
           }
         } else if (!ok && event.error) {
-          this._line("  " + this._style(THEME.error, event.error.code || "") + " " + event.error.message);
+          this._line("  " + this._style(THEME.error, event.error.code || "") + " " + (event.error.message || ""));
         }
         break;
       }
@@ -146,10 +190,10 @@ class TUI {
   getPrompt() {
     if (!this._session || !this._session.provider) return "> ";
     const s = this._session;
-    const model = s.provider.model || "?";
+    const model = s.provider!.model || "?";
     const mode = (s.permissionManager && s.permissionManager.mode) || "normal";
     const total = (s.inputTokens || 0) + (s.outputTokens || 0);
-    const costVal = s.costTracker ? s.costTracker.getCost(s.provider?.model) : 0;
+    const costVal = s.costTracker ? s.costTracker.getCost(s.provider?.model ?? "") : 0;
     const cost = costVal > 0 ? " $" + costVal.toFixed(4) : (s.costTracker ? " $0" : "");
     const left = " " + model + " | " + mode + " | " + total.toLocaleString() + "t" + cost;
     return this._style(THEME.statusLine, left) + " > ";
@@ -163,9 +207,9 @@ class TUI {
    * creates a new one-line prompt. This is the correct way to ask for
    * approval without blocking the event loop.
    */
-  createApprovalCallback() {
+  createApprovalCallback(): (toolName: string, toolInput: Record<string, unknown>) => Promise<string> {
     const self = this;
-    return async function (toolName, toolInput) {
+    return async function (toolName: string, toolInput: Record<string, unknown>): Promise<string> {
       if (!self._rl || !self._isTTY) return "approve"; // auto-approve in non-interactive mode
 
       const name = self._fmtName(toolName);
@@ -179,8 +223,8 @@ class TUI {
         " / " + self._style(THEME.accent, "[A]lways") +
         " > ";
 
-      return new Promise(function (resolve) {
-        self._rl.question(question, function (answer) {
+      return new Promise<string>(function (resolve) {
+        self._rl!.question(question, function (answer) {
           var a = answer.trim().toLowerCase();
           if (a === "y" || a === "yes" || a === "") resolve("approve");
           else if (a === "a" || a === "always") resolve("always");
@@ -192,23 +236,23 @@ class TUI {
 
   // === Helpers ===
 
-  _fmtName(name) {
+  _fmtName(name: string) {
     var parts = String(name).split(".");
-    return parts.map(function (p, i) { return i === 0 ? p.charAt(0).toUpperCase() + p.slice(1) : p; }).join(" ");
+    return parts.map(function (p: string, i: number) { return i === 0 ? p.charAt(0).toUpperCase() + p.slice(1) : p; }).join(" ");
   }
 
-  _fmtInput(event) {
-    var input = event.input || {};
+  _fmtInput(event: EngineEvent) {
+    var input = (event.input || {}) as Record<string, unknown>;
     if (event.name === "file.read" || event.name === "file.write" || event.name === "file.edit" || event.name === "file.delete") {
-      return input.path || "";
+      return (input.path as string) || "";
     }
     if (event.name === "shell.run") {
-      var cmd = [input.command].concat(input.args || []).filter(Boolean).join(" ");
+      var cmd = [input.command as string].concat((input.args as string[]) || []).filter(Boolean).join(" ");
       return cmd.length > 50 ? cmd.slice(0, 47) + "..." : cmd;
     }
-    if (event.name === "file.glob") return input.pattern || "";
-    if (event.name === "file.search" || event.name === "grep") return "\"" + (input.query || input.pattern || "") + "\"";
-    if (event.name === "web.fetch" || event.name === "web.search") return (input.url || input.query || "").slice(0, 50);
+    if (event.name === "file.glob") return (input.pattern as string) || "";
+    if (event.name === "file.search" || event.name === "grep") return "\"" + ((input.query as string) || (input.pattern as string) || "") + "\"";
+    if (event.name === "web.fetch" || event.name === "web.search") return ((input.url as string) || (input.query as string) || "").slice(0, 50);
     return "";
   }
 }

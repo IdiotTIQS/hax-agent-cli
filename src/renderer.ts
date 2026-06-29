@@ -2,6 +2,40 @@ import { ANSI, THEME, stripAnsi } from './renderer-ansi.js';
 import { TerminalScreen } from './renderer-terminal.js';
 import { MarkdownRenderer, styled } from './renderer-markdown.js';
 
+interface Screen {
+  isTTY(): boolean;
+  columns: number;
+  write(t: string): void;
+  clear(): void;
+}
+
+interface MarkdownRendererLike {
+  render(text: string): string;
+  _renderInline(text: string): string;
+}
+
+interface ToolChunk {
+  name?: string;
+  input?: Record<string, unknown>;
+  isError?: boolean;
+  error?: { message?: string; code?: string } | string;
+  data?: Record<string, unknown>;
+  durationMs?: number;
+  errorCode?: string;
+  repeatedInvalid?: boolean;
+  showNotice?: boolean;
+  attempt?: number;
+  delta?: string;
+  summary?: string;
+  [key: string]: unknown;
+}
+
+interface PreviewItem {
+  line: number;
+  marker: string;
+  text?: string;
+}
+
 const SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 const SPINNER_INTERVAL = 80;
 
@@ -24,7 +58,17 @@ const CLAUDE_BANNER = [
 ];
 
 class Spinner {
-  constructor(screen) {
+  screen: Screen;
+  frameIndex: number;
+  timer: ReturnType<typeof setInterval> | null;
+  active: boolean;
+  label: string;
+  verb: string;
+  startTime: number;
+  tokenCount: number;
+  isTTY: boolean;
+
+  constructor(screen: Screen) {
     this.screen = screen;
     this.frameIndex = 0;
     this.timer = null;
@@ -91,17 +135,38 @@ class Spinner {
 }
 
 class NullWritable {
+  writable: boolean;
+
   constructor() { this.writable = true; }
-  write() { return true; }
-  end() { return this; }
-  on() {}
-  once() {}
-  removeListener() {}
-  off() {}
+  write(): boolean { return true; }
+  end(): this { return this; }
+  on(): void {}
+  once(): void {}
+  removeListener(): void {}
+  off(): void {}
 }
 
 class ResponseRenderer {
-  constructor(screen, markdown) {
+  screen: Screen;
+  markdown: MarkdownRendererLike;
+  spinner: Spinner;
+  assistantStarted: boolean;
+  textStarted: boolean;
+  lineOpen: boolean;
+  lineBuffer: string;
+  currentToolName: string;
+  currentToolInput: Record<string, unknown>;
+  thinkingSummary: string;
+  toolCount: number;
+  startTime: number;
+  outputTokens: number;
+  inputTokens: number;
+  _collapsed: { name: string; count: number; results: ToolChunk[] } | null;
+  _partialWritten: boolean;
+  _fullText: string;
+  _lastToolOk: boolean | null;
+
+  constructor(screen: Screen, markdown: MarkdownRendererLike) {
     this.screen = screen;
     this.markdown = markdown;
     this.spinner = new Spinner(screen);
@@ -120,6 +185,7 @@ class ResponseRenderer {
     this._collapsed = null;
     this._partialWritten = false;
     this._fullText = '';
+    this._lastToolOk = null;
   }
 
   /** Render complete markdown text (called at end of turn) */
@@ -347,34 +413,34 @@ class ResponseRenderer {
   }
 }
 
-function formatToolStart(chunk) {
-  const label = toToolLabel(chunk.name);
-  const inputSummary = formatToolInputSummary(chunk.name, chunk.input);
+function formatToolStart(chunk: ToolChunk): string {
+  const label = toToolLabel(chunk.name ?? '');
+  const inputSummary = formatToolInputSummary(chunk.name ?? '', chunk.input);
   const attemptLabel = chunk.attempt && chunk.attempt > 1 ? ` ${THEME.warning}(attempt ${chunk.attempt})${ANSI.reset}` : '';
   if (!inputSummary) return `${THEME.toolIndicator}${label}${ANSI.reset}${attemptLabel}`;
   return `${THEME.toolIndicator}${label}${ANSI.reset}${attemptLabel}${THEME.dim}${inputSummary}${ANSI.reset}`;
 }
 
-function formatToolInputSummary(name, input) {
+function formatToolInputSummary(name: string, input: Record<string, unknown> | undefined | null): string {
   if (!input || typeof input !== 'object') return '';
 
   if (name === 'file.read') {
-    return input.path ? `(${THEME.accent}${formatDisplayPath(input.path)}${ANSI.reset})` : '';
+    return input.path ? `(${THEME.accent}${formatDisplayPath(input.path as string)}${ANSI.reset})` : '';
   }
   if (name === 'file.write') {
-    return input.path ? `(${THEME.accent}${formatDisplayPath(input.path)}${ANSI.reset})` : '';
+    return input.path ? `(${THEME.accent}${formatDisplayPath(input.path as string)}${ANSI.reset})` : '';
   }
   if (name === 'file.delete') {
-    return input.path ? `(${THEME.accent}${formatDisplayPath(input.path)}${ANSI.reset})` : '';
+    return input.path ? `(${THEME.accent}${formatDisplayPath(input.path as string)}${ANSI.reset})` : '';
   }
   if (name === 'file.glob') {
-    const parts = [input.pattern ? `${THEME.accent}"${input.pattern}"${ANSI.reset}` : ''];
-    if (input.cwd && input.cwd !== '.') parts.push(`${THEME.dim}in ${formatDisplayPath(input.cwd)}${ANSI.reset}`);
+    const parts: string[] = [input.pattern ? `${THEME.accent}"${input.pattern}"${ANSI.reset}` : ''];
+    if (input.cwd && input.cwd !== '.') parts.push(`${THEME.dim}in ${formatDisplayPath(input.cwd as string)}${ANSI.reset}`);
     return parts.filter(Boolean).length > 0 ? `(${parts.join(' ')})` : '';
   }
   if (name === 'file.search') {
-    const parts = [input.query ? `${THEME.accent}"${input.query}"${ANSI.reset}` : ''];
-    if (input.path && input.path !== '.') parts.push(`${THEME.dim}in ${formatDisplayPath(input.path)}${ANSI.reset}`);
+    const parts: string[] = [input.query ? `${THEME.accent}"${input.query}"${ANSI.reset}` : ''];
+    if (input.path && input.path !== '.') parts.push(`${THEME.dim}in ${formatDisplayPath(input.path as string)}${ANSI.reset}`);
     return parts.filter(Boolean).length > 0 ? `(${parts.join(' ')})` : '';
   }
   if (name === 'shell.run') {
@@ -389,15 +455,15 @@ function formatToolInputSummary(name, input) {
   return visibleEntries.length > 0 ? `(${visibleEntries.join(', ')})` : '';
 }
 
-function formatToolResult(chunk) {
+function formatToolResult(chunk: ToolChunk): string {
   const name = chunk.name;
   const duration = formatDuration(chunk.durationMs);
 
   if (chunk.isError) {
     const code = chunk.errorCode && chunk.errorCode !== 'TOOL_ERROR' ? `${chunk.errorCode}: ` : '';
-    const errText = typeof chunk.error === "object" ? (chunk.error.message || chunk.error.code || JSON.stringify(chunk.error)) : String(chunk.error || "");
+    const errText = typeof chunk.error === "object" && chunk.error !== null ? ((chunk.error as { message?: string; code?: string }).message || (chunk.error as { message?: string; code?: string }).code || JSON.stringify(chunk.error)) : String(chunk.error || "");
     const message = chunk.error ? `${code}${errText}` : `${code}tool failed`;
-    const path = chunk.input?.path;
+    const path = (chunk.input as Record<string, unknown> | undefined)?.path;
     const pathDisplay = path ? `(${THEME.accent}${formatDisplayPath(path)}${ANSI.reset})` : '';
     return `  ${THEME.toolError}✗ ${name}${pathDisplay} failed${THEME.dim}${duration}${ANSI.reset}\n    ${THEME.dim}└─ ${message}${ANSI.reset}`;
   }
@@ -410,33 +476,32 @@ function formatToolResult(chunk) {
   return `  ${THEME.toolSuccess}✓ ${toToolLabel(name)}${THEME.dim}${duration}${ANSI.reset}\n    ${THEME.dim}${detail}${ANSI.reset}`;
 }
 
-function formatToolSuccessDetail(chunk) {
+function formatToolSuccessDetail(chunk: ToolChunk): string {
   const data = chunk.data || {};
   const name = chunk.name;
 
   if (name === 'file.read') {
-    const content = data.content || '';
+    const content = (data.content as string) || '';
     const lineCount = content.split('\n').length;
-    const byteSize = formatBytes(data.bytes);
+    const byteSize = formatBytes(data.bytes as number);
     return `${THEME.accent}${formatDisplayPath(data.path)}${ANSI.reset} · ${byteSize} · ${lineCount} ${pluralize('line', lineCount)}`;
   }
 
   if (name === 'file.write') {
-    const action = data.overwritten ? 'Updated' : 'Created';
-    const change = data.change;
-    const byteSize = formatBytes(data.bytes);
+    const change = data.change as Record<string, unknown> | undefined;
+    const byteSize = formatBytes(data.bytes as number);
 
     if (change && change.operation === 'update') {
-      const diffParts = [];
-      if (change.added > 0) diffParts.push(`${THEME.diffAdd}+${change.added}${ANSI.reset}`);
-      if (change.removed > 0) diffParts.push(`${THEME.diffRemove}-${change.removed}${ANSI.reset}`);
+      const diffParts: string[] = [];
+      if ((change.added as number) > 0) diffParts.push(`${THEME.diffAdd}+${change.added}${ANSI.reset}`);
+      if ((change.removed as number) > 0) diffParts.push(`${THEME.diffRemove}-${change.removed}${ANSI.reset}`);
       return `${THEME.accent}${formatDisplayPath(data.path)}${ANSI.reset} · ${byteSize} (${diffParts.join(', ')})`;
     }
     return `${THEME.accent}${formatDisplayPath(data.path)}${ANSI.reset} · ${byteSize}`;
   }
 
   if (name === 'file.delete') {
-    return `${THEME.accent}${formatDisplayPath(data.path)}${ANSI.reset} · ${formatBytes(data.bytes)} deleted`;
+    return `${THEME.accent}${formatDisplayPath(data.path)}${ANSI.reset} · ${formatBytes(data.bytes as number)} deleted`;
   }
 
   if (name === 'file.glob') {
@@ -447,20 +512,20 @@ function formatToolSuccessDetail(chunk) {
 
   if (name === 'file.search') {
     const matchCount = Array.isArray(data.matches) ? data.matches.length : 0;
-    const fileCount = new Set(Array.isArray(data.matches) ? data.matches.map(m => m.path) : []).size;
+    const fileCount = new Set(Array.isArray(data.matches) ? data.matches.map((m: Record<string, unknown>) => m.path) : []).size;
     const truncated = data.truncated ? ' (truncated)' : '';
     return `${matchCount} ${pluralize('match', matchCount)} in ${fileCount} ${pluralize('file', fileCount)}${truncated}`;
   }
 
   if (name === 'shell.run') {
-    const parts = [];
+    const parts: string[] = [];
     if (data.exitCode !== null && data.exitCode !== undefined) parts.push(`exit ${data.exitCode}`);
     if (data.signal) parts.push(`signal ${data.signal}`);
     if (data.timedOut) parts.push('timed out');
     const status = parts.length > 0 ? ` (${parts.join(', ')})` : '';
 
     if (data.stdout) {
-      const output = data.stdout.trim();
+      const output = (data.stdout as string).trim();
       if (output.length > 0) {
         const lines = output.split('\n');
         const preview = lines.length > 5 ? lines.slice(0, 5).join('\n') + '\n    ...' : output;
@@ -469,7 +534,7 @@ function formatToolSuccessDetail(chunk) {
       }
     }
     if (data.stderr) {
-      const errOut = data.stderr.trim();
+      const errOut = (data.stderr as string).trim();
       if (errOut.length > 0) {
         const preview = errOut.length > 200 ? `${errOut.slice(0, 197)}...` : errOut;
         return `exit ${data.exitCode || 0}${status}\n    ─ ${THEME.toolError}${preview}${ANSI.reset}`;
@@ -481,7 +546,7 @@ function formatToolSuccessDetail(chunk) {
   return '';
 }
 
-function formatFileModificationNotice(chunk) {
+function formatFileModificationNotice(chunk: ToolChunk): string[] | null {
   // file.write path (existing)
   if (chunk.name === 'file.write' && !chunk.isError && chunk.data?.path && chunk.data?.change) {
     return formatWriteModificationNotice(chunk);
@@ -495,31 +560,32 @@ function formatFileModificationNotice(chunk) {
   return null;
 }
 
-function formatWriteModificationNotice(chunk) {
-  const change = chunk.data.change;
+function formatWriteModificationNotice(chunk: ToolChunk): string[] {
+  const data = chunk.data as Record<string, unknown>;
+  const change = data.change as Record<string, unknown>;
   const action = change.operation === 'create' ? 'Create' : 'Update';
   const duration = formatDuration(chunk.durationMs);
-  const pathDisplay = `${THEME.toolIndicator}${action}${ANSI.reset}(${THEME.accent}${formatDisplayPath(chunk.data.path)}${ANSI.reset})${THEME.dim}${duration}${ANSI.reset}`;
-  const lines = [
+  const pathDisplay = `${THEME.toolIndicator}${action}${ANSI.reset}(${THEME.accent}${formatDisplayPath(data.path as string)}${ANSI.reset})${THEME.dim}${duration}${ANSI.reset}`;
+  const lines: string[] = [
     pathDisplay,
     `  ${THEME.border}└─${ANSI.reset}  ${formatChangeSummary(change)}`,
   ];
 
   if (change.preview && Array.isArray(change.preview) && change.preview.length > 0) {
-    renderPreviewLines(lines, change.preview);
+    renderPreviewLines(lines, change.preview as PreviewItem[]);
   }
 
   return lines;
 }
 
-function formatEditModificationNotice(chunk) {
-  const data = chunk.data;
+function formatEditModificationNotice(chunk: ToolChunk): string[] {
+  const data = chunk.data as Record<string, unknown>;
   const applied = data.applied !== false;
   const action = applied ? 'Edit' : 'Preview';
   const duration = formatDuration(chunk.durationMs);
-  const pathDisplay = `${THEME.toolIndicator}${action}${ANSI.reset}(${THEME.accent}${formatDisplayPath(data.path)}${ANSI.reset})${THEME.dim}${duration}${ANSI.reset}`;
-  const summary = data.summary || `Modified ${data.oldLines || 1} → ${data.newLines || 1} lines`;
-  const lines = [
+  const pathDisplay = `${THEME.toolIndicator}${action}${ANSI.reset}(${THEME.accent}${formatDisplayPath(data.path as string)}${ANSI.reset})${THEME.dim}${duration}${ANSI.reset}`;
+  const summary = (data.summary as string | undefined) || `Modified ${data.oldLines || 1} → ${data.newLines || 1} lines`;
+  const lines: string[] = [
     pathDisplay,
     `  ${THEME.border}└─${ANSI.reset}  ${summary}`,
   ];
@@ -527,7 +593,7 @@ function formatEditModificationNotice(chunk) {
   // Parse the raw diff string into preview items
   if (data.diff && typeof data.diff === 'string') {
     const rawDiffLines = data.diff.split('\n');
-    const preview = [];
+    const preview: PreviewItem[] = [];
     for (const dLine of rawDiffLines) {
       if (dLine.startsWith('- ')) {
         preview.push({ line: preview.length + 1, marker: '-', text: dLine.slice(2) });
@@ -545,7 +611,7 @@ function formatEditModificationNotice(chunk) {
   return lines;
 }
 
-function renderPreviewLines(lines, preview) {
+function renderPreviewLines(lines: string[], preview: PreviewItem[]): void {
   const maxPreview = 6;
   const shown = preview.slice(0, maxPreview);
   for (const item of shown) {
@@ -559,18 +625,20 @@ function renderPreviewLines(lines, preview) {
   }
 }
 
-function formatChangeSummary(change) {
-  const parts = [];
-  if (change.added > 0) parts.push(`${THEME.diffAdd}Added ${change.added} ${pluralize('line', change.added)}${ANSI.reset}`);
-  if (change.removed > 0) parts.push(`${THEME.diffRemove}Removed ${change.removed} ${pluralize('line', change.removed)}${ANSI.reset}`);
+function formatChangeSummary(change: Record<string, unknown>): string {
+  const parts: string[] = [];
+  const added = change.added as number;
+  const removed = change.removed as number;
+  if (added > 0) parts.push(`${THEME.diffAdd}Added ${added} ${pluralize('line', added)}${ANSI.reset}`);
+  if (removed > 0) parts.push(`${THEME.diffRemove}Removed ${removed} ${pluralize('line', removed)}${ANSI.reset}`);
   if (parts.length === 0) {
-    const changed = Number.isFinite(change.changed) && change.changed > 0 ? change.changed : 1;
+    const changed = Number.isFinite(change.changed) && (change.changed as number) > 0 ? (change.changed as number) : 1;
     parts.push(`Modified ${changed} ${pluralize('line', changed)}`);
   }
   return parts.join(', ');
 }
 
-function formatBytes(bytes) {
+function formatBytes(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes === 0) return '0 B';
   const units = ['B', 'KB', 'MB', 'GB'];
   const i = Math.floor(Math.log(bytes) / Math.log(1024));
@@ -578,31 +646,31 @@ function formatBytes(bytes) {
   return `${i === 0 ? value : value.toFixed(1)} ${units[i]}`;
 }
 
-function formatDuration(durationMs) {
+function formatDuration(durationMs: number | undefined): string {
   return Number.isFinite(durationMs) ? ` in ${durationMs}ms` : '';
 }
 
-function formatDisplayPath(filePath) {
+function formatDisplayPath(filePath: unknown): string {
   return String(filePath).replace(/\//g, '\\');
 }
 
-function pluralize(word, count) {
+function pluralize(word: string, count: number): string {
   return count === 1 ? word : `${word}s`;
 }
 
-function toToolLabel(name) {
+function toToolLabel(name: unknown): string {
   return String(name || 'tool')
     .split('.')
     .map(part => part ? `${part[0].toUpperCase()}${part.slice(1)}` : part)
     .join(' ');
 }
 
-function isDisplayableInput(key, value) {
+function isDisplayableInput(key: string, value: unknown): boolean {
   return !/key|token|secret|password|content|env/i.test(key) &&
     (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean');
 }
 
-function formatProviderError(error, provider) {
+function formatProviderError(error: { message?: string; code?: string } | null | undefined, provider: { name?: string } | null | undefined): string {
   const message = error?.message || String(error);
   const msg = message.toLowerCase();
 

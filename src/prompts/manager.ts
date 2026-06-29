@@ -10,10 +10,18 @@ import { execSync } from "child_process";
 const PROMPT_FILES = ["CLAUDE.md", "AGENTS.md", "HAX.md", "README.md"];
 const MAX_PROMPT_CHARS = 20000;
 
+interface FullSystemPromptOptions {
+  skipProjectContext?: boolean;
+  skipEnvironment?: boolean;
+  cwd?: string;
+  personalizationMarkdown?: string;
+  skillsXml?: string;
+}
+
 /** Load project-level context from CLAUDE.md / AGENTS.md files */
-function loadProjectContext(cwd = process.cwd()) {
-  const sources = [];
-  let current = path.resolve(cwd);
+function loadProjectContext(cwd?: string): Array<{ file: string; content: string }> {
+  const sources: Array<{ file: string; content: string }> = [];
+  let current = path.resolve(cwd || process.cwd());
 
   while (current !== path.dirname(current)) {
     for (const fn of PROMPT_FILES) {
@@ -31,8 +39,8 @@ function loadProjectContext(cwd = process.cwd()) {
 }
 
 /** Build environment context section for system prompt */
-function buildEnvironmentContext() {
-  const parts = [];
+function buildEnvironmentContext(): string {
+  const parts: string[] = [];
   parts.push(`OS: ${process.platform} ${process.arch}`);
   parts.push(`Shell: ${process.env.SHELL || "unknown"}`);
   parts.push(`Workspace: ${process.cwd()}`);
@@ -50,8 +58,8 @@ function buildEnvironmentContext() {
 }
 
 /** Assemble the full system prompt from components */
-function buildFullSystemPrompt(basePrompt, options = {}) {
-  const sections = [];
+function buildFullSystemPrompt(basePrompt: string, options: FullSystemPromptOptions = {}): string {
+  const sections: string[] = [];
 
   // 1. Base system prompt
   if (basePrompt) sections.push(basePrompt);

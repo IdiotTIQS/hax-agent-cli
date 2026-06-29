@@ -1,16 +1,31 @@
 /** Voice mode controller. Ported from OpenHarness voice/voice_mode.py */
 import { isWakeWord, isStopPhrase } from "./keyterms.js";
 
+interface VoiceModeOptions {
+  onTranscript?: (text: string) => void;
+  onCommand?: (cmd: string) => void;
+}
+
 class VoiceMode {
-  constructor(opts = {}) { this._enabled = false; this._listening = false; this._onTranscript = opts.onTranscript || (() => {}); this._onCommand = opts.onCommand || (() => {}); }
+  _enabled: boolean;
+  _listening: boolean;
+  _onTranscript: (text: string) => void;
+  _onCommand: (cmd: string) => void;
 
-  get enabled() { return this._enabled; }
-  get listening() { return this._listening; }
+  constructor(opts: VoiceModeOptions = {}) {
+    this._enabled = false;
+    this._listening = false;
+    this._onTranscript = opts.onTranscript || (() => {});
+    this._onCommand = opts.onCommand || (() => {});
+  }
 
-  start() { this._enabled = true; this._listening = true; return true; }
-  stop() { this._enabled = false; this._listening = false; return true; }
+  get enabled(): boolean { return this._enabled; }
+  get listening(): boolean { return this._listening; }
 
-  processTranscript(text) {
+  start(): boolean { this._enabled = true; this._listening = true; return true; }
+  stop(): boolean { this._enabled = false; this._listening = false; return true; }
+
+  processTranscript(text: string): { type: string; text: string } | null {
     if (!this._listening) return null;
     if (isStopPhrase(text)) { this._listening = false; return { type: "stop", text }; }
     this._onTranscript(text);

@@ -49,10 +49,10 @@ const ANSI = {
   cursorRestore: '\x1B[u',
   cursorShow: '\x1B[?25h',
   cursorHide: '\x1B[?25l',
-  cursorTo: (row, col) => `\x1B[${row};${col}H`,
-  scrollUp: (n) => `\x1B[${n}S`,
-  scrollDown: (n) => `\x1B[${n}T`,
-  setScrollRegion: (top, bottom) => `\x1B[${top};${bottom}r`,
+  cursorTo: (row: number, col: number): string => `\x1B[${row};${col}H`,
+  scrollUp: (n: number): string => `\x1B[${n}S`,
+  scrollDown: (n: number): string => `\x1B[${n}T`,
+  setScrollRegion: (top: number, bottom: number): string => `\x1B[${top};${bottom}r`,
   altScreenOn: '\x1B[?1049h',
   altScreenOff: '\x1B[?1049l',
   bracketedPasteOn: '\x1B[?2004h',
@@ -100,7 +100,7 @@ const THEME = {
   shellIndicator: ANSI.brightYellow,
 };
 
-function stripAnsi(text) {
+function stripAnsi(text: string): string {
   return text.replace(/\x1B\[[0-?]*[ -/]*[@-~]/g, '');
 }
 

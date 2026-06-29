@@ -23,20 +23,56 @@ import registerExtended from "./extended-commands.js";
 
 const VERSION = JSON.parse(readFileSync(join(import.meta.dirname, "../../package.json"), "utf8")).version;
 
-function _persist(key, val, sub) {
+interface CommandContext {
+  screen: { write(t: string): void };
+  session: {
+    messages: Array<{ role: string; content: unknown; internal?: boolean }>;
+    provider: { name?: string; model?: string; apiKey?: string; apiUrl?: string; listModels?(): Promise<Array<{ id: string }>> } | null;
+    toolRegistry?: { list(): Array<{ name: string; description: string }> } | null;
+    permissionManager: { mode: string; _alwaysAllow?: Set<string>; _alwaysDeny?: Set<string>; allowTool(t: string): void; denyTool(t: string): void; } | null;
+    costTracker?: { getCost(m: string): number; getPricing(m: string): unknown; turnCount: number; toolCallCount: number; } | null;
+    goal?: { enabled?: boolean; text?: string; maxContinuations?: number } | null;
+    sandbox?: { isRunning?: boolean; backend?: string; start(): Promise<void>; stop(): void } | null;
+    hookExecutor?: { run?(event: string, payload: unknown): Promise<void> } | null;
+    inputTokens?: number;
+    outputTokens?: number;
+    cacheCreationTokens?: number;
+    cacheReadTokens?: number;
+    turnCount?: number;
+    toolCallCount?: number;
+    id?: string;
+    _modifiedFiles?: Set<string>;
+    _thinking?: boolean;
+    _thinkIntensity?: string | number | null;
+    _tags?: string[];
+    getStatusLine?(): string;
+    isStreaming?: boolean;
+  };
+  rl?: { prompt?(): void; close?(): void; question?(q: string, cb: (a: string) => void): void } | null;
+  settings?: { projectRoot?: string; [key: string]: unknown } | null;
+  mcpManager?: { getStatus(): Record<string, { status: string; tools: number }>; loadConfig(): void; startAll(): Promise<void>; stopAll(): void; discoverTools(): Promise<Array<{ name: string }>> } | null;
+  engine?: { maxToolTurns?: number } | null;
+}
+
+interface CommandEntry {
+  handler(args: string[], ctx: CommandContext): void | Promise<void>;
+  description: string;
+}
+
+const commands: Record<string, CommandEntry> = {};
+
+function _persist(key: string, val: unknown, sub?: string): void {
   try {
-    var s = loadSettings();
-    if (sub) { if (!s[key]) s[key] = {}; s[key][sub] = val; }
+    const s = (loadSettings() ?? {}) as Record<string, unknown>;
+    if (sub) { if (!s[key]) s[key] = {}; (s[key] as Record<string, unknown>)[sub] = val; }
     else s[key] = val;
-    saveSettings(s);
+    saveSettings(s as Parameters<typeof saveSettings>[0]);
   } catch (_) {}
 }
 
-const commands = {};
+function register(name: string, handler: (args: string[], ctx: CommandContext) => void | Promise<void>, desc = ""): void { commands[name] = { handler, description: desc }; }
 
-function register(name, handler, desc = "") { commands[name] = { handler, description: desc }; }
-
-async function execute(line, ctx) {
+async function execute(line: string, ctx: CommandContext): Promise<void> {
   const [cmd, ...args] = line.slice(1).trim().split(/\s+/);
   const c = commands[cmd];
   if (!c) { ctx.screen.write(`${styled(THEME.warning, `Unknown command: /${cmd}`)}\n`); ctx.rl?.prompt?.(); return; }
@@ -67,9 +103,9 @@ register("help", (_, ctx) => {
   ctx.rl?.prompt?.();
 }, "Show this help");
 
-register("exit", (_, ctx) => { ctx.rl?.close(); }, "Exit the session");
-register("quit", (_, ctx) => { ctx.rl?.close(); }, "Exit the session");
-register("q", (_, ctx) => { ctx.rl?.close(); });
+register("exit", (_, ctx) => { ctx.rl?.close?.(); }, "Exit the session");
+register("quit", (_, ctx) => { ctx.rl?.close?.(); }, "Exit the session");
+register("q", (_, ctx) => { ctx.rl?.close?.(); });
 
 register("clear", (_, ctx) => {
   ctx.session.messages = [];
@@ -79,25 +115,25 @@ register("clear", (_, ctx) => {
 
 register("models", async (_, ctx) => {
   try {
-    const models = await ctx.session.provider.listModels();
+    const models = await ctx.session.provider?.listModels?.() ?? [];
     for (const m of models) ctx.screen.write(`  ${m.id}\n`);
-  } catch (err) { ctx.screen.write(`${styled(THEME.error, err.message)}\n`); }
+  } catch (err) { ctx.screen.write(`${styled(THEME.error, (err as Error).message)}\n`); }
   ctx.rl?.prompt?.();
 }, "List available models");
 
 register("model", (args, ctx) => {
   if (args.length > 0) {
-    ctx.session.provider.model = args[0];
+    if (ctx.session.provider) ctx.session.provider.model = args[0];
     // Persist to settings
     try {
-      const s = loadSettings();
+      const s = loadSettings() ?? {} as Record<string, unknown>;
       if (!s.agent) s.agent = {};
-      s.agent.model = args[0];
-      saveSettings(s);
+      (s.agent as Record<string, unknown>).model = args[0];
+      saveSettings(s as Parameters<typeof saveSettings>[0]);
     } catch (_) {}
     ctx.screen.write(`${styled(THEME.success, "Model: " + args[0])}\n`);
   }
-  else ctx.screen.write(`${styled(THEME.info, "Current model: " + ctx.session.provider.model)}\n`);
+  else ctx.screen.write(`${styled(THEME.info, "Current model: " + ctx.session.provider?.model)}\n`);
   ctx.rl?.prompt?.();
 }, "Switch model");
 
@@ -108,22 +144,22 @@ register("provider", async (args, ctx) => {
     for (const [n, p] of Object.entries(profiles)) ctx.screen.write(`  ${n === pm.activeName ? THEME.success + "*" : " "}${ANSI.reset} ${n.padEnd(12)} ${p.provider}/${p.model || "default"}\n`);
   } else if (args[0]) {
     if (pm.use(args[0])) {
-      ctx.session.provider = createProvider({ ...pm.active });
+      ctx.session.provider = createProvider({ ...pm.active } as { provider?: string; model?: string });
       // Persist to settings so it survives restart
       try {
-        const s = loadSettings();
+        const s = (loadSettings() ?? {}) as Record<string, unknown>;
         if (!s.agent) s.agent = {};
-        s.agent._activeProfile = args[0];
-        s.agent.provider = pm.active.provider;
-        s.agent.model = pm.active.model;
-        saveSettings(s);
+        (s.agent as Record<string, unknown>)._activeProfile = args[0];
+        (s.agent as Record<string, unknown>).provider = pm.active.provider;
+        (s.agent as Record<string, unknown>).model = pm.active.model || "default";
+        saveSettings(s as Parameters<typeof saveSettings>[0]);
       } catch (_) {}
       ctx.screen.write(`${styled(THEME.success, "Profile: " + args[0] + " (" + pm.active.provider + "/" + (pm.active.model || "default") + ")")}\n`);
     } else {
       // Fallback: try raw provider name
       try {
         const prov = createProvider({ provider: args[0] });
-        pm.set(args[0], { provider: args[0], model: prov.model, apiUrl: prov.apiUrl || "" });
+        pm.set(args[0], { provider: args[0], model: prov.model || "", apiUrl: prov.apiUrl || "" });
         pm.use(args[0]);
         ctx.session.provider = prov;
         ctx.screen.write(`${styled(THEME.success, "Switched to " + args[0] + " (" + prov.model + ")")}\n`);
@@ -136,7 +172,7 @@ register("provider", async (args, ctx) => {
 }, "Switch provider profile (use 'list' to see all)");
 
 register("status", (_, ctx) => {
-  ctx.screen.write(`${ctx.session.getStatusLine()}\n`);
+  ctx.screen.write(`${ctx.session.getStatusLine?.() ?? ""}\n`);
   ctx.rl?.prompt?.();
 }, "Show session status");
 
@@ -223,23 +259,23 @@ register("perms", (_, ctx) => {
 
 register("allow", (args, ctx) => {
   const pm = ctx.session.permissionManager;
-  if (pm && args[0]) { pm.allowTool(args[0]); _persist("permissions", [...pm._alwaysAllow], "allowedTools"); ctx.screen.write(`${styled(THEME.success, "Always allow: " + args[0])}\n`); }
+  if (pm && args[0]) { pm.allowTool(args[0]); _persist("permissions", [...(pm._alwaysAllow || [])], "allowedTools"); ctx.screen.write(`${styled(THEME.success, "Always allow: " + args[0])}\n`); }
   ctx.rl?.prompt?.();
 }, "Always allow a tool");
 
 register("deny", (args, ctx) => {
   const pm = ctx.session.permissionManager;
-  if (pm && args[0]) { pm.denyTool(args[0]); _persist("permissions", [...pm._alwaysDeny], "deniedTools"); ctx.screen.write(`${styled(THEME.warning, "Always deny: " + args[0])}\n`); }
+  if (pm && args[0]) { pm.denyTool(args[0]); _persist("permissions", [...(pm._alwaysDeny || [])], "deniedTools"); ctx.screen.write(`${styled(THEME.warning, "Always deny: " + args[0])}\n`); }
   ctx.rl?.prompt?.();
 }, "Always deny a tool");
 
 register("config", (args, ctx) => {
   if (args[0] === "reload") {
-    const cfg = reloadSettings();
+    const cfg = reloadSettings() ?? {};
     ctx.screen.write(`${styled(THEME.success, "Configuration reloaded from disk.")}\n`);
-    ctx.screen.write(`${JSON.stringify({ agent: cfg.agent, permissions: cfg.permissions, ui: cfg.ui }, null, 2)}\n`);
+    ctx.screen.write(`${JSON.stringify({ agent: (cfg as Record<string, unknown>).agent, permissions: (cfg as Record<string, unknown>).permissions, ui: (cfg as Record<string, unknown>).ui }, null, 2)}\n`);
   } else {
-    const cfg = loadSettings();
+    const cfg = loadSettings() ?? {};
     ctx.screen.write(`${JSON.stringify(cfg, null, 2)}\n`);
   }
   ctx.rl?.prompt?.();
@@ -290,7 +326,7 @@ register("lsp", async (args, ctx) => {
 
 register("cost", (_, ctx) => {
   const s = ctx.session;
-  const input = s.inputTokens; const output = s.outputTokens;
+  const input = s.inputTokens ?? 0; const output = s.outputTokens ?? 0;
   const model = s.provider?.model || "?";
   const cost = s.costTracker ? s.costTracker.getCost(model) : 0;
   const pricing = s.costTracker ? s.costTracker.getPricing(model) : null;
@@ -299,8 +335,8 @@ register("cost", (_, ctx) => {
   ctx.screen.write(`  Input:    ${input.toLocaleString()} tokens\n`);
   ctx.screen.write(`  Output:   ${output.toLocaleString()} tokens\n`);
   ctx.screen.write(`  Total:    ${(input + output).toLocaleString()} tokens\n`);
-  if (s.cacheCreationTokens > 0) ctx.screen.write(`  Cache write: ${s.cacheCreationTokens.toLocaleString()} tokens\n`);
-  if (s.cacheReadTokens > 0) ctx.screen.write(`  Cache read:  ${s.cacheReadTokens.toLocaleString()} tokens\n`);
+  if ((s.cacheCreationTokens ?? 0) > 0) ctx.screen.write(`  Cache write: ${(s.cacheCreationTokens ?? 0).toLocaleString()} tokens\n`);
+  if ((s.cacheReadTokens ?? 0) > 0) ctx.screen.write(`  Cache read:  ${(s.cacheReadTokens ?? 0).toLocaleString()} tokens\n`);
   ctx.screen.write(`  Cost:     ~$${cost.toFixed(4)} (${source})\n`);
   ctx.screen.write(`  Turns:    ${s.turnCount} · Tools: ${s.toolCallCount}\n`);
   ctx.rl?.prompt?.();
@@ -378,10 +414,10 @@ register("api-key", (args, ctx) => {
 
 register("api-url", (args, ctx) => {
   if (args[0]) {
-    ctx.session.provider.apiUrl = args[0];
+    if (ctx.session.provider) ctx.session.provider.apiUrl = args[0];
     ctx.screen.write(`${styled(THEME.success, `API URL set to: ${args[0]}`)}\n`);
   } else {
-    ctx.screen.write(`${styled(THEME.info, `API URL: ${ctx.session.provider.apiUrl || "default"}`)}\n`);
+    ctx.screen.write(`${styled(THEME.info, `API URL: ${ctx.session.provider?.apiUrl || "default"}`)}\n`);
   }
   ctx.rl?.prompt?.();
 }, "Set or show API base URL");
@@ -426,15 +462,16 @@ register("init", (_, ctx) => {
 
 register("permissions", (args, ctx) => {
   const pm = ctx.session.permissionManager;
+  if (!pm) { ctx.rl?.prompt?.(); return; }
   if (args[0] === "allow" && args[1]) { pm.allowTool(args[1]); ctx.screen.write(`${styled(THEME.success, "Always allow: " + args[1])}\n`); }
   else if (args[0] === "deny" && args[1]) { pm.denyTool(args[1]); ctx.screen.write(`${styled(THEME.warning, "Always deny: " + args[1])}\n`); }
-  else if (args[0] === "reset") { pm._alwaysAllow.clear(); pm._alwaysDeny.clear(); ctx.screen.write(`${styled(THEME.success, "Permissions reset.")}\n`); }
+  else if (args[0] === "reset") { pm._alwaysAllow?.clear(); pm._alwaysDeny?.clear(); ctx.screen.write(`${styled(THEME.success, "Permissions reset.")}\n`); }
   else if (args[0] === "yolo") { pm.mode = "yolo"; ctx.screen.write(`${styled(THEME.warning, "YOLO mode: all tools auto-approved.")}\n`); }
   else if (args[0] === "normal") { pm.mode = "normal"; ctx.screen.write(`${styled(THEME.info, "Normal mode: tools require approval.")}\n`); }
   else {
     ctx.screen.write(`${styled(THEME.info, `Mode: ${pm.mode}`)}\n`);
-    ctx.screen.write(`  Allow: ${[...pm._alwaysAllow].join(", ") || "none"}\n`);
-    ctx.screen.write(`  Deny:  ${[...pm._alwaysDeny].join(", ") || "none"}\n`);
+    ctx.screen.write(`  Allow: ${[...(pm._alwaysAllow || [])].join(", ") || "none"}\n`);
+    ctx.screen.write(`  Deny:  ${[...(pm._alwaysDeny || [])].join(", ") || "none"}\n`);
     ctx.screen.write(`  Usage: /permissions [allow|deny|reset|yolo|normal] [tool]\n`);
   }
   ctx.rl?.prompt?.();
@@ -445,13 +482,14 @@ register("sandbox", (args, ctx) => {
   if (args[0] === "on" || args[0] === "enable") {
     if (s.sandbox) { ctx.screen.write(`${styled(THEME.info, "Sandbox already running (" + s.sandbox.backend + ")")}\n`); }
     else {
-      const settings = loadSettings();
-      s.sandbox = new SandboxAdapter({ backend: settings.sandbox?.backend || "docker", image: settings.sandbox?.image || "node:18-alpine", network: settings.sandbox?.network || "none", cpus: settings.sandbox?.cpus || 2, memory: settings.sandbox?.memory || "512m", hostDir: process.cwd() });
+      const settings = loadSettings() ?? {} as Record<string, unknown>;
+      const sandboxCfg = (settings as Record<string, unknown>).sandbox as Record<string, unknown> | undefined;
+      s.sandbox = new SandboxAdapter({ backend: sandboxCfg?.backend || "docker", image: sandboxCfg?.image || "node:18-alpine", network: sandboxCfg?.network || "none", cpus: sandboxCfg?.cpus || 2, memory: sandboxCfg?.memory || "512m", hostDir: process.cwd() });
       s.sandbox.start().then(() => {
-        ctx.screen.write(`${styled(THEME.success, "Sandbox started (" + s.sandbox.backend + ")")}\n`);
+        ctx.screen.write(`${styled(THEME.success, "Sandbox started (" + s.sandbox!.backend + ")")}\n`);
         ctx.rl?.prompt?.();
       }).catch((err) => {
-        ctx.screen.write(`${styled(THEME.error, "Sandbox failed: " + err.message)}\n`);
+        ctx.screen.write(`${styled(THEME.error, "Sandbox failed: " + (err as Error).message)}\n`);
         s.sandbox = null;
         ctx.rl?.prompt?.();
       });
@@ -506,6 +544,6 @@ register("personalize", (_, ctx) => {
 }, "Extract environment facts from conversation");
 
 // Load extended commands
-registerExtended(register, styled, THEME, ANSI);
+registerExtended(register, styled, THEME as unknown as Record<string, string>, ANSI as unknown as Record<string, string>);
 
 export { register, execute, commands };

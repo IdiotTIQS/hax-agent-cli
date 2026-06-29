@@ -3,8 +3,8 @@
  * Ported from OpenHarness keybindings/parser.py
  */
 
-const MODIFIERS = { ctrl: "ctrl", shift: "shift", alt: "alt", meta: "meta", cmd: "meta", super: "meta" };
-const SPECIAL_KEYS = {
+const MODIFIERS: Record<string, string> = { ctrl: "ctrl", shift: "shift", alt: "alt", meta: "meta", cmd: "meta", super: "meta" };
+const SPECIAL_KEYS: Record<string, string> = {
   up: "up", down: "down", left: "left", right: "right",
   enter: "enter", return: "enter", tab: "tab", escape: "esc",
   backspace: "backspace", delete: "delete", home: "home", end: "end",
@@ -15,11 +15,11 @@ const SPECIAL_KEYS = {
 };
 
 /** Parse a keybinding string like "ctrl+shift+k" into { key, modifiers } */
-function parseKeybinding(expr) {
+function parseKeybinding(expr: string): { key: string; modifiers: string[] } | null {
   if (!expr || typeof expr !== "string") return null;
   const parts = expr.toLowerCase().split("+").map(p => p.trim());
   let key = parts[parts.length - 1];
-  const modifiers = [];
+  const modifiers: string[] = [];
   for (let i = 0; i < parts.length - 1; i++) {
     if (MODIFIERS[parts[i]]) modifiers.push(MODIFIERS[parts[i]]);
     else return null; // Unknown modifier
@@ -33,20 +33,21 @@ function parseKeybinding(expr) {
 }
 
 /** Check if a keypress event matches a parsed binding */
-function matchesBinding(event, binding) {
+function matchesBinding(event: unknown, binding: string | { key: string; modifiers: string[] }): boolean {
   if (!binding || !event) return false;
   const parsed = typeof binding === "string" ? parseKeybinding(binding) : binding;
   if (!parsed) return false;
+  const ev = event as Record<string, unknown>;
   // Check key
-  const eventKey = (event.name || event.key || "").toLowerCase();
+  const eventKey = ((ev.name || ev.key || "") as string).toLowerCase();
   const normalizedKey = SPECIAL_KEYS[eventKey] || eventKey;
   if (parsed.key !== normalizedKey && parsed.key !== eventKey) return false;
   // Check modifiers
-  const eventMods = [];
-  if (event.ctrl) eventMods.push("ctrl");
-  if (event.shift) eventMods.push("shift");
-  if (event.alt) eventMods.push("alt");
-  if (event.meta) eventMods.push("meta");
+  const eventMods: string[] = [];
+  if (ev.ctrl) eventMods.push("ctrl");
+  if (ev.shift) eventMods.push("shift");
+  if (ev.alt) eventMods.push("alt");
+  if (ev.meta) eventMods.push("meta");
   eventMods.sort();
   if (JSON.stringify(parsed.modifiers) !== JSON.stringify(eventMods)) return false;
   return true;

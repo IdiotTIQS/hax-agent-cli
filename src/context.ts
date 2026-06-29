@@ -6,21 +6,73 @@
  * ported to the new store, these degrade gracefully to empty results — callers
  * may still pass `memories` / `transcript` in explicitly to supply data.
  */
-function listMemories(_settings) {
+
+interface ContextSettings {
+  memory?: { enabled?: boolean; maxItems?: number; directory?: string };
+  sessions?: { directory?: string };
+  agent?: { name?: string; model?: string; maxTurns?: number; temperature?: number };
+  prompts?: { includeSettings?: boolean; includeMemory?: boolean; includeTranscript?: boolean; maxTranscriptMessages?: number };
+  projectRoot?: string;
+}
+
+interface ContextMemory {
+  name?: string;
+  content?: unknown;
+}
+
+interface ContextEntry {
+  role?: string;
+  type?: string;
+  content?: unknown;
+  text?: unknown;
+  message?: unknown;
+}
+
+interface ContextMessage {
+  role: string;
+  content: string;
+}
+
+interface PromptContextResult {
+  systemPrompt: string;
+  messages: ContextMessage[];
+  memories: ContextMemory[];
+  transcript: ContextEntry[];
+}
+
+interface LoadPromptContextOptions {
+  settings?: ContextSettings;
+  memories?: ContextMemory[];
+  transcript?: ContextEntry[];
+  sessionId?: string;
+  userPrompt?: string;
+  instructions?: string;
+  runtime?: Record<string, unknown>;
+}
+
+interface SystemPromptOptions {
+  settings?: ContextSettings;
+  memories?: ContextMemory[];
+  transcript?: ContextEntry[];
+  instructions?: string;
+  runtime?: Record<string, unknown>;
+}
+
+function listMemories(_settings: ContextSettings): ContextMemory[] {
   return [];
 }
 
-function readTranscript(_sessionId, _settings) {
+function readTranscript(_sessionId: string, _settings: ContextSettings): ContextEntry[] {
   return [];
 }
 
 /**
  * Load prompt context from memories and transcript, building the system prompt
  * and message list for the provider.
- * @param {{ settings?: object, memories?: object[], transcript?: object[], sessionId?: string, userPrompt?: string, instructions?: string, runtime?: object }} [options]
- * @returns {{ systemPrompt: string, messages: object[], memories: object[], transcript: object[] }}
+ * @param {LoadPromptContextOptions} [options]
+ * @returns {PromptContextResult}
  */
-function loadPromptContext(options = {}) {
+function loadPromptContext(options: LoadPromptContextOptions = {}): PromptContextResult {
   const settings = options.settings || {};
   const memories = options.memories || (settings.memory?.enabled === false ? [] : listMemories(settings));
   const transcript = options.transcript || (options.sessionId ? readTranscript(options.sessionId, settings) : []);
@@ -32,7 +84,7 @@ function loadPromptContext(options = {}) {
   });
 }
 
-function buildPromptContext(options = {}) {
+function buildPromptContext(options: LoadPromptContextOptions = {}): PromptContextResult {
   const settings = options.settings || {};
   const memories = limitItems(options.memories || [], settings.memory?.maxItems || 20);
   const transcript = limitLast(options.transcript || [], settings.prompts?.maxTranscriptMessages);
@@ -52,10 +104,10 @@ function buildPromptContext(options = {}) {
   };
 }
 
-function assembleSystemPrompt(options = {}) {
+function assembleSystemPrompt(options: SystemPromptOptions = {}): string {
   const settings = options.settings || {};
   const prompts = settings.prompts || {};
-  const sections = [];
+  const sections: string[] = [];
 
   sections.push(formatSection('Identity', 'You are Hax Agent CLI, a lightweight AI coding assistant running in the terminal. You help developers with coding, file operations, shell commands, and project management. Always identify yourself as Hax Agent when asked.'));
 
@@ -82,10 +134,10 @@ function assembleSystemPrompt(options = {}) {
   return sections.filter(Boolean).join('\n\n');
 }
 
-function buildMessages(transcript = [], userPrompt) {
+function buildMessages(transcript: ContextEntry[] = [], userPrompt?: string): ContextMessage[] {
   const messages = transcript
     .map(toMessage)
-    .filter(Boolean);
+    .filter((m): m is ContextMessage => m !== null);
 
   if (userPrompt) {
     messages.push({ role: 'user', content: String(userPrompt) });
@@ -94,7 +146,7 @@ function buildMessages(transcript = [], userPrompt) {
   return messages;
 }
 
-function formatSection(title, body) {
+function formatSection(title: string, body: string): string {
   const content = String(body || '').trim();
 
   if (!content) {
@@ -104,17 +156,17 @@ function formatSection(title, body) {
   return `## ${title}\n${content}`;
 }
 
-function formatSettings(settings) {
+function formatSettings(settings: ContextSettings): string {
   const agent = settings.agent || {};
   const memory = settings.memory || {};
   const sessions = settings.sessions || {};
-  const rows = [
+  const rows: [string, unknown][] = [
     ['agent', agent.name],
     ['model', agent.model],
     ['maxTurns', agent.maxTurns],
     ['temperature', agent.temperature],
     ['projectRoot', settings.projectRoot],
-    ['memoryDirectory', memory.directory],
+    ['memoryDirectory', (memory as any).directory],
     ['sessionDirectory', sessions.directory],
   ];
 
@@ -124,7 +176,7 @@ function formatSettings(settings) {
     .join('\n');
 }
 
-function formatMemories(memories) {
+function formatMemories(memories: ContextMemory[]): string {
   if (memories.length === 0) {
     return 'No stored memories.';
   }
@@ -134,7 +186,7 @@ function formatMemories(memories) {
     .join('\n');
 }
 
-function formatTranscript(transcript) {
+function formatTranscript(transcript: ContextEntry[]): string {
   if (transcript.length === 0) {
     return 'No recent transcript.';
   }
@@ -144,8 +196,8 @@ function formatTranscript(transcript) {
     .join('\n');
 }
 
-function toMessage(entry) {
-  if (!entry || !['user', 'assistant'].includes(entry.role)) {
+function toMessage(entry: ContextEntry): ContextMessage | null {
+  if (!entry || !['user', 'assistant'].includes(entry.role || '')) {
     return null;
   }
 
@@ -156,12 +208,12 @@ function toMessage(entry) {
   }
 
   return {
-    role: entry.role,
+    role: entry.role as string,
     content,
   };
 }
 
-function extractEntryContent(entry) {
+function extractEntryContent(entry: ContextEntry): string {
   if (entry.content !== undefined) {
     return stringifyContent(entry.content);
   }
@@ -177,7 +229,7 @@ function extractEntryContent(entry) {
   return stringifyContent(entry);
 }
 
-function stringifyContent(value) {
+function stringifyContent(value: unknown): string {
   if (value === undefined || value === null) {
     return '';
   }
@@ -189,23 +241,23 @@ function stringifyContent(value) {
   return JSON.stringify(value, null, 2);
 }
 
-function limitItems(items, limit) {
-  if (!Number.isFinite(limit) || limit < 1) {
+function limitItems<T>(items: T[], limit: number | undefined): T[] {
+  if (!Number.isFinite(limit) || (limit as number) < 1) {
     return items;
   }
 
-  return items.slice(0, limit);
+  return items.slice(0, limit as number);
 }
 
-function limitLast(items, limit) {
-  if (!Number.isFinite(limit) || limit < 1) {
+function limitLast<T>(items: T[], limit: number | undefined): T[] {
+  if (!Number.isFinite(limit) || (limit as number) < 1) {
     return items;
   }
 
-  return items.slice(Math.max(0, items.length - limit));
+  return items.slice(Math.max(0, items.length - (limit as number)));
 }
 
-function truncate(value, maxLength) {
+function truncate(value: unknown, maxLength: number): string {
   const text = String(value || '');
 
   if (text.length <= maxLength) {

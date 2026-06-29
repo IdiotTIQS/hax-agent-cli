@@ -11,7 +11,7 @@ const RE_LINK = /^\[([^\]]+)\]\(([^)]+)\)/;
  * Fast linear scan for the next markdown special character.
  * Uses indexOf chains so the JIT can inline each call.
  */
-function findNextSpecial(text, start, end) {
+function findNextSpecial(text: string, start: number, end: number): number {
   let idx = -1;
   let tmp;
   tmp = text.indexOf('*', start);
@@ -26,21 +26,23 @@ function findNextSpecial(text, start, end) {
 }
 
 class MarkdownRenderer {
-  constructor(columns = 80) {
+  columns: number;
+
+  constructor(columns: number = 80) {
     this.columns = columns;
   }
 
-  _isTableRow(l) { return l && /^\|.*\|$/.test(l.trim()); }
-  _isTableSep(l) { return l && /^\|[\s\-:|]+\|$/.test(l.trim()); }
+  _isTableRow(l: string): boolean { return Boolean(l && /^\|.*\|$/.test(l.trim())); }
+  _isTableSep(l: string): boolean { return Boolean(l && /^\|[\s\-:|]+\|$/.test(l.trim())); }
 
-  render(text) {
+  render(text: string): string {
     if (!text) return '';
     const lines = text.split('\n');
-    const output = [];
+    const output: string[] = [];
 
     let inCodeBlock = false;
     let codeLang = '';
-    let codeLines = [];
+    let codeLines: string[] = [];
 
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
@@ -86,8 +88,7 @@ class MarkdownRenderer {
       // Table detection: header | sep | data...
       if (this._isTableRow(line) && i + 2 < lines.length && this._isTableSep(lines[i + 1]) && this._isTableRow(lines[i + 2])) {
         const header = line;
-        const sep = lines[i + 1];
-        const dataRows = [];
+        const dataRows: string[] = [];
         i += 2; // skip to first data row
         dataRows.push(lines[i]);
         while (i + 1 < lines.length && this._isTableRow(lines[i + 1])) {
@@ -113,7 +114,7 @@ class MarkdownRenderer {
     return output.join('\n');
   }
 
-  _renderHeading(line) {
+  _renderHeading(line: string): string {
     const match = line.match(/^(#{1,6})\s+(.*)/);
     if (!match) return this._renderInline(line);
     const level = match[1].length;
@@ -122,7 +123,7 @@ class MarkdownRenderer {
     return `\n${THEME.heading}${prefix}${text}${ANSI.reset}`;
   }
 
-  _renderCodeBlock(lines, lang) {
+  _renderCodeBlock(lines: string[], lang: string): string {
     const width = Math.min(this.columns - 4, 100);
     const topBorder = `${THEME.border}╭${'─'.repeat(width)}╮${ANSI.reset}`;
     const bottomBorder = `${THEME.border}╰${'─'.repeat(width)}╯${ANSI.reset}`;
@@ -138,7 +139,7 @@ class MarkdownRenderer {
     return rendered.join('\n');
   }
 
-  _renderListItem(line) {
+  _renderListItem(line: string): string {
     const match = line.match(/^(\s*)([-*+]|\d+\.)\s+(.*)/);
     if (!match) return this._renderInline(line);
     const indent = match[1];
@@ -148,18 +149,18 @@ class MarkdownRenderer {
     return `${indent}${THEME.list}${displayMarker}${ANSI.reset} ${text}`;
   }
 
-  _renderBlockquote(line) {
+  _renderBlockquote(line: string): string {
     const text = line.replace(/^>\s*/, '');
     return `${THEME.dim}▎ ${this._renderInline(text)}${ANSI.reset}`;
   }
 
-  _renderHr() {
+  _renderHr(): string {
     const width = Math.min(this.columns - 2, 60);
     return `${THEME.hr}${'─'.repeat(width)}${ANSI.reset}`;
   }
 
-  _renderTable(header, dataRows) {
-    const parse = r => r.trim().replace(/^\||\|$/g, '').split('|').map(c => c.trim());
+  _renderTable(header: string, dataRows: string[]): string {
+    const parse = (r: string): string[] => r.trim().replace(/^\||\|$/g, '').split('|').map(c => c.trim());
     const hdr = parse(header);
     const rows = dataRows.map(parse);
     const allRows = [hdr, ...rows];
@@ -167,10 +168,10 @@ class MarkdownRenderer {
     const colWidths = hdr.map((_, ci) =>
       Math.min(40, Math.max(3, ...allRows.map(r => r[ci] ? r[ci].length : 0)))
     );
-    const pad = (text, w) => text + ' '.repeat(Math.max(0, w - text.length));
+    const pad = (text: string, w: number): string => text + ' '.repeat(Math.max(0, w - text.length));
     const border = THEME.border || THEME.dim;
 
-    const result = [];
+    const result: string[] = [];
     // Top border
     result.push(border + '┌' + colWidths.map(w => '─'.repeat(w + 2)).join('┬') + '┐' + ANSI.reset);
     // Header row
@@ -188,7 +189,7 @@ class MarkdownRenderer {
     return result.join('\n');
   }
 
-  _renderInline(text) {
+  _renderInline(text: string): string {
     if (!text) return '';
     let result = '';
     let cursor = 0;
@@ -273,7 +274,7 @@ class MarkdownRenderer {
   }
 }
 
-function styled(color, text) {
+function styled(color: string, text: string): string {
   return `${color}${text}${ANSI.reset}`;
 }
 

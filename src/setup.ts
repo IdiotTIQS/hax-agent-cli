@@ -8,13 +8,13 @@ import os from "os";
 import path from "path";
 import fs from "fs";
 
-function _question(rl, prompt) {
+function _question(rl: readline.Interface, prompt: string): Promise<string> {
   return new Promise(function (resolve) {
     rl.question(prompt, function (answer) { resolve(answer.trim()); });
   });
 }
 
-async function runSetup() {
+async function runSetup(): Promise<{ provider: string; model: string; apiKey: string; permMode: string }> {
   var rl = readline.createInterface({ input: process.stdin, output: process.stdout });
   var out = process.stdout;
 
@@ -29,19 +29,19 @@ async function runSetup() {
   for (var i = 0; i < providers.length; i++) {
     out.write("  [" + (i + 1) + "] " + providers[i] + "\n");
   }
-  var choice = await _question(rl, "\nEnter number or name (default: deepseek): ");
-  var provider = providers[parseInt(choice) - 1] || choice || "deepseek";
+  var choice: string = await _question(rl, "\nEnter number or name (default: deepseek): ");
+  var provider: string = providers[parseInt(choice) - 1] || choice || "deepseek";
   if (!providers.includes(provider)) provider = "deepseek";
 
   // 2. API Key
   out.write("\n\x1b[1m2. API Key\x1b[0m\n");
   var keyHint = provider === "anthropic" ? "sk-ant-..." : provider === "openai" ? "sk-proj-..." : "sk-...";
-  var apiKey = await _question(rl, "Paste your " + provider + " API key (" + keyHint + "): ");
+  var apiKey: string = await _question(rl, "Paste your " + provider + " API key (" + keyHint + "): ");
   if (apiKey) {
     var kdir = path.join(os.homedir(), ".haxagent");
     if (!fs.existsSync(kdir)) fs.mkdirSync(kdir, { recursive: true });
     var kp = path.join(kdir, "apikeys.json");
-    var keys = {};
+    var keys: Record<string, string> = {};
     try { keys = JSON.parse(fs.readFileSync(kp, "utf-8")); } catch (_) {}
     keys[provider] = apiKey;
     fs.writeFileSync(kp, JSON.stringify(keys, null, 2));
@@ -56,15 +56,15 @@ async function runSetup() {
   for (var j = 0; j < models.length; j++) {
     out.write("  [" + (j + 1) + "] " + models[j] + "\n");
   }
-  var mChoice = await _question(rl, "\nEnter number (default: 1): ");
-  var model = models[parseInt(mChoice) - 1] || models[0];
+  var mChoice: string = await _question(rl, "\nEnter number (default: 1): ");
+  var model: string = models[parseInt(mChoice) - 1] || models[0];
   if (!model) model = provider === "anthropic" ? "claude-sonnet-4-6" : "deepseek-v4-flash";
 
   // 4. Permission mode
   out.write("\n\x1b[1m4. Permission mode:\x1b[0m\n");
   out.write("  [1] normal — ask before write/delete/shell\n");
   out.write("  [2] yolo   — auto-approve all tools\n");
-  var pChoice = await _question(rl, "\nEnter number (default: 1): ");
+  var pChoice: string = await _question(rl, "\nEnter number (default: 1): ");
   var permMode = pChoice === "2" ? "yolo" : "normal";
 
   // Save settings
@@ -81,7 +81,7 @@ async function runSetup() {
 
   // Save profile
   var pp = path.join(sdir, "profiles.json");
-  var profiles = {};
+  var profiles: Record<string, unknown> = {};
   profiles[provider] = { provider: provider, model: model, apiUrl: "" };
   fs.writeFileSync(pp, JSON.stringify(profiles, null, 2));
 
@@ -95,13 +95,13 @@ async function runSetup() {
   return { provider, model, apiKey, permMode };
 }
 
-function shouldRunSetup() {
+function shouldRunSetup(): boolean {
   var sdir = path.join(os.homedir(), ".haxagent");
   var sp = path.join(sdir, "settings.json");
   if (fs.existsSync(sp)) {
     try {
-      var s = JSON.parse(fs.readFileSync(sp, "utf-8"));
-      if (s.setup && s.setup.initialized) return false;
+      var s: Record<string, unknown> = JSON.parse(fs.readFileSync(sp, "utf-8"));
+      if (s.setup && (s.setup as Record<string, unknown>).initialized) return false;
     } catch (_) {}
   }
   // Check for env vars
