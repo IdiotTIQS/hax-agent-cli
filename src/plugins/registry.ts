@@ -1,20 +1,32 @@
 /**
  * Plugin System — manifest-driven plugin loading.
  * Ported from OpenHarness plugins/loader.py.
- *
- * Plugin directory:
- *   my-plugin/
- *     plugin.json    # { name, version, description, skillsDir, hooksFile }
- *     hooks.json     # [ { event, type, matcher, priority } ]
- *     skills/        # SKILL.md files
  */
 
 import fs from "fs";
 import path from "path";
 import os from "os";
 
+interface PluginManifestOptions {
+  name?: string;
+  version?: string;
+  description?: string;
+  enabled?: boolean;
+  skillsDir?: string;
+  hooksFile?: string;
+  dir?: string;
+}
+
 class PluginManifest {
-  constructor(o = {}) {
+  name: string;
+  version: string;
+  description: string;
+  enabled: boolean;
+  skillsDir: string;
+  hooksFile: string;
+  dir: string;
+
+  constructor(o: PluginManifestOptions = {}) {
     this.name = o.name || "";
     this.version = o.version || "0.1.0";
     this.description = o.description || "";
@@ -25,12 +37,41 @@ class PluginManifest {
   }
 }
 
-class PluginRegistry {
-  constructor() { this._plugins = new Map(); }
+interface PluginSkill {
+  name: string;
+  path: string;
+  content: string;
+}
 
-  async loadFromDir(dir) {
+interface LoadedPlugin {
+  name: string;
+  version: string;
+  description: string;
+  dir: string;
+  enabled: boolean;
+  skills: PluginSkill[];
+  hooks: unknown[];
+}
+
+interface RawManifest {
+  name?: string;
+  version?: string;
+  description?: string;
+  enabled?: boolean;
+  skillsDir?: string;
+  hooksFile?: string;
+}
+
+class PluginRegistry {
+  private _plugins: Map<string, LoadedPlugin>;
+
+  constructor() {
+    this._plugins = new Map();
+  }
+
+  async loadFromDir(dir: string): Promise<LoadedPlugin[]> {
     if (!fs.existsSync(dir)) return [];
-    const results = [];
+    const results: LoadedPlugin[] = [];
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
       if (!entry.isDirectory()) continue;
       const r = await this.loadPlugin(path.join(dir, entry.name));
@@ -39,18 +80,18 @@ class PluginRegistry {
     return results;
   }
 
-  async loadPlugin(pluginDir) {
+  async loadPlugin(pluginDir: string): Promise<LoadedPlugin | null> {
     const manifestPath = path.join(pluginDir, "plugin.json");
     if (!fs.existsSync(manifestPath)) return null;
 
-    let manifest;
-    try { manifest = JSON.parse(fs.readFileSync(manifestPath, "utf-8")); }
+    let manifest: RawManifest;
+    try { manifest = JSON.parse(fs.readFileSync(manifestPath, "utf-8")) as RawManifest; }
     catch (_) { return null; }
     if (!manifest.name) return null;
 
     if (this._plugins.has(manifest.name)) return null;
 
-    const plugin = {
+    const plugin: LoadedPlugin = {
       name: manifest.name, version: manifest.version || "0.1.0",
       description: manifest.description || "", dir: pluginDir,
       enabled: manifest.enabled !== false,
@@ -60,7 +101,7 @@ class PluginRegistry {
     // Load hooks
     const hooksFile = path.join(pluginDir, manifest.hooksFile || "hooks.json");
     if (fs.existsSync(hooksFile)) {
-      try { plugin.hooks = JSON.parse(fs.readFileSync(hooksFile, "utf-8")); }
+      try { plugin.hooks = JSON.parse(fs.readFileSync(hooksFile, "utf-8")) as unknown[]; }
       catch (_) {}
     }
 
@@ -80,29 +121,29 @@ class PluginRegistry {
     return plugin;
   }
 
-  get(name) { return this._plugins.get(name) || null; }
-  list() { return [...this._plugins.values()]; }
-  listEnabled() { return this.list().filter(p => p.enabled); }
+  get(name: string): LoadedPlugin | null { return this._plugins.get(name) || null; }
+  list(): LoadedPlugin[] { return [...this._plugins.values()]; }
+  listEnabled(): LoadedPlugin[] { return this.list().filter(p => p.enabled); }
 
   /** Get all hooks from enabled plugins */
-  getAllHooks() {
-    const all = [];
+  getAllHooks(): Array<unknown & { _plugin: string }> {
+    const all: Array<Record<string, unknown> & { _plugin: string }> = [];
     for (const p of this.listEnabled()) {
-      for (const h of (p.hooks || [])) all.push({ ...h, _plugin: p.name });
+      for (const h of (p.hooks || [])) {
+        all.push({ ...(h as Record<string, unknown>), _plugin: p.name });
+      }
     }
     return all;
   }
 }
 
 /** Load plugins from standard locations (synchronous convenience wrapper). */
-function loadPluginRegistry(cwd = process.cwd()) {
+function loadPluginRegistry(cwd = process.cwd()): PluginRegistry {
   const registry = new PluginRegistry();
   const dirs = [
     path.join(os.homedir(), ".haxagent", "plugins"),
     path.join(cwd, ".hax-agent", "plugins"),
   ];
-  // Fire-and-forget async loads; plugins will be available once resolved.
-  // The registry is returned immediately so callers can use it synchronously.
   for (const d of dirs) {
     registry.loadFromDir(d).catch(() => {});
   }

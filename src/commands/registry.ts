@@ -484,7 +484,7 @@ register("sandbox", (args, ctx) => {
     else {
       const settings = loadSettings() ?? {} as Record<string, unknown>;
       const sandboxCfg = (settings as Record<string, unknown>).sandbox as Record<string, unknown> | undefined;
-      s.sandbox = new SandboxAdapter({ backend: sandboxCfg?.backend || "docker", image: sandboxCfg?.image || "node:18-alpine", network: sandboxCfg?.network || "none", cpus: sandboxCfg?.cpus || 2, memory: sandboxCfg?.memory || "512m", hostDir: process.cwd() });
+      s.sandbox = new SandboxAdapter({ backend: (sandboxCfg?.backend as string) || "docker", image: (sandboxCfg?.image as string) || "node:18-alpine", network: (sandboxCfg?.network as string) || "none", cpus: (sandboxCfg?.cpus as number) || 2, memory: (sandboxCfg?.memory as string) || "512m", hostDir: process.cwd() });
       s.sandbox.start().then(() => {
         ctx.screen.write(`${styled(THEME.success, "Sandbox started (" + s.sandbox!.backend + ")")}\n`);
         ctx.rl?.prompt?.();

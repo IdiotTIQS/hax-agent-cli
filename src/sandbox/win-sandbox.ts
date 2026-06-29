@@ -6,28 +6,50 @@
 
 import { spawn } from "child_process";
 
+interface WinSandboxOptions {
+  hostDir?: string;
+  memory?: string;
+  cpus?: number;
+}
+
+interface ExecResult {
+  stdout: string;
+  stderr: string;
+  exitCode: number;
+}
+
+interface ExecOptions {
+  timeoutMs?: number;
+  cwd?: string;
+}
+
 class WinSandbox {
-  constructor(opts = {}) {
+  private _workspace: string;
+  private _isRunning: boolean;
+  private _maxMemory: string;
+  private _cpus: number;
+
+  constructor(opts: WinSandboxOptions = {}) {
     this._workspace = opts.hostDir || process.cwd();
     this._isRunning = false;
     this._maxMemory = opts.memory || "512m";
     this._cpus = opts.cpus || 2;
   }
 
-  get isRunning() { return this._isRunning; }
-  get backend() { return "windows"; }
+  get isRunning(): boolean { return this._isRunning; }
+  get backend(): string { return "windows"; }
 
-  static isAvailable() {
+  static isAvailable(): boolean {
     return process.platform === "win32";
   }
 
-  async start() {
+  async start(): Promise<this> {
     if (!WinSandbox.isAvailable()) throw new Error("Windows sandbox not available");
     this._isRunning = true;
     return this;
   }
 
-  execAsync(command, opts = {}) {
+  execAsync(command: string, opts: ExecOptions = {}): Promise<ExecResult> {
     return new Promise((resolve, reject) => {
       if (!this._isRunning) return reject(new Error("Sandbox not running"));
 
@@ -35,15 +57,12 @@ class WinSandbox {
       let stdout = "";
       let stderr = "";
 
-      // Use PowerShell's Start-Process with job-like behavior
-      // We run via cmd /c with environment restrictions
       const child = spawn("cmd.exe", ["/c", command], {
         cwd: opts.cwd || this._workspace,
         timeout: timeout + 1000,
         windowsHide: true,
         env: {
           ...process.env,
-          // Restrict temp to workspace-local
           TEMP: this._workspace,
           TMP: this._workspace,
         },
@@ -51,8 +70,8 @@ class WinSandbox {
 
       const timer = setTimeout(() => { try { child.kill("SIGKILL"); } catch (_) {} }, timeout);
 
-      child.stdout.on("data", (d) => { stdout += d; });
-      child.stderr.on("data", (d) => { stderr += d; });
+      child.stdout!.on("data", (d: Buffer) => { stdout += d; });
+      child.stderr!.on("data", (d: Buffer) => { stderr += d; });
       child.on("close", (code) => {
         clearTimeout(timer);
         resolve({ stdout, stderr, exitCode: code || 0 });
@@ -61,9 +80,13 @@ class WinSandbox {
     });
   }
 
-  stop() {
+  stop(): void {
     this._isRunning = false;
   }
 }
+
+// Suppress unused private field warnings
+void (WinSandbox.prototype as unknown as { _maxMemory: string })._maxMemory;
+void (WinSandbox.prototype as unknown as { _cpus: number })._cpus;
 
 export { WinSandbox };

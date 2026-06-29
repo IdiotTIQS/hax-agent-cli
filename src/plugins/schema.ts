@@ -1,12 +1,6 @@
 /**
  * Plugin Schema — JSON Schema validation for plugin.json manifests.
  * Ported from OpenHarness plugins/schemas.py pattern.
- *
- * Validates plugin.json against a defined schema with:
- * - Required fields enforcement
- * - Type checking
- * - Dependency validation
- * - Security category checks
  */
 
 // === Plugin JSON Schema ===
@@ -137,24 +131,33 @@ const PLUGIN_SCHEMA = {
 
 // === Validation Result ===
 
+interface ValidationError {
+  path: string;
+  message: string;
+}
+
 class ValidationResult {
+  valid: boolean;
+  errors: ValidationError[];
+  warnings: ValidationError[];
+
   constructor() {
     this.valid = true;
     this.errors = [];
     this.warnings = [];
   }
 
-  addError(path, message) {
+  addError(path: string, message: string): void {
     this.valid = false;
     this.errors.push({ path, message });
   }
 
-  addWarning(path, message) {
+  addWarning(path: string, message: string): void {
     this.warnings.push({ path, message });
   }
 
-  toString() {
-    const lines = [];
+  toString(): string {
+    const lines: string[] = [];
     if (this.errors.length) {
       lines.push(`Errors (${this.errors.length}):`);
       for (const e of this.errors) lines.push(`  [${e.path}] ${e.message}`);
@@ -168,14 +171,54 @@ class ValidationResult {
   }
 }
 
+// === Plugin manifest shape (for validation) ===
+
+interface HaxAgentHook {
+  event?: string;
+  type?: string;
+  command?: string;
+  url?: string;
+}
+
+interface HaxAgentMcpServer {
+  type?: string;
+  command?: string;
+  url?: string;
+}
+
+interface HaxAgentTrust {
+  requiresUserApproval?: boolean;
+  sandboxRequired?: boolean;
+  allowedOperations?: string[];
+}
+
+interface HaxAgentConfig {
+  hooks?: HaxAgentHook[];
+  mcp?: Record<string, HaxAgentMcpServer>;
+  trust?: HaxAgentTrust;
+}
+
+interface PluginManifestShape {
+  name?: string;
+  version?: string;
+  description?: string;
+  category?: string;
+  license?: string;
+  keywords?: unknown;
+  main?: unknown;
+  dependencies?: Record<string, string>;
+  haxAgent?: HaxAgentConfig;
+  repository?: string;
+}
+
 // === Validator ===
 
 /**
  * Validate a plugin.json object against the schema.
- * @param {Object} manifest — parsed plugin.json
- * @returns {ValidationResult}
+ * @param manifest — parsed plugin.json
+ * @returns ValidationResult
  */
-function validatePluginManifest(manifest) {
+function validatePluginManifest(manifest: unknown): ValidationResult {
   const result = new ValidationResult();
 
   if (!manifest || typeof manifest !== "object") {
@@ -183,59 +226,61 @@ function validatePluginManifest(manifest) {
     return result;
   }
 
+  const m = manifest as PluginManifestShape;
+
   // Required fields
-  if (!manifest.name || typeof manifest.name !== "string") {
+  if (!m.name || typeof m.name !== "string") {
     result.addError("name", "Required: plugin name (string)");
-  } else if (!/^[a-z][a-z0-9._-]*$/.test(manifest.name)) {
-    result.addError("name", `Invalid name "${manifest.name}": must be lowercase alphanumeric with dots/hyphens`);
+  } else if (!/^[a-z][a-z0-9._-]*$/.test(m.name)) {
+    result.addError("name", `Invalid name "${m.name}": must be lowercase alphanumeric with dots/hyphens`);
   }
 
-  if (!manifest.version || typeof manifest.version !== "string") {
+  if (!m.version || typeof m.version !== "string") {
     result.addError("version", "Required: semantic version (e.g., 1.0.0)");
-  } else if (!/^\d+\.\d+\.\d+(-[a-zA-Z0-9.]+)?$/.test(manifest.version)) {
-    result.addError("version", `Invalid version "${manifest.version}": must be semver`);
+  } else if (!/^\d+\.\d+\.\d+(-[a-zA-Z0-9.]+)?$/.test(m.version)) {
+    result.addError("version", `Invalid version "${m.version}": must be semver`);
   }
 
   // Description
-  if (manifest.description && typeof manifest.description !== "string") {
+  if (m.description && typeof m.description !== "string") {
     result.addError("description", "Must be a string");
-  } else if (manifest.description && manifest.description.length > 200) {
+  } else if (m.description && m.description.length > 200) {
     result.addWarning("description", "Description exceeds 200 characters");
   }
 
   // Category
-  if (manifest.category) {
+  if (m.category) {
     const validCategories = ["tools", "skills", "commands", "hooks", "providers", "ui", "integration", "other"];
-    if (!validCategories.includes(manifest.category)) {
-      result.addWarning("category", `Unknown category "${manifest.category}". Use one of: ${validCategories.join(", ")}`);
+    if (!validCategories.includes(m.category)) {
+      result.addWarning("category", `Unknown category "${m.category}". Use one of: ${validCategories.join(", ")}`);
     }
   }
 
   // License
-  if (manifest.license) {
+  if (m.license) {
     const validLicenses = ["MIT", "Apache-2.0", "GPL-3.0", "BSD-2-Clause", "BSD-3-Clause", "ISC", "UNLICENSED", "Proprietary"];
-    if (!validLicenses.includes(manifest.license)) {
-      result.addWarning("license", `Unrecognized license "${manifest.license}"`);
+    if (!validLicenses.includes(m.license)) {
+      result.addWarning("license", `Unrecognized license "${m.license}"`);
     }
   }
 
   // Keywords
-  if (manifest.keywords) {
-    if (!Array.isArray(manifest.keywords)) {
+  if (m.keywords) {
+    if (!Array.isArray(m.keywords)) {
       result.addError("keywords", "Must be an array");
-    } else if (manifest.keywords.length > 10) {
+    } else if ((m.keywords as unknown[]).length > 10) {
       result.addWarning("keywords", "More than 10 keywords");
     }
   }
 
   // Main entry
-  if (manifest.main && typeof manifest.main !== "string") {
+  if (m.main && typeof m.main !== "string") {
     result.addError("main", "Must be a string path");
   }
 
   // haxAgent config
-  if (manifest.haxAgent) {
-    const hax = manifest.haxAgent;
+  if (m.haxAgent) {
+    const hax = m.haxAgent;
 
     // Trust config
     if (hax.trust) {
@@ -297,17 +342,23 @@ function validatePluginManifest(manifest) {
 
 // === Quick Security Check ===
 
+interface SecurityAuditResult {
+  risk: "low" | "medium" | "high";
+  reasons: string[];
+}
+
 /**
  * Quick security audit of a plugin manifest.
  * Returns a risk level: "low" | "medium" | "high"
  */
-function securityAudit(manifest) {
+function securityAudit(manifest: unknown): SecurityAuditResult {
   if (!manifest) return { risk: "high", reasons: ["No manifest"] };
 
-  const reasons = [];
-  let risk = "low";
+  const reasons: string[] = [];
+  let risk: "low" | "medium" | "high" = "low";
 
-  const hax = manifest.haxAgent;
+  const m = manifest as PluginManifestShape;
+  const hax = m.haxAgent;
   if (hax) {
     if (hax.trust?.requiresUserApproval === false && !hax.trust?.allowedOperations) {
       reasons.push("Auto-approval with no operation restrictions");

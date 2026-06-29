@@ -8,26 +8,44 @@ import fs from "fs";
 import path from "path";
 import os from "os";
 
+interface MacOSOptions {
+  hostDir?: string;
+}
+
+interface ExecResult {
+  stdout: string;
+  stderr: string;
+  exitCode: number;
+}
+
+interface ExecOptions {
+  timeoutMs?: number;
+  cwd?: string;
+}
+
 class MacOSSandbox {
-  constructor(opts = {}) {
+  private _workspace: string;
+  private _isRunning: boolean;
+  private _policyFile: string | null;
+
+  constructor(opts: MacOSOptions = {}) {
     this._workspace = opts.hostDir || process.cwd();
     this._isRunning = false;
     this._policyFile = null;
   }
 
-  get isRunning() { return this._isRunning; }
-  get backend() { return "macos"; }
+  get isRunning(): boolean { return this._isRunning; }
+  get backend(): string { return "macos"; }
 
-  static isAvailable() {
+  static isAvailable(): boolean {
     try {
       execSync("which sandbox-exec", { encoding: "utf-8", timeout: 3000, stdio: "pipe" });
       return true;
     } catch (_) { return false; }
   }
 
-  async start() {
+  async start(): Promise<this> {
     if (!MacOSSandbox.isAvailable()) throw new Error("sandbox-exec not available");
-    // Generate policy file
     const policy = this._generatePolicy();
     this._policyFile = path.join(os.tmpdir(), `hax-sandbox-${Date.now().toString(36)}.sb`);
     fs.writeFileSync(this._policyFile, policy, "utf-8");
@@ -35,11 +53,11 @@ class MacOSSandbox {
     return this;
   }
 
-  execAsync(command, opts = {}) {
+  execAsync(command: string, opts: ExecOptions = {}): Promise<ExecResult> {
     return new Promise((resolve, reject) => {
       if (!this._isRunning) return reject(new Error("Sandbox not running"));
 
-      const args = ["-f", this._policyFile, "sh", "-c", command];
+      const args = ["-f", this._policyFile!, "sh", "-c", command];
       const timeout = opts.timeoutMs || 30000;
       let stdout = "";
       let stderr = "";
@@ -51,8 +69,8 @@ class MacOSSandbox {
 
       const timer = setTimeout(() => { try { child.kill("SIGKILL"); } catch (_) {} }, timeout);
 
-      child.stdout.on("data", (d) => { stdout += d; });
-      child.stderr.on("data", (d) => { stderr += d; });
+      child.stdout!.on("data", (d: Buffer) => { stdout += d; });
+      child.stderr!.on("data", (d: Buffer) => { stderr += d; });
       child.on("close", (code) => {
         clearTimeout(timer);
         resolve({ stdout, stderr, exitCode: code || 0 });
@@ -61,7 +79,7 @@ class MacOSSandbox {
     });
   }
 
-  stop() {
+  stop(): void {
     if (this._policyFile) {
       try { fs.unlinkSync(this._policyFile); } catch (_) {}
       this._policyFile = null;
@@ -69,7 +87,7 @@ class MacOSSandbox {
     this._isRunning = false;
   }
 
-  _generatePolicy() {
+  private _generatePolicy(): string {
     const ws = this._workspace;
     const tmp = os.tmpdir();
     return `(version 1)

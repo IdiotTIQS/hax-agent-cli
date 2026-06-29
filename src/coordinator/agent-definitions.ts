@@ -1,6 +1,13 @@
 /** Agent role definitions. Ported from OpenHarness coordinator/agent_definitions.py */
 
-const BUILTIN_AGENTS = {
+interface BuiltinAgentDef {
+  name: string;
+  role: string;
+  description: string;
+  tools: string[];
+}
+
+const BUILTIN_AGENTS: Record<string, BuiltinAgentDef> = {
   architect: { name: "architect", role: "Software Architect", description: "Designs system architecture, component boundaries, and data flow", tools: ["file.read", "file.glob", "file.search", "web.search"] },
   reviewer: { name: "reviewer", role: "Code Reviewer", description: "Reviews code for correctness, readability, security, and performance", tools: ["file.read", "file.glob", "file.search", "shell.run"] },
   tester: { name: "tester", role: "Test Engineer", description: "Designs and writes tests, analyzes coverage gaps", tools: ["file.read", "file.write", "file.edit", "file.glob", "file.search", "shell.run"] },
@@ -10,11 +17,36 @@ const BUILTIN_AGENTS = {
   researcher: { name: "researcher", role: "Researcher", description: "Explores codebases, gathers context, answers questions", tools: ["file.read", "file.glob", "file.search", "web.search", "web.fetch"] },
 };
 
-class AgentDefinition {
-  constructor(o = {}) { this.name = o.name || ""; this.role = o.role || ""; this.description = o.description || ""; this.tools = o.tools || []; this.systemPrompt = o.systemPrompt || ""; }
+interface AgentDefinitionOptions {
+  name?: string;
+  role?: string;
+  description?: string;
+  tools?: string[];
+  systemPrompt?: string;
 }
 
-function getBuiltinAgent(name) { return BUILTIN_AGENTS[name] ? new AgentDefinition(BUILTIN_AGENTS[name]) : null; }
-function listBuiltinAgents() { return Object.values(BUILTIN_AGENTS).map(a => new AgentDefinition(a)); }
+class AgentDefinition {
+  name: string;
+  role: string;
+  description: string;
+  tools: string[];
+  systemPrompt: string;
+
+  constructor(o: AgentDefinitionOptions = {}) {
+    this.name = o.name || "";
+    this.role = o.role || "";
+    this.description = o.description || "";
+    this.tools = o.tools || [];
+    this.systemPrompt = o.systemPrompt || "";
+  }
+}
+
+function getBuiltinAgent(name: string): AgentDefinition | null {
+  return BUILTIN_AGENTS[name] ? new AgentDefinition(BUILTIN_AGENTS[name]) : null;
+}
+
+function listBuiltinAgents(): AgentDefinition[] {
+  return Object.values(BUILTIN_AGENTS).map(a => new AgentDefinition(a));
+}
 
 export { BUILTIN_AGENTS, AgentDefinition, getBuiltinAgent, listBuiltinAgents };

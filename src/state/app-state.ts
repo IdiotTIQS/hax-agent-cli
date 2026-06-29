@@ -3,8 +3,50 @@
  * Ported from OpenHarness state/app_state.py + state/store.py
  */
 
+interface AppStateOptions {
+  model?: string;
+  permissionMode?: string;
+  theme?: string;
+  cwd?: string;
+  provider?: string;
+  authStatus?: string;
+  baseUrl?: string;
+  vimEnabled?: boolean;
+  voiceEnabled?: boolean;
+  voiceAvailable?: boolean;
+  voiceReason?: string;
+  fastMode?: boolean;
+  effort?: string;
+  passes?: number;
+  mcpConnected?: number;
+  mcpFailed?: number;
+  bridgeSessions?: number;
+  outputStyle?: string;
+  keybindings?: Record<string, unknown>;
+}
+
 class AppState {
-  constructor(o = {}) {
+  model: string;
+  permissionMode: string;
+  theme: string;
+  cwd: string;
+  provider: string;
+  authStatus: string;
+  baseUrl: string;
+  vimEnabled: boolean;
+  voiceEnabled: boolean;
+  voiceAvailable: boolean;
+  voiceReason: string;
+  fastMode: boolean;
+  effort: string;
+  passes: number;
+  mcpConnected: number;
+  mcpFailed: number;
+  bridgeSessions: number;
+  outputStyle: string;
+  keybindings: Record<string, unknown>;
+
+  constructor(o: AppStateOptions = {}) {
     this.model = o.model || "";
     this.permissionMode = o.permissionMode || "normal";
     this.theme = o.theme || "default";
@@ -27,15 +69,20 @@ class AppState {
   }
 }
 
+type StateListener = (state: AppState) => void;
+
 class AppStateStore {
-  constructor(initialState) {
+  private _state: AppState;
+  private _listeners: StateListener[];
+
+  constructor(initialState?: AppState) {
     this._state = initialState || new AppState();
     this._listeners = [];
   }
 
-  get() { return this._state; }
+  get(): AppState { return this._state; }
 
-  set(updates) {
+  set(updates: AppStateOptions): AppState {
     this._state = new AppState({ ...this._state, ...updates });
     for (const fn of [...this._listeners]) {
       try { fn(this._state); } catch (_) {}
@@ -43,7 +90,7 @@ class AppStateStore {
     return this._state;
   }
 
-  subscribe(listener) {
+  subscribe(listener: StateListener): () => void {
     this._listeners.push(listener);
     return () => {
       const idx = this._listeners.indexOf(listener);

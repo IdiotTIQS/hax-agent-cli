@@ -9,8 +9,32 @@ import os from "os";
 
 // === Skill Definition ===
 
+interface SkillOptions {
+  name?: string;
+  displayName?: string;
+  description?: string;
+  content?: string;
+  source?: string;
+  dir?: string;
+  isHidden?: boolean;
+  commandName?: string | null;
+  aliases?: string[];
+  disableModelInvocation?: boolean;
+}
+
 class Skill {
-  constructor(opts = {}) {
+  name: string;
+  displayName: string;
+  description: string;
+  content: string;
+  source: string;
+  dir: string;
+  isHidden: boolean;
+  commandName: string | null;
+  aliases: string[];
+  disableModelInvocation: boolean;
+
+  constructor(opts: SkillOptions = {}) {
     this.name = opts.name || "";
     this.displayName = opts.displayName || this.name;
     this.description = opts.description || "";
@@ -24,10 +48,10 @@ class Skill {
   }
 
   /** Get the skill prompt for sending to the model. */
-  getPrompt() { return this.content; }
+  getPrompt(): string { return this.content; }
 
   /** Get prompt for a slash command invocation. */
-  getPromptForCommand(args = []) {
+  getPromptForCommand(args: string[] = []): Array<{ text: string }> {
     let p = this.content;
     if (args.length > 0) p = `Execute skill "${this.name}" with arguments: ${args.join(", ")}\n\n${p}`;
     return [{ text: p }];
@@ -37,22 +61,24 @@ class Skill {
 // === Skill Registry ===
 
 class SkillRegistry {
+  private _skills: Map<string, Skill>;
+
   constructor() { this._skills = new Map(); }
 
-  register(skill) {
+  register(skill: Skill): void {
     if (!(skill instanceof Skill)) throw new Error("Expected Skill instance");
-    if (this._skills.has(skill.name)) return; // Skip duplicates
+    if (this._skills.has(skill.name)) return;
     this._skills.set(skill.name, skill);
   }
 
-  get(name) { return this._skills.get(name) || null; }
-  list() { return [...this._skills.values()]; }
-  get size() { return this._skills.size; }
+  get(name: string): Skill | null { return this._skills.get(name) || null; }
+  list(): Skill[] { return [...this._skills.values()]; }
+  get size(): number { return this._skills.size; }
 
   /** Find skills matching a query by name, description, or content keywords. */
-  search(query, limit = 5) {
+  search(query: string, limit = 5): Skill[] {
     const q = String(query).toLowerCase();
-    const scored = [];
+    const scored: Array<{ skill: Skill; score: number }> = [];
     for (const skill of this._skills.values()) {
       if (skill.isHidden) continue;
       let score = 0;
@@ -69,7 +95,7 @@ class SkillRegistry {
   }
 
   /** Match skill by explicit command name. */
-  matchByCommand(cmd) {
+  matchByCommand(cmd: string): Skill | null {
     const c = String(cmd).toLowerCase();
     for (const skill of this._skills.values()) {
       if (skill.commandName === c) return skill;
@@ -79,7 +105,7 @@ class SkillRegistry {
   }
 
   /** Build system prompt with all registered skills. */
-  buildSystemPrompt() {
+  buildSystemPrompt(): string {
     const skills = this.list().filter(s => !s.isHidden);
     if (!skills.length) return "";
     const lines = ["<available_skills>"];
@@ -94,13 +120,22 @@ class SkillRegistry {
 // === Skill Loading ===
 
 const SKILL_FILE = "SKILL.md";
-const SKILL_DIRS = {
+const SKILL_DIRS: Record<string, string[]> = {
   project: [".hax-agent/skills", ".claude/skills", ".agents/skills"],
 };
 
+interface FrontmatterValue {
+  [key: string]: string | boolean | string[];
+}
+
+interface ParsedFrontmatter {
+  frontmatter: FrontmatterValue;
+  body: string;
+}
+
 /** Load skills from a directory containing SKILL.md subdirectories. */
-function loadSkillsFromDir(dir, source = "project") {
-  const skills = [];
+function loadSkillsFromDir(dir: string, source = "project"): Skill[] {
+  const skills: Skill[] = [];
   if (!fs.existsSync(dir)) return skills;
 
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -111,17 +146,24 @@ function loadSkillsFromDir(dir, source = "project") {
     try {
       const raw = fs.readFileSync(skillPath, "utf-8");
       const { frontmatter, body } = parseFrontmatter(raw);
+      const fmName = frontmatter["name"];
+      const fmDisplayName = frontmatter["display_name"];
+      const fmDesc = frontmatter["description"];
+      const fmHidden = frontmatter["hidden"];
+      const fmCommand = frontmatter["command"];
+      const fmAliases = frontmatter["aliases"];
+      const fmDisable = frontmatter["disable_model_invocation"];
       skills.push(new Skill({
-        name: frontmatter.name || entry.name,
-        displayName: frontmatter.display_name || frontmatter.name || entry.name,
-        description: frontmatter.description || "",
+        name: (typeof fmName === "string" ? fmName : null) || entry.name,
+        displayName: (typeof fmDisplayName === "string" ? fmDisplayName : null) || (typeof fmName === "string" ? fmName : null) || entry.name,
+        description: typeof fmDesc === "string" ? fmDesc : "",
         content: body,
         source,
         dir: path.join(dir, entry.name),
-        isHidden: frontmatter.hidden === true,
-        commandName: frontmatter.command || null,
-        aliases: frontmatter.aliases || [],
-        disableModelInvocation: frontmatter.disable_model_invocation === true,
+        isHidden: fmHidden === true,
+        commandName: typeof fmCommand === "string" ? fmCommand : null,
+        aliases: Array.isArray(fmAliases) ? fmAliases : [],
+        disableModelInvocation: fmDisable === true,
       }));
     } catch (_) { /* skip invalid skills */ }
   }
@@ -129,15 +171,15 @@ function loadSkillsFromDir(dir, source = "project") {
 }
 
 /** Parse YAML frontmatter from markdown (--- ... ---). */
-function parseFrontmatter(raw) {
+function parseFrontmatter(raw: string): ParsedFrontmatter {
   const match = raw.match(/^---\s*\n([\s\S]*?)\n---\s*\n?([\s\S]*)$/);
   if (!match) return { frontmatter: {}, body: raw };
-  const fm = {};
+  const fm: FrontmatterValue = {};
   for (const line of match[1].split("\n")) {
     const idx = line.indexOf(":");
     if (idx > 0) {
       const key = line.slice(0, idx).trim();
-      let val = line.slice(idx + 1).trim();
+      let val: string | boolean = line.slice(idx + 1).trim();
       if (val === "true") val = true;
       else if (val === "false") val = false;
       fm[key] = val;
@@ -147,7 +189,7 @@ function parseFrontmatter(raw) {
 }
 
 /** Load all skills (user + project). */
-function loadSkillRegistry(cwd = process.cwd()) {
+function loadSkillRegistry(cwd = process.cwd()): SkillRegistry {
   const registry = new SkillRegistry();
 
   // User-level: ~/.haxagent/skills/
