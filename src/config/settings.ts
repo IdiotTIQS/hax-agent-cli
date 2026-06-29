@@ -19,9 +19,40 @@ const DEFAULTS = {
   context: { compactionEnabled: false, compactionThreshold: 0.85 },
 };
 
-let _cached = null;
+interface AgentSettings {
+  provider?: string;
+  model?: string;
+  maxTurns?: number;
+  thinking?: boolean;
+  thinkIntensity?: string | null;
+  _activeProfile?: string;
+  [key: string]: unknown;
+}
 
-function loadSettings() {
+interface PermissionSettings {
+  mode?: string;
+  allowedTools?: string[];
+  deniedTools?: string[];
+  [key: string]: unknown;
+}
+
+interface UiSettings {
+  locale?: string;
+  autoClearScreen?: boolean;
+  theme?: string;
+  [key: string]: unknown;
+}
+
+interface SettingsShape {
+  agent?: AgentSettings;
+  permissions?: PermissionSettings;
+  ui?: UiSettings;
+  [key: string]: unknown;
+}
+
+let _cached: SettingsShape | null = null;
+
+function loadSettings(): SettingsShape {
   if (_cached) return _cached;
   _cached = _readSettings();
   return _cached;
@@ -34,7 +65,7 @@ function _readSettings() {
       file = JSON.parse(fs.readFileSync(CONFIG_FILE, "utf-8"));
     }
   } catch (_) {}
-  return deepMerge({}, DEFAULTS, file);
+  return deepMerge({} as SettingsShape, DEFAULTS as SettingsShape, file as SettingsShape);
 }
 
 /** Force reload from disk, busting the cache. */
@@ -43,17 +74,17 @@ function reloadSettings() {
   return loadSettings();
 }
 
-function saveSettings(settings) {
+function saveSettings(settings: SettingsShape) {
   if (!fs.existsSync(CONFIG_DIR)) fs.mkdirSync(CONFIG_DIR, { recursive: true });
   fs.writeFileSync(CONFIG_FILE, JSON.stringify(settings, null, 2), "utf-8");
   _cached = null;
 }
 
-function deepMerge(target, ...sources) {
+function deepMerge(target: SettingsShape, ...sources: Array<Record<string, unknown>>): SettingsShape {
   for (const src of sources) {
     for (const key of Object.keys(src)) {
       if (src[key] && typeof src[key] === "object" && !Array.isArray(src[key])) {
-        target[key] = deepMerge(target[key] || {}, src[key]);
+        target[key] = deepMerge((target[key] || {}) as SettingsShape, src[key] as Record<string, unknown>);
       } else {
         target[key] = src[key];
       }

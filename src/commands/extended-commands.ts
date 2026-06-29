@@ -68,7 +68,7 @@ export default function registerExtended(
   register("summary", (args, ctx) => {
     const msgs = ctx.session.messages;
     if (msgs.length === 0) { ctx.screen.write(`${styled(THEME.dim, "No messages in session.")}\n`); ctx.rl?.prompt?.(); return; }
-    const userMsgs = msgs.filter(function(m) { return m.role === "user" && !m.internal; });
+    const userMsgs = msgs.filter(function(m: { role: string; internal?: boolean }) { return m.role === "user" && !m.internal; });
     const totalInput = ctx.session.inputTokens || 0;
     const totalOutput = ctx.session.outputTokens || 0;
     const files = ctx.session._modifiedFiles ? [...ctx.session._modifiedFiles] : [];

@@ -54,7 +54,7 @@ function getCronRegistryPath() { return path.join(getDataDir(), "cron_jobs.json"
 function getPluginsDir() { return path.join(getConfigDir(), "plugins"); }
 function getSkillsDir() { return path.join(getConfigDir(), "skills"); }
 
-function getProjectConfigDir(cwd) {
+function getProjectConfigDir(cwd: string) {
   const dir = path.resolve(cwd || process.cwd(), ".hax-agent");
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
   return dir;

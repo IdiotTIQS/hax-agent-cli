@@ -20,13 +20,31 @@ import { execSync } from "child_process";
 import { listMcpResourcesTool, readMcpResourceTool, listMcpToolsTool } from "./mcp-tools.js";
 import { imageToTextTool, imageGenerationTool } from "./image-tools.js";
 
+// Local re-declaration of shared tool types (avoids circular import from registry)
+interface ToolContext {
+  root: string;
+  registry?: { list(): { name: string; description: string }[] };
+  session?: Record<string, unknown>;
+  _backgroundTasks?: Record<string, unknown>;
+  _tasks?: Map<string, Record<string, unknown>>;
+  _todos?: Array<{ task: string; status: string }>;
+  _outputLevel?: string;
+  mcpManager?: unknown;
+  [key: string]: unknown;
+}
+interface ToolResult {
+  ok: boolean;
+  data?: unknown;
+  error?: { code: string; message: string; [key: string]: unknown };
+}
+
 // === Helpers ===
-const resolvePath = (root, p) => {
+const resolvePath = (root: string, p: string): string => {
   const r = path.resolve(root, p);
   if (!r.startsWith(path.resolve(root))) throw new Error(`Path outside workspace: ${p}`);
   return r;
 };
-const requireString = (v, name) => {
+const requireString = (v: unknown, name: string): string => {
   if (typeof v !== "string" || !v.trim()) throw new Error(`${name} is required`);
   return v.trim();
 };
@@ -47,8 +65,8 @@ const agentTool = {
       run_in_background: { type: "boolean", default: false },
     },
   },
-  async execute(args, ctx) {
-    var desc = args.description || args.prompt.slice(0, 60);
+  async execute(args: Record<string, unknown>, ctx: ToolContext): Promise<ToolResult> {
+    var desc = (args.description || (args.prompt as string).slice(0, 60)) as string;
     var id = "agent_" + Date.now().toString(36);
 
     if (args.run_in_background) {
@@ -58,9 +76,9 @@ const agentTool = {
     // Actually run sub-agent via hax-agent --batch
     try {
       var cliPath = path.join(ctx.root || process.cwd(), "src", "cli.js");
-      var escaped = args.prompt.replace(/"/g, '\\"').replace(/\n/g, " ");
+      var escaped = (args.prompt as string).replace(/"/g, '\\"').replace(/\n/g, " ");
       var cmd = '"' + process.execPath + '" "' + cliPath + '" --batch "' + escaped + '"';
-      var timeout = Math.min(args.maxTurns || 10, 20) * 60000;
+      var timeout = Math.min((args.maxTurns as number) || 10, 20) * 60000;
 
       var stdout = (execSync(cmd, {
         cwd: ctx.root, timeout: timeout, encoding: "utf-8", maxBuffer: 500 * 1024, shell: true,
@@ -92,9 +110,9 @@ const sendMessageTool = {
       message: { type: "string" },
     },
   },
-  async execute(args, ctx) {
-    const tasks = ctx._backgroundTasks || {};
-    const task = tasks[args.task_id];
+  async execute(args: Record<string, unknown>, ctx: ToolContext): Promise<ToolResult> {
+    const tasks = (ctx._backgroundTasks || {}) as Record<string, unknown>;
+    const task = tasks[args.task_id as string];
     if (!task) return { ok: false, error: { code: "TASK_NOT_FOUND", message: `Task ${args.task_id} not found` } };
     return { ok: true, data: { taskId: args.task_id, message: `Message sent to task ${args.task_id}` } };
   },
@@ -105,9 +123,9 @@ const sendMessageTool = {
 // B) Task Management Tools
 // ============================================================
 
-function _getTasks(ctx) {
+function _getTasks(ctx: ToolContext): Map<string, Record<string, unknown>> {
   ctx._tasks = ctx._tasks || new Map();
-  return ctx._tasks;
+  return ctx._tasks as Map<string, Record<string, unknown>>;
 }
 
 function _taskDir() {
@@ -127,10 +145,10 @@ const taskCreateTool = {
       permissionMode: { type: "string", default: "normal" },
     },
   },
-  async execute(args, ctx) {
+  async execute(args: Record<string, unknown>, ctx: ToolContext): Promise<ToolResult> {
     const tasks = _getTasks(ctx);
     const id = `task_${Date.now().toString(36)}`;
-    const task = { id, prompt: args.prompt, status: "pending", createdAt: Date.now() };
+    const task: Record<string, unknown> = { id, prompt: args.prompt, status: "pending", createdAt: Date.now() };
     tasks.set(id, task);
     return { ok: true, data: { taskId: id, status: "pending" } };
   },
@@ -141,9 +159,9 @@ const taskGetTool = {
   name: "task.get",
   description: "Get task status and details.",
   inputSchema: { type: "object", required: ["task_id"], properties: { task_id: { type: "string" } } },
-  async execute(args, ctx) {
+  async execute(args: Record<string, unknown>, ctx: ToolContext): Promise<ToolResult> {
     const tasks = _getTasks(ctx);
-    const task = tasks.get(args.task_id);
+    const task = tasks.get(args.task_id as string);
     if (!task) return { ok: false, error: { code: "NOT_FOUND", message: `Task ${args.task_id} not found` } };
     return { ok: true, data: task };
   },
@@ -154,7 +172,7 @@ const taskListTool = {
   name: "task.list",
   description: "List all tasks.",
   inputSchema: { type: "object", properties: {} },
-  async execute(args, ctx) {
+  async execute(_args: Record<string, unknown>, ctx: ToolContext): Promise<ToolResult> {
     return { ok: true, data: [..._getTasks(ctx).values()] };
   },
   isReadOnly: () => true,
@@ -164,11 +182,11 @@ const taskOutputTool = {
   name: "task.output",
   description: "View task output/logs.",
   inputSchema: { type: "object", required: ["task_id"], properties: { task_id: { type: "string" } } },
-  async execute(args, ctx) {
+  async execute(args: Record<string, unknown>, ctx: ToolContext): Promise<ToolResult> {
     const tasks = _getTasks(ctx);
-    const task = tasks.get(args.task_id);
+    const task = tasks.get(args.task_id as string);
     if (!task) return { ok: false, error: { code: "NOT_FOUND", message: `Task ${args.task_id} not found` } };
-    return { ok: true, data: { taskId: args.task_id, output: task.output || "", status: task.status } };
+    return { ok: true, data: { taskId: args.task_id, output: task["output"] || "", status: task["status"] } };
   },
   isReadOnly: () => true,
 };
@@ -177,11 +195,11 @@ const taskStopTool = {
   name: "task.stop",
   description: "Stop a running task.",
   inputSchema: { type: "object", required: ["task_id"], properties: { task_id: { type: "string" } } },
-  async execute(args, ctx) {
+  async execute(args: Record<string, unknown>, ctx: ToolContext): Promise<ToolResult> {
     const tasks = _getTasks(ctx);
-    const task = tasks.get(args.task_id);
+    const task = tasks.get(args.task_id as string);
     if (!task) return { ok: false, error: { code: "NOT_FOUND", message: `Task ${args.task_id} not found` } };
-    task.status = "stopped";
+    task["status"] = "stopped";
     return { ok: true, data: { taskId: args.task_id, status: "stopped" } };
   },
   isReadOnly: () => false,
@@ -202,7 +220,7 @@ const teamCreateTool = {
       agents: { type: "array", items: { type: "string" } },
     },
   },
-  async execute(args, ctx) {
+  async execute(args: Record<string, unknown>, _ctx: ToolContext): Promise<ToolResult> {
     const dir = path.join(process.cwd(), ".hax-agent", "teams");
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     const teamFile = path.join(dir, `${args.name}.json`);
@@ -222,7 +240,7 @@ const teamDeleteTool = {
   name: "team.delete",
   description: "Delete an agent team.",
   inputSchema: { type: "object", required: ["name"], properties: { name: { type: "string" } } },
-  async execute(args, ctx) {
+  async execute(args: Record<string, unknown>, _ctx: ToolContext): Promise<ToolResult> {
     const fp = path.join(process.cwd(), ".hax-agent", "teams", `${args.name}.json`);
     if (!fs.existsSync(fp)) return { ok: false, error: { code: "NOT_FOUND", message: `Team ${args.name} not found` } };
     fs.unlinkSync(fp);
@@ -239,11 +257,11 @@ const enterPlanModeTool = {
   name: "enter_plan_mode",
   description: "Enter plan mode (block all mutating tools until plan is approved).",
   inputSchema: { type: "object", properties: {} },
-  async execute(args, ctx) {
+  async execute(_args: Record<string, unknown>, ctx: ToolContext): Promise<ToolResult> {
     const pm = ctx.session?.permissionManager;
     if (pm) {
       const { PermissionMode } = await import("../engine/agent.js");
-      pm.mode = PermissionMode.PLAN;
+      (pm as Record<string, unknown>)["mode"] = PermissionMode.PLAN;
       return { ok: true, data: { mode: "plan", message: "Entered plan mode. All mutating tools are blocked." } };
     }
     return { ok: true, data: { mode: "plan" } };
@@ -255,11 +273,11 @@ const exitPlanModeTool = {
   name: "exit_plan_mode",
   description: "Exit plan mode and resume normal tool permissions.",
   inputSchema: { type: "object", properties: {} },
-  async execute(args, ctx) {
+  async execute(_args: Record<string, unknown>, ctx: ToolContext): Promise<ToolResult> {
     const pm = ctx.session?.permissionManager;
     if (pm) {
       const { PermissionMode } = await import("../engine/agent.js");
-      pm.mode = PermissionMode.DEFAULT;
+      (pm as Record<string, unknown>)["mode"] = PermissionMode.DEFAULT;
       return { ok: true, data: { mode: "normal", message: "Exited plan mode. Tools restored." } };
     }
     return { ok: true, data: { mode: "normal" } };
@@ -274,9 +292,9 @@ const enterWorktreeTool = {
     type: "object", required: ["branch"],
     properties: { branch: { type: "string" }, path: { type: "string" } },
   },
-  async execute(args, ctx) {
-    const branch = args.branch || `hax-worktree-${Date.now().toString(36)}`;
-    const wp = args.path || path.join(os.tmpdir(), "hax-worktree", branch);
+  async execute(args: Record<string, unknown>, ctx: ToolContext): Promise<ToolResult> {
+    const branch = (args.branch || `hax-worktree-${Date.now().toString(36)}`) as string;
+    const wp = (args.path || path.join(os.tmpdir(), "hax-worktree", branch)) as string;
     try {
       execSync(`git worktree add "${wp}" -b "${branch}"`, { cwd: ctx.root || process.cwd(), encoding: "utf-8" });
       return { ok: true, data: { branch, path: wp, message: `Worktree created at ${wp} on branch ${branch}` } };
@@ -291,7 +309,7 @@ const exitWorktreeTool = {
   name: "exit_worktree",
   description: "Remove an isolated git worktree.",
   inputSchema: { type: "object", required: ["path"], properties: { path: { type: "string" } } },
-  async execute(args, ctx) {
+  async execute(args: Record<string, unknown>, ctx: ToolContext): Promise<ToolResult> {
     try {
       execSync(`git worktree remove "${args.path}"`, { cwd: ctx.root || process.cwd(), encoding: "utf-8" });
       return { ok: true, data: { removed: args.path } };
@@ -309,11 +327,12 @@ const todoWriteTool = {
     type: "object", required: ["todos"],
     properties: { todos: { type: "array", items: { type: "object", properties: { task: { type: "string" }, status: { type: "string", default: "pending" } } } } },
   },
-  async execute(args, ctx) {
-    const todos = (args.todos || []).map(t => typeof t === "string" ? { task: t, status: "pending" } : t);
+  async execute(args: Record<string, unknown>, ctx: ToolContext): Promise<ToolResult> {
+    const rawTodos = (args.todos || []) as unknown[];
+    const todos = rawTodos.map((t: unknown) => typeof t === "string" ? { task: t, status: "pending" } : t as { task: string; status: string });
     if (!ctx._todos) ctx._todos = [];
-    ctx._todos.push(...todos);
-    const statuses = todos.map(t => `${t.status === "done" ? "✓" : "○"} ${t.task}`).join("\n");
+    ctx._todos.push(...(todos as Array<{ task: string; status: string }>));
+    const statuses = todos.map((t: unknown) => { const todo = t as { task: string; status: string }; return `${todo.status === "done" ? "✓" : "○"} ${todo.task}`; }).join("\n");
     return { ok: true, data: { todos, total: ctx._todos.length, summary: statuses } };
   },
   isReadOnly: () => false,
@@ -342,7 +361,7 @@ const cronCreateTool = {
       enabled: { type: "boolean", default: true },
     },
   },
-  async execute(args) {
+  async execute(args: Record<string, unknown>): Promise<ToolResult> {
     const id = crypto.randomUUID();
     const job = { id, name: args.name, prompt: args.prompt, schedule: args.schedule, enabled: args.enabled !== false, createdAt: Date.now() };
     fs.writeFileSync(path.join(_cronDir(), `${id}.json`), JSON.stringify(job, null, 2));
@@ -355,7 +374,7 @@ const cronDeleteTool = {
   name: "cron.delete",
   description: "Delete a scheduled cron job.",
   inputSchema: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
-  async execute(args) {
+  async execute(args: Record<string, unknown>): Promise<ToolResult> {
     const fp = path.join(_cronDir(), `${args.id}.json`);
     if (!fs.existsSync(fp)) return { ok: false, error: { code: "NOT_FOUND", message: `Cron job ${args.id} not found` } };
     fs.unlinkSync(fp);
@@ -368,8 +387,8 @@ const cronListTool = {
   name: "cron.list",
   description: "List all scheduled cron jobs.",
   inputSchema: { type: "object", properties: {} },
-  async execute() {
-    const jobs = fs.readdirSync(_cronDir()).filter(f => f.endsWith(".json")).map(f => JSON.parse(fs.readFileSync(path.join(_cronDir(), f), "utf-8")));
+  async execute(): Promise<ToolResult> {
+    const jobs = fs.readdirSync(_cronDir()).filter((f: string) => f.endsWith(".json")).map((f: string) => JSON.parse(fs.readFileSync(path.join(_cronDir(), f), "utf-8")));
     return { ok: true, data: jobs };
   },
   isReadOnly: () => true,
@@ -379,7 +398,7 @@ const cronToggleTool = {
   name: "cron.toggle",
   description: "Toggle a cron job enabled/disabled.",
   inputSchema: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
-  async execute(args) {
+  async execute(args: Record<string, unknown>): Promise<ToolResult> {
     const fp = path.join(_cronDir(), `${args.id}.json`);
     const job = JSON.parse(fs.readFileSync(fp, "utf-8"));
     job.enabled = !job.enabled;
@@ -395,8 +414,8 @@ const sleepTool = {
   name: "sleep",
   description: "Pause execution for a specified duration.",
   inputSchema: { type: "object", required: ["seconds"], properties: { seconds: { type: "number" } } },
-  async execute(args) {
-    const ms = Math.min((args.seconds || 0) * 1000, 300000);
+  async execute(args: Record<string, unknown>): Promise<ToolResult> {
+    const ms = Math.min(((args.seconds as number) || 0) * 1000, 300000);
     await new Promise(r => setTimeout(r, ms));
     return { ok: true, data: { sleptMs: ms } };
   },
@@ -409,7 +428,7 @@ const askUserTool = {
   name: "ask_user",
   description: "Ask the user a question and wait for their response.",
   inputSchema: { type: "object", required: ["question"], properties: { question: { type: "string" } } },
-  async execute(args) {
+  async execute(args: Record<string, unknown>): Promise<ToolResult> {
     return { ok: true, data: { question: args.question, note: "User response required. The model should await the user's reply before continuing." } };
   },
   isReadOnly: () => true,
@@ -421,10 +440,10 @@ const toolSearchTool = {
   name: "tool_search",
   description: "Search for available tools by keyword.",
   inputSchema: { type: "object", required: ["query"], properties: { query: { type: "string" } } },
-  async execute(args, ctx) {
+  async execute(args: Record<string, unknown>, ctx: ToolContext): Promise<ToolResult> {
     const tools = ctx.registry?.list() || [];
-    const q = args.query.toLowerCase();
-    const matches = tools.filter(t => t.name.toLowerCase().includes(q) || t.description.toLowerCase().includes(q));
+    const q = (args.query as string).toLowerCase();
+    const matches = tools.filter((t: { name: string; description: string }) => t.name.toLowerCase().includes(q) || t.description.toLowerCase().includes(q));
     return { ok: true, data: { query: args.query, matches: matches.slice(0, 20) } };
   },
   isReadOnly: () => true,
@@ -436,8 +455,8 @@ const briefTool = {
   name: "brief",
   description: "Set output verbosity level.",
   inputSchema: { type: "object", properties: { level: { type: "string", default: "normal" } } },
-  async execute(args, ctx) {
-    if (ctx) ctx._outputLevel = args.level || "normal";
+  async execute(args: Record<string, unknown>, ctx: ToolContext): Promise<ToolResult> {
+    if (ctx) ctx._outputLevel = (args.level as string) || "normal";
     return { ok: true, data: { level: args.level || "normal" } };
   },
   isReadOnly: () => false,
@@ -454,19 +473,19 @@ const configTool = {
       action: { type: "string", default: "get" },
     },
   },
-  async execute(args, ctx) {
+  async execute(args: Record<string, unknown>, ctx: ToolContext): Promise<ToolResult> {
     const { loadSettings } = await import("../config/settings.js");
-    const settings = ctx.session?.settings || loadSettings();
+    const settings = (ctx.session?.settings || loadSettings()) as Record<string, unknown>;
     if (args.action === "set" && args.key && args.value !== undefined) {
-      const keys = args.key.split(".");
+      const keys = (args.key as string).split(".");
       let obj = settings;
-      for (let i = 0; i < keys.length - 1; i++) { if (!obj[keys[i]]) obj[keys[i]] = {}; obj = obj[keys[i]]; }
+      for (let i = 0; i < keys.length - 1; i++) { if (!obj[keys[i]]) obj[keys[i]] = {}; obj = obj[keys[i]] as Record<string, unknown>; }
       obj[keys[keys.length - 1]] = args.value;
       return { ok: true, data: { key: args.key, value: args.value } };
     }
     return { ok: true, data: settings };
   },
-  isReadOnly: (args) => args?.action !== "set",
+  isReadOnly: (args?: Record<string, unknown>) => args?.action !== "set",
 };
 
 // --- Glob (enhanced) ---
@@ -483,12 +502,12 @@ const globTool = {
       includeStats: { type: "boolean", default: false },
     },
   },
-  async execute(args, ctx) {
-    const ignore = args.ignore || ["node_modules/**", ".git/**", "**/__pycache__/**", "**/.venv/**"];
-    const dir = args.path ? resolvePath(ctx.root, args.path) : ctx.root;
-    const matches = globSync(args.pattern, { cwd: dir, nodir: true, ignore, absolute: false }).slice(0, args.maxResults || 500);
-    const result: { pattern: unknown; matches: string[]; count: number; truncated: boolean; files?: Array<{ path: string; size: number }> } = { pattern: args.pattern, matches, count: matches.length, truncated: matches.length >= (args.maxResults || 500) };
-    if (args.includeStats) result.files = matches.map(f => ({ path: f, size: fs.statSync(path.join(dir, f)).size }));
+  async execute(args: Record<string, unknown>, ctx: ToolContext): Promise<ToolResult> {
+    const ignore = (args.ignore as string[]) || ["node_modules/**", ".git/**", "**/__pycache__/**", "**/.venv/**"];
+    const dir = args.path ? resolvePath(ctx.root, args.path as string) : ctx.root;
+    const matches = globSync(args.pattern as string, { cwd: dir, nodir: true, ignore, absolute: false }).slice(0, (args.maxResults as number) || 500);
+    const result: { pattern: unknown; matches: string[]; count: number; truncated: boolean; files?: Array<{ path: string; size: number }> } = { pattern: args.pattern, matches, count: matches.length, truncated: matches.length >= ((args.maxResults as number) || 500) };
+    if (args.includeStats) result.files = matches.map((f: string) => ({ path: f, size: fs.statSync(path.join(dir, f)).size }));
     return { ok: true, data: result };
   },
   isReadOnly: () => true,
@@ -509,33 +528,33 @@ const grepTool = {
       ignoreCase: { type: "boolean", default: true },
     },
   },
-  async execute(args, ctx) {
-    const dir = args.path ? resolvePath(ctx.root, args.path) : ctx.root;
-    const include = args.include || "**/*.{js,ts,py,md,json,yaml,yml,toml,rs,go,java,c,cpp,h,hpp,css,html,sh,bat,xml,svg}";
-    const ignore = args.exclude ? [args.exclude, "node_modules/**", ".git/**"] : ["node_modules/**", ".git/**"];
+  async execute(args: Record<string, unknown>, ctx: ToolContext): Promise<ToolResult> {
+    const dir = args.path ? resolvePath(ctx.root, args.path as string) : ctx.root;
+    const include = (args.include as string) || "**/*.{js,ts,py,md,json,yaml,yml,toml,rs,go,java,c,cpp,h,hpp,css,html,sh,bat,xml,svg}";
+    const ignore = args.exclude ? [args.exclude as string, "node_modules/**", ".git/**"] : ["node_modules/**", ".git/**"];
     const files = globSync(include, { cwd: dir, nodir: true, ignore });
     const flags = args.ignoreCase !== false ? "gi" : "g";
-    const re = new RegExp(args.pattern, flags);
+    const re = new RegExp(args.pattern as string, flags);
     const matches: Array<{ file: string; line: number; content: string; before?: string[]; after?: string[] }> = [];
 
     for (const f of files.slice(0, 500)) {
-      if (matches.length >= (args.maxResults || 200)) break;
+      if (matches.length >= ((args.maxResults as number) || 200)) break;
       try {
         const lines = fs.readFileSync(path.join(dir, f), "utf-8").split("\n");
-        for (let i = 0; i < lines.length && matches.length < (args.maxResults || 200); i++) {
+        for (let i = 0; i < lines.length && matches.length < ((args.maxResults as number) || 200); i++) {
           if (re.test(lines[i])) {
             re.lastIndex = 0;
-            const ctxBefore = args.context ? lines.slice(Math.max(0, i - args.context), i) : [];
-            const ctxAfter = args.context ? lines.slice(i + 1, i + 1 + args.context) : [];
+            const ctxBefore = args.context ? lines.slice(Math.max(0, i - (args.context as number)), i) : [];
+            const ctxAfter = args.context ? lines.slice(i + 1, i + 1 + (args.context as number)) : [];
             matches.push({
               file: f, line: i + 1, content: lines[i].trim(),
-              ...(args.context ? { before: ctxBefore.map(l => l.trim()), after: ctxAfter.map(l => l.trim()) } : {}),
+              ...(args.context ? { before: ctxBefore.map((l: string) => l.trim()), after: ctxAfter.map((l: string) => l.trim()) } : {}),
             });
           }
         }
       } catch (_) {}
     }
-    return { ok: true, data: { pattern: args.pattern, matches, count: matches.length, truncated: matches.length >= (args.maxResults || 200) } };
+    return { ok: true, data: { pattern: args.pattern, matches, count: matches.length, truncated: matches.length >= ((args.maxResults as number) || 200) } };
   },
   isReadOnly: () => true,
 };
@@ -549,10 +568,10 @@ const skillTool = {
     type: "object", required: ["name"],
     properties: { name: { type: "string" }, arguments: { type: "string" } },
   },
-  async execute(args, ctx) {
+  async execute(args: Record<string, unknown>, ctx: ToolContext): Promise<ToolResult> {
     try {
       const reg = (await import("../skills/registry.js")).loadSkillRegistry(ctx.root || process.cwd());
-      const skill = reg.get(args.name);
+      const skill = reg.get(args.name as string);
       if (!skill) return { ok: false, error: { code: "NOT_FOUND", message: `Skill ${args.name} not found` } };
       return { ok: true, data: { name: args.name, content: skill.content, description: skill.description } };
     } catch (_) {
@@ -574,18 +593,18 @@ const lspTool = {
       symbol: { type: "string" }, file: { type: "string" }, line: { type: "number" }, column: { type: "number" },
     },
   },
-  async execute(args, ctx) {
+  async execute(args: Record<string, unknown>, ctx: ToolContext): Promise<ToolResult> {
     try {
       const lsp = await import("../services/lsp.js");
       const root = ctx.root || process.cwd();
       if (args.action === "search") {
-        return { ok: true, data: lsp.workspaceSearch(root, args.symbol || "").slice(0, 30) };
+        return { ok: true, data: lsp.workspaceSearch(root, (args.symbol as string) || "").slice(0, 30) };
       }
       if (args.action === "definition") {
-        return { ok: true, data: lsp.goToDefinition(root, args.symbol || "", args.file || null, args.line) };
+        return { ok: true, data: lsp.goToDefinition(root, (args.symbol as string) || "", (args.file as string | null) || null, args.line as number) };
       }
       if (args.action === "references") {
-        return { ok: true, data: lsp.findReferences(root, args.symbol || "").slice(0, 30) };
+        return { ok: true, data: lsp.findReferences(root, (args.symbol as string) || "").slice(0, 30) };
       }
       return { ok: false, error: { code: "INVALID_ACTION", message: `Unknown action: ${args.action}` } };
     } catch (_) {
@@ -606,12 +625,12 @@ const taskUpdateTool = {
     type: "object", required: ["task_id"],
     properties: { task_id: { type: "string" }, description: { type: "string" }, progress: { type: "number" }, status_note: { type: "string" } },
   },
-  async execute(args, ctx) {
-    const tasks = _getTasks(ctx); const task = tasks.get(args.task_id);
+  async execute(args: Record<string, unknown>, ctx: ToolContext): Promise<ToolResult> {
+    const tasks = _getTasks(ctx); const task = tasks.get(args.task_id as string);
     if (!task) return { ok: false, error: { code: "NOT_FOUND", message: `Task ${args.task_id} not found` } };
-    if (args.description) task.description = args.description;
-    if (args.progress !== undefined) task.metadata = { ...task.metadata, progress: String(args.progress) };
-    if (args.status_note) task.metadata = { ...task.metadata, status_note: args.status_note };
+    if (args.description) task["description"] = args.description;
+    if (args.progress !== undefined) task["metadata"] = { ...(task["metadata"] as object), progress: String(args.progress) };
+    if (args.status_note) task["metadata"] = { ...(task["metadata"] as object), status_note: args.status_note };
     return { ok: true, data: task };
   },
   isReadOnly: () => false,
@@ -624,7 +643,7 @@ const askUserQuestionTool = {
     type: "object", required: ["questions"],
     properties: { questions: { type: "array" }, answers: { type: "object" } },
   },
-  async execute(args) { return { ok: true, data: { questions: args.questions || [], message: "Awaiting user response." } }; },
+  async execute(args: Record<string, unknown>): Promise<ToolResult> { return { ok: true, data: { questions: args.questions || [], message: "Awaiting user response." } }; },
   isReadOnly: () => true,
 };
 
@@ -635,7 +654,7 @@ const mcpAuthTool = {
     type: "object", required: ["server"],
     properties: { server: { type: "string" }, auth_type: { type: "string", default: "oauth" }, credentials: { type: "object" } },
   },
-  async execute(args, ctx) {
+  async execute(args: Record<string, unknown>, ctx: ToolContext): Promise<ToolResult> {
     const mgr = ctx.mcpManager;
     if (!mgr) return { ok: false, error: { code: "MCP_NOT_CONFIGURED", message: "MCP manager not available" } };
     return { ok: true, data: { server: args.server, authenticated: true } };
@@ -650,30 +669,30 @@ const notebookEditTool = {
     type: "object", required: ["path"],
     properties: { path: { type: "string" }, action: { type: "string", default: "read" }, cell_index: { type: "number" }, cell_type: { type: "string" }, source: { type: "string" } },
   },
-  async execute(args, ctx) {
+  async execute(args: Record<string, unknown>, ctx: ToolContext): Promise<ToolResult> {
     const fp = resolvePath(ctx.root, requireString(args.path, "path"));
     if (path.extname(fp).toLowerCase() !== ".ipynb") return { ok: false, error: { code: "INVALID_FORMAT", message: "Not a .ipynb file" } };
     try {
       const nb = JSON.parse(fs.readFileSync(fp, "utf-8"));
-      const cells = nb.cells || [];
+      const cells: Array<Record<string, unknown>> = nb.cells || [];
       if (args.action === "read") {
-        return { ok: true, data: { path: args.path, cells: cells.map((c, i) => ({ index: i, type: c.cell_type, source: (c.source || []).join("").slice(0, 200) })), count: cells.length } };
+        return { ok: true, data: { path: args.path, cells: cells.map((c: Record<string, unknown>, i: number) => ({ index: i, type: c["cell_type"], source: ((c["source"] as string[]) || []).join("").slice(0, 200) })), count: cells.length } };
       }
       if (args.action === "add") {
-        cells.push({ cell_type: args.cell_type || "code", source: (args.source || "").split("\n"), metadata: {} });
+        cells.push({ cell_type: args.cell_type || "code", source: ((args.source as string) || "").split("\n"), metadata: {} });
         fs.writeFileSync(fp, JSON.stringify(nb, null, 1));
         return { ok: true, data: { path: args.path, added: cells.length - 1 } };
       }
       if (args.action === "update" && args.cell_index !== undefined) {
-        if (!cells[args.cell_index]) return { ok: false, error: { code: "INVALID_INDEX", message: `Cell ${args.cell_index} not found` } };
-        if (args.source) cells[args.cell_index].source = args.source.split("\n");
+        if (!cells[args.cell_index as number]) return { ok: false, error: { code: "INVALID_INDEX", message: `Cell ${args.cell_index} not found` } };
+        if (args.source) cells[args.cell_index as number]["source"] = (args.source as string).split("\n");
         fs.writeFileSync(fp, JSON.stringify(nb, null, 1));
         return { ok: true, data: { path: args.path, updated: args.cell_index } };
       }
       return { ok: false, error: { code: "INVALID_ACTION", message: `Unknown action: ${args.action}` } };
     } catch (err) { return { ok: false, error: { code: "NOTEBOOK_ERROR", message: (err as Error).message } }; }
   },
-  isReadOnly: (args) => args?.action === "read",
+  isReadOnly: (args?: Record<string, unknown>) => args?.action === "read",
 };
 
 // ============================================================

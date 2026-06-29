@@ -5,15 +5,18 @@
 
 const RETRYABLE_STATUS_CODES = new Set([429, 500, 502, 503, 529]);
 
-function isRetryable(err) {
-  const status = err?.status || err?.statusCode || 0;
+function isRetryable(err: unknown): boolean {
+  const e = err as Record<string, unknown>;
+  const status = (e?.status || e?.statusCode || 0) as number;
   if (RETRYABLE_STATUS_CODES.has(status)) return true;
-  const msg = String(err?.message || "").toLowerCase();
+  const msg = String(e?.message || "").toLowerCase();
   return /rate.?limit|too many requests|server error|internal server|ETIMEDOUT|ECONNRESET|ECONNREFUSED/i.test(msg);
 }
 
-function parseRetryAfter(err) {
-  const h = err?.headers?.["retry-after"] || err?.response?.headers?.["retry-after"];
+function parseRetryAfter(err: unknown): number {
+  const e = err as Record<string, unknown>;
+  const headers = (e?.headers || (e?.response as Record<string, unknown>)?.headers) as Record<string, string> | undefined;
+  const h = headers?.["retry-after"];
   if (!h) return 0;
   const s = parseInt(h, 10);
   if (Number.isFinite(s) && s > 0) return s * 1000;
@@ -21,7 +24,7 @@ function parseRetryAfter(err) {
   return 0;
 }
 
-async function withRetry(fn, { maxRetries = 3, baseDelayMs = 1000, maxDelayMs = 30000 } = {}) {
+async function withRetry(fn: () => Promise<unknown>, { maxRetries = 3, baseDelayMs = 1000, maxDelayMs = 30000 } = {}) {
   let lastErr;
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try { return await fn(); }

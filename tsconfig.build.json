@@ -1,7 +1,6 @@
 {
-  // 构建配置（区别于根 tsconfig.json 的 checkJs/noEmit 护栏配置）。
-  // NodeNext 模式已激活：同时兼容 CJS 和 ESM，迁移期间两种格式均可正常类型检查。
-  // 源码逐步从 CJS 转为 ESM（leaf→root），转换完成后 package.json 再切到 "type":"module"。
+  // 构建配置（区别于根 tsconfig.json 的 noEmit 护栏配置）。
+  // 全仓已迁移为 TypeScript + ESM（NodeNext）。strict 全开。
   "compilerOptions": {
     "target": "ES2022",
     "module": "NodeNext",
@@ -14,19 +13,13 @@
     "sourceMap": true,
     "declaration": false,
 
-    // 渐进迁移期：允许 .js 与 .ts 共存
-    "allowJs": true,
-    "checkJs": false,
-
-    "strict": false,
-    "noImplicitAny": false,
+    "strict": true,
     "skipLibCheck": true,
     "resolveJsonModule": true,
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true
   },
   "include": [
-    "src/**/*.js",
     "src/**/*.ts"
   ],
   "exclude": [

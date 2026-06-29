@@ -11,9 +11,9 @@ const resolve6 = promisify(dns.resolve6);
 
 const DEFAULT_PORTS = { http: 80, https: 443 };
 
-class NetworkGuardError extends Error { constructor(m) { super(m); this.name = "NetworkGuardError"; } }
+class NetworkGuardError extends Error { constructor(m: string) { super(m); this.name = "NetworkGuardError"; } }
 
-function validateHttpUrl(urlStr) {
+function validateHttpUrl(urlStr: string) {
   let parsed;
   try { parsed = new URL(urlStr); } catch (_) { throw new NetworkGuardError("Invalid URL"); }
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") throw new NetworkGuardError("Only http and https URLs are allowed");
@@ -22,9 +22,9 @@ function validateHttpUrl(urlStr) {
   return parsed;
 }
 
-async function ensurePublicHttpUrl(urlStr) {
+async function ensurePublicHttpUrl(urlStr: string) {
   const parsed = validateHttpUrl(urlStr);
-  const port = parsed.port ? parseInt(parsed.port) : DEFAULT_PORTS[parsed.protocol.replace(":", "")];
+  const port = parsed.port ? parseInt(parsed.port) : (DEFAULT_PORTS as Record<string, number>)[parsed.protocol.replace(":", "")];
 
   // Check for loopback / private
   const hostname = parsed.hostname;

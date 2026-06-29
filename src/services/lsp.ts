@@ -30,7 +30,7 @@ class LspSymbol {
   }
 }
 
-function detectLanguage(fp: string): string { return EXT_MAP[path.extname(String(fp)).toLowerCase()] || "text"; }
+function detectLanguage(fp: string): string { return (EXT_MAP as Record<string, string>)[path.extname(String(fp)).toLowerCase()] || "text"; }
 
 function iterFiles(root: string, lang?: string): string[] {
   const files: string[] = [];

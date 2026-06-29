@@ -1,61 +1,23 @@
 {
-  // 类型护栏配置：仅做类型检查，不产出编译文件。
-  // 运行方式不变 —— 仍然 node src/cli.js 直接跑源码。
+  // 类型护栏配置：仅做类型检查，不产出编译文件（开发用 tsx 直跑 .ts）。
+  // 全仓已迁移为 TypeScript + ESM（NodeNext）+ strict 全开。
   "compilerOptions": {
-    // allowJs+checkJs：用 JSDoc 校验 .js，无需把文件改成 .ts
-    "allowJs": true,
-    "checkJs": true,
     "noEmit": true,
 
-    // 匹配项目实际运行环境：Node>=18 + ESM
     "target": "ES2022",
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "lib": ["ES2022"],
     "types": ["node"],
 
-    // 渐进策略：首批不开 strict，先暴露明显类型错误，后续逐步收紧
-    "strict": false,
-    "noImplicitAny": false,
+    "strict": true,
     "skipLibCheck": true,
     "resolveJsonModule": true,
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true
   },
-  // 类型护栏覆盖范围。采用「白名单 include」而非 src/** + exclude：
-  // TS 的 exclude 不能阻止被 include 文件引用的模块被连带检查，只有不
-  // 出现在 include 中、且不作为根文件，才真正不在本文件内报错。
-  // 暂未纳入的两类文件见末尾注释。
   "include": [
-    "src/core/**/*.ts",
-    "src/api/**/*.ts",
-    "src/engine/**/*.ts",
-    "src/tools/**/*.ts",
-    "src/auth/**/*.ts",
-    "src/channels/**/*.ts",
-    "src/memory/**/*.ts",
-    "src/hooks/**/*.ts",
-    "src/plugins/**/*.ts",
-    "src/skills/**/*.ts",
-    "src/config/**/*.ts",
-    "src/keybindings/**/*.ts",
-    "src/personalization/**/*.ts",
-    "src/coordinator/**/*.ts",
-    "src/output-styles/**/*.ts",
-    "src/prompts/**/*.ts",
-    "src/shared/**/*.ts",
-    "src/utils/**/*.ts",
-    "src/vim/**/*.ts",
-    "src/voice/**/*.ts",
-    "src/state/**/*.ts",
-    "src/tasks/**/*.ts",
-    "src/bridge/**/*.ts",
-    "src/autopilot/**/*.ts",
-    "src/services/**/*.ts",
-    "src/commands/**/*.ts",
-    "src/swarm/**/*.ts",
-    "src/session.ts",
-    "src/context.ts"
+    "src/**/*.ts"
   ],
   "exclude": [
     "node_modules",
@@ -63,6 +25,4 @@
     "dist",
     "test"
   ]
-  // 暂未纳入 include（工作区半成品，本次修复范围之外、仍有 pre-existing
-  // 类型问题待其改动落定后处理）：cli.js, sandbox/, tui/
 }

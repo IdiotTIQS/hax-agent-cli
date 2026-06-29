@@ -110,12 +110,12 @@ class Spinner {
     }
   }
 
-  updateLabel(label) {
+  updateLabel(label: string) {
     this.label = label;
     if (this.active) this._render();
   }
 
-  updateTokens(count) {
+  updateTokens(count: number) {
     this.tokenCount = count;
   }
 
@@ -189,7 +189,7 @@ class ResponseRenderer {
   }
 
   /** Render complete markdown text (called at end of turn) */
-  renderMarkdown(text) {
+  renderMarkdown(text: string) {
     return this.markdown.render(text);
   }
 
@@ -198,7 +198,7 @@ class ResponseRenderer {
     this.spinner.start('', 'Thinking');
   }
 
-  writeText(delta) {
+  writeText(delta: string) {
     this.spinner.stop();
     if (this._collapsed) this._flushCollapsed();
     if (!this.textStarted) {
@@ -230,7 +230,7 @@ class ResponseRenderer {
     }
   }
 
-  thinking(chunk) {
+  thinking(chunk: ToolChunk) {
     if (!this.assistantStarted) {
       this.spinner.stop();
       this.screen.write("\n" + THEME.assistantIndicator + "Assistant " + THEME.dim + "(thinking)" + ANSI.reset + "\n");
@@ -245,13 +245,13 @@ class ResponseRenderer {
     }
   }
 
-  startTool(chunk) {
+  startTool(chunk: ToolChunk) {
     this._flushTextBuffer();
     this.toolCount++;
     if (this._collapsed && this._collapsed.name !== chunk.name) {
       this._flushCollapsed();
     }
-    this.currentToolName = chunk.name;
+    this.currentToolName = chunk.name || '';
     this.currentToolInput = chunk.input || {};
     this._lastToolOk = null; // will be set by finishTool
 
@@ -266,11 +266,11 @@ class ResponseRenderer {
 
     // For non-shell tools: don't show start, just track for collapsing
     if (!this._collapsed) {
-      this._collapsed = { name: chunk.name, count: 0, results: [] };
+      this._collapsed = { name: chunk.name ?? "", count: 0, results: [] };
     }
   }
 
-  finishTool(chunk) {
+  finishTool(chunk: ToolChunk) {
     this.spinner.stop();
     this._lastToolOk = !chunk.isError;
 
@@ -310,7 +310,7 @@ class ResponseRenderer {
     this._collapsed = null;
   }
 
-  _renderToolResult(chunk) {
+  _renderToolResult(chunk: ToolChunk) {
     if (!this.assistantStarted) {
       this.screen.write('\n' + THEME.assistantIndicator + 'Assistant' + ANSI.reset + '\n');
       this.assistantStarted = true;
@@ -327,7 +327,7 @@ class ResponseRenderer {
     }
   }
 
-  notice(message) {
+  notice(message: string) {
     this.spinner.stop();
     if (this._collapsed) this._flushCollapsed();
     if (this.lineOpen) {
@@ -337,7 +337,7 @@ class ResponseRenderer {
     this.screen.write(`${THEME.info}  ${message}${ANSI.reset}\n`);
   }
 
-  complete(usage) {
+  complete(usage: { outputTokens?: number; inputTokens?: number } | null | undefined) {
     this.spinner.stop();
     if (this._collapsed) this._flushCollapsed();
     this._flushTextBuffer();
@@ -371,7 +371,7 @@ class ResponseRenderer {
     this.textStarted = false;
   }
 
-  fail(message) {
+  fail(message: string) {
     this.spinner.stop();
     if (this._collapsed) this._flushCollapsed();
     this._flushTextBuffer();

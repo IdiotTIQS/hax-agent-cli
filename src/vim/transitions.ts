@@ -50,8 +50,8 @@ const TRANSITIONS = {
   },
 };
 
-function resolveAction(mode, key) {
-  const modeTransitions = TRANSITIONS[mode];
+function resolveAction(mode: string, key: string) {
+  const modeTransitions = (TRANSITIONS as Record<string, Record<string, unknown>>)[mode];
   if (!modeTransitions) return null;
   return modeTransitions[key] || null;
 }

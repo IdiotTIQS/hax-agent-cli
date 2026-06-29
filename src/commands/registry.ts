@@ -381,7 +381,7 @@ register("api-key", (args, ctx) => {
   const dir = path.join(os.homedir(), ".haxagent");
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
   const cfgPath = path.join(dir, "apikeys.json");
-  let keys = {};
+  let keys: Record<string, string> = {};
   try { keys = JSON.parse(fs.readFileSync(cfgPath, "utf-8")); } catch (_) {}
 
   // Determine provider and key
