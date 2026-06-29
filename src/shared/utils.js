@@ -1,5 +1,3 @@
-"use strict";
-
 // === ANSI escape codes ===
 const ESC = "\x1b";
 const CSI = `${ESC}[`;
@@ -46,4 +44,4 @@ function estimateStringTokens(s) {
   return Math.ceil(cjk / 1.5) + Math.ceil(other / 4.0);
 }
 
-module.exports = { ANSI, THEME, stripAnsi, styled, escapeRegex, sleep, safeJsonParse, safeJsonStringify, truncate, pluralize, estimateStringTokens };
+export { ANSI, THEME, stripAnsi, styled, escapeRegex, sleep, safeJsonParse, safeJsonStringify, truncate, pluralize, estimateStringTokens };

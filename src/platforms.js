@@ -1,12 +1,10 @@
-"use strict";
-
 /**
  * Platform detection and capability matrix.
  * Ported from OpenHarness platforms.py
  */
 
-const os = require("os");
-const process = require("process");
+import os from "os";
+import process from "process";
 
 const PlatformName = {
   MACOS: "macos", LINUX: "linux", WINDOWS: "windows", WSL: "wsl", UNKNOWN: "unknown",
@@ -41,4 +39,4 @@ function getPlatformCapabilities(name) {
   };
 }
 
-module.exports = { PlatformName, detectPlatform, getPlatform, getPlatformCapabilities };
+export { PlatformName, detectPlatform, getPlatform, getPlatformCapabilities };

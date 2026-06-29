@@ -1,5 +1,3 @@
-"use strict";
-
 /**
  * API Error Types - structured error classification for API calls.
  * Ported from OpenHarness api/errors.py pattern.
@@ -343,7 +341,7 @@ function isPromptTooLongError(err) {
 
 // === Exports ===
 
-module.exports = {
+export {
   // Error codes
   ApiErrorCode,
 

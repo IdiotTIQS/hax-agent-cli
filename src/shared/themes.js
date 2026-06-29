@@ -1,5 +1,3 @@
-"use strict";
-
 /**
  * Theme System — 5 built-in terminal color themes.
  * Ported from OpenHarness themes/ pattern.
@@ -76,4 +74,4 @@ function listThemes() {
   return Object.entries(THEMES).map(([name, t]) => ({ name, ...t }));
 }
 
-module.exports = { THEMES, applyTheme, listThemes };
+export { THEMES, applyTheme, listThemes };

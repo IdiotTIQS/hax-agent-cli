@@ -1,5 +1,3 @@
-"use strict";
-
 /**
  * Permission Checker - standalone module extracted from engine/agent.js
  * Ported from OpenHarness permissions/checker.py
@@ -14,7 +12,7 @@
  * - isReadOnly passthrough from tool definitions
  */
 
-const path = require("path");
+import path from "path";
 
 // === Permission Modes ===
 
@@ -411,7 +409,7 @@ class PermissionChecker {
 
 // === Exports ===
 
-module.exports = {
+export {
   PermissionMode,
   PermissionDecision,
   PermissionChecker,

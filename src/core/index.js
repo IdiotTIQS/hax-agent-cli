@@ -1,5 +1,3 @@
-"use strict";
-
 /**
  * Core Module - unified exports
  *
@@ -10,14 +8,9 @@
  * - memory: Compaction functions, token estimation
  */
 
-const messages = require("./messages/types");
-const permissions = require("./permissions/checker");
-const api = require("./api/provider-adapter");
-const memory = require("./memory/compaction");
+import * as messages from "./messages/types.js";
+import * as permissions from "./permissions/checker.js";
+import * as api from "./api/provider-adapter.js";
+import * as memory from "./memory/compaction.js";
 
-module.exports = {
-  messages,
-  permissions,
-  api,
-  memory,
-};
+export { messages, permissions, api, memory };

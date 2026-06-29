@@ -1,5 +1,3 @@
-"use strict";
-
 /**
  * Standardized Message Types - ported from OpenHarness engine/messages.py
  *
@@ -7,6 +5,9 @@
  * and stream event types. Eliminates the "plain JS object" gap vs OpenHarness's
  * Pydantic-based ConversationMessage + ContentBlock union.
  */
+
+import fs from "fs";
+import path from "path";
 
 // === Content Block Types ===
 
@@ -380,9 +381,6 @@ function sanitizeConversation(messages) {
 
 // === Helper: Create image from file path ===
 
-const fs = require("fs");
-const path = require("path");
-
 /**
  * Create an ImageBlock from a local file path.
  * Reads the file and base64-encodes it.
@@ -433,7 +431,7 @@ function toOpenAIMessages(messages, systemPrompt = null) {
 
 // === Exports ===
 
-module.exports = {
+export {
   // Types
   ContentBlockType,
   MessageRole,

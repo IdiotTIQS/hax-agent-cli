@@ -1,5 +1,3 @@
-"use strict";
-
 /**
  * Atomic file-write helpers for persistent state.
  * Ported from OpenHarness utils/fs.py
@@ -8,9 +6,9 @@
  * must be written atomically to prevent data loss on crash.
  */
 
-const fs = require("fs");
-const path = require("path");
-const os = require("os");
+import fs from "fs";
+import path from "path";
+import os from "os";
 
 function atomicWriteBytes(filePath, data) {
   const dst = path.resolve(filePath);
@@ -47,4 +45,4 @@ function safeReadJSON(filePath, fallback = null) {
   } catch (_) { return fallback; }
 }
 
-module.exports = { atomicWriteBytes, atomicWriteText, atomicWriteJSON, safeReadJSON };
+export { atomicWriteBytes, atomicWriteText, atomicWriteJSON, safeReadJSON };

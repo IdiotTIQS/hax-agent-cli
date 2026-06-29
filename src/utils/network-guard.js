@@ -1,13 +1,11 @@
-"use strict";
-
 /**
  * HTTP target validation helpers for outbound web tools.
  * Ported from OpenHarness utils/network_guard.py
  */
 
-const { URL } = require("url");
-const dns = require("dns");
-const { promisify } = require("util");
+import { URL } from "url";
+import dns from "dns";
+import { promisify } from "util";
 const resolve4 = promisify(dns.resolve4);
 const resolve6 = promisify(dns.resolve6);
 
@@ -44,4 +42,4 @@ async function ensurePublicHttpUrl(urlStr) {
   return parsed;
 }
 
-module.exports = { validateHttpUrl, ensurePublicHttpUrl, NetworkGuardError, DEFAULT_PORTS };
+export { validateHttpUrl, ensurePublicHttpUrl, NetworkGuardError, DEFAULT_PORTS };

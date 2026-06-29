@@ -1,5 +1,3 @@
-"use strict";
-
 /**
  * Conversation Compaction - ported from OpenHarness services/compact/
  *
@@ -17,7 +15,7 @@
  * - Always preserve session-critical context (goals, memories, key files)
  */
 
-const { estimateMessageTokens } = require("../messages/types");
+import { estimateMessageTokens } from "../messages/types.js";
 
 // === Compaction Types ===
 
@@ -611,7 +609,7 @@ function attachStructuredContext(messages, attachments = {}) {
 
 // === Exports ===
 
-module.exports = {
+export {
   CompactionType,
   CompactionProgressEvent,
   CompactionState,

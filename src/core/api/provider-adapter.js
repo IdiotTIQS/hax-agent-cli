@@ -1,5 +1,3 @@
-"use strict";
-
 /**
  * Provider Adapter - unified protocol for streaming LLM providers.
  * Ported from OpenHarness api/client.py (SupportsStreamingMessages protocol).
@@ -23,9 +21,16 @@
  *   - ApiErrorEvent           - error occurred
  *   - ApiRetryEvent           - retrying after error
  *   - ApiUsageEvent           - token usage info
+ *
+ * Optional-dep strategy: createRequire is used so that the lazy try-guarded
+ * require() calls for @anthropic-ai/sdk and openai are preserved as-is inside
+ * streamMessage(). This avoids making streamMessage() callers async and keeps
+ * the optional-dependency semantics identical to the original CJS code.
  */
 
-const EventEmitter = require("events");
+import EventEmitter from "events";
+import { createRequire } from "module";
+const require = createRequire(import.meta.url);
 
 // === API Stream Event Types ===
 
@@ -578,7 +583,7 @@ function createProviderAdapter(config = {}, env = process.env) {
 
 // === Exports ===
 
-module.exports = {
+export {
   // Types
   ApiStreamEventType,
 

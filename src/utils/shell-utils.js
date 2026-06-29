@@ -1,13 +1,11 @@
-"use strict";
-
 /**
  * Shared shell and subprocess helpers.
  * Ported from OpenHarness utils/shell.py
  */
 
-const { spawn } = require("child_process");
-const path = require("path");
-const { getPlatform, PlatformName } = require("../platforms");
+import { spawn, execSync, spawnSync } from "child_process";
+import path from "path";
+import { getPlatform, PlatformName } from "../platforms.js";
 
 function resolveShellCommand(command, opts = {}) {
   const plat = opts.platformName || getPlatform();
@@ -41,7 +39,7 @@ function spawnShell(command, opts = {}) {
 
 function _which(cmd) {
   try {
-    const result = require("child_process").execSync(
+    const result = execSync(
       process.platform === "win32" ? `where ${cmd} 2>nul` : `which ${cmd} 2>/dev/null`,
       { encoding: "utf-8", timeout: 5000 }
     ).trim();
@@ -51,9 +49,9 @@ function _which(cmd) {
 
 function _bashIsUsable(bashPath) {
   try {
-    const result = require("child_process").spawnSync(bashPath, ["-lc", "exit 0"], { timeout: 5000 });
+    const result = spawnSync(bashPath, ["-lc", "exit 0"], { timeout: 5000 });
     return result.status === 0;
   } catch (_) { return false; }
 }
 
-module.exports = { resolveShellCommand, spawnShell };
+export { resolveShellCommand, spawnShell };

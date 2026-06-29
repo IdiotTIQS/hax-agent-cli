@@ -1,5 +1,3 @@
-"use strict";
-
 /**
  * Cross-platform exclusive file-lock helpers.
  * Ported from OpenHarness utils/file_lock.py
@@ -7,9 +5,10 @@
  * Used to serialise read-modify-write sequences on shared JSON registries.
  */
 
-const fs = require("fs");
-const path = require("path");
-const { getPlatform, PlatformName } = require("../platforms");
+import fs from "fs";
+import path from "path";
+import { getPlatform, PlatformName } from "../platforms.js";
+import { sleep } from "../shared/utils.js";
 
 class SwarmLockError extends Error { constructor(m) { super(m); this.name = "SwarmLockError"; } }
 class SwarmLockUnavailableError extends SwarmLockError { constructor(m) { super(m); this.name = "SwarmLockUnavailableError"; } }
@@ -32,7 +31,6 @@ function _posixLock(lockPath, fn) {
   const lockFile = lockPath + ".lock";
   const maxWait = 10000; const interval = 50; let waited = 0;
   while (fs.existsSync(lockFile) && waited < maxWait) {
-    const { sleep } = require("../shared/utils");
     // Simple spin — in production use proper fcntl
     waited += interval;
   }
@@ -49,4 +47,4 @@ function _windowsLock(lockPath, fn) {
   return _posixLock(lockPath, fn); // Same fallback for Windows
 }
 
-module.exports = { exclusiveFileLock, SwarmLockError, SwarmLockUnavailableError };
+export { exclusiveFileLock, SwarmLockError, SwarmLockUnavailableError };
