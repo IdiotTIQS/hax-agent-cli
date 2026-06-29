@@ -1,5 +1,3 @@
-"use strict";
-
 /**
  * Consolidated pricing data for all supported providers.
  * All prices are per million tokens (USD).
@@ -166,4 +164,4 @@ function getCost(model, inputTokens, outputTokens, cacheWriteTokens, cacheReadTo
   return input + output + cw + cr;
 }
 
-module.exports = { PRICING, getPricing, getCost };
+export { PRICING, getPricing, getCost };

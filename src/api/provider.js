@@ -1,5 +1,3 @@
-"use strict";
-
 /**
  * Provider Clients - full provider suite matching OpenHarness registry.
  *
@@ -7,7 +5,10 @@
  *            Zhipu, DashScope, Ollama, vLLM, OpenRouter
  */
 
-const { withRetry } = require("./retry");
+import fs from "fs";
+import path from "path";
+import os from "os";
+import { withRetry } from "./retry.js";
 
 // === Base OpenAI-compatible client ===
 
@@ -15,7 +16,8 @@ class BaseOpenAICompatible {
   constructor(o = {}) { this.apiKey = o.apiKey; this.apiUrl = o.apiUrl; this.model = o.model; this.name = o.name; this.maxTokens = o.maxTokens || 8192; }
 
   async *stream(req = {}) {
-    const OpenAI = /** @type {any} */ (require("openai").default || require("openai"));
+    const mod = /** @type {any} */ (await import("openai"));
+    const OpenAI = mod.default || mod;
     const client = new OpenAI({ apiKey: this.apiKey, baseURL: this.apiUrl });
     const model = req.model || this.model;
     if (!model) throw new Error(`${this.name}: model is required`);
@@ -107,7 +109,8 @@ class AnthropicProvider {
   get name() { return "anthropic"; }
 
   async *stream(req = {}) {
-    const Anthropic = /** @type {any} */ (require("@anthropic-ai/sdk").default || require("@anthropic-ai/sdk"));
+    const mod = /** @type {any} */ (await import("@anthropic-ai/sdk"));
+    const Anthropic = mod.default || mod;
     const client = new Anthropic({ apiKey: this.apiKey, baseURL: this.apiUrl });
     let text = "", usage = null;
 
@@ -267,7 +270,6 @@ function createProvider(cfg = {}, env = process.env) {
   let apiKey = cfg.apiKey || (entry.envKey ? env[entry.envKey] : null);
   if (!apiKey) {
     try {
-      const fs = require("fs"), path = require("path"), os = require("os");
       const kp = path.join(os.homedir(), ".haxagent", "apikeys.json");
       const saved = JSON.parse(fs.readFileSync(kp, "utf-8"));
       apiKey = saved[name] || saved[entry.name || ""] || null;
@@ -289,4 +291,4 @@ function listProviders() {
   return result;
 }
 
-module.exports = { createProvider, listProviders, REGISTRY, AnthropicProvider, BaseOpenAICompatible };
+export { createProvider, listProviders, REGISTRY, AnthropicProvider, BaseOpenAICompatible };

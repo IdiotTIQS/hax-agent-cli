@@ -1,5 +1,3 @@
-"use strict";
-
 /**
  * API Retry - exponential backoff with jitter.
  * Ported from OpenHarness api/client.py.
@@ -39,4 +37,4 @@ async function withRetry(fn, { maxRetries = 3, baseDelayMs = 1000, maxDelayMs = 
   throw lastErr;
 }
 
-module.exports = { withRetry, isRetryable, parseRetryAfter };
+export { withRetry, isRetryable, parseRetryAfter };

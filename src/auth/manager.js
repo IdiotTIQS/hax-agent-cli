@@ -1,8 +1,7 @@
-"use strict";
 /** Authentication manager. Ported from OpenHarness auth/manager.py */
-const fs = require("fs");
-const path = require("path");
-const os = require("os");
+import fs from "fs";
+import path from "path";
+import os from "os";
 
 const KNOWN_PROVIDERS = ["anthropic", "openai", "deepseek", "groq", "mistral", "google", "moonshot", "zhipu", "dashscope", "openrouter", "ollama", "vllm", "bedrock", "vertex", "copilot", "minimax", "modelscope"];
 
@@ -42,4 +41,4 @@ class AuthManager {
   }
 }
 
-module.exports = { AuthManager, KNOWN_PROVIDERS };
+export { AuthManager, KNOWN_PROVIDERS };

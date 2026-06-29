@@ -1,13 +1,11 @@
-"use strict";
-
 /**
  * Minimal settings management.
  * Loads from ~/.haxagent/settings.json and env vars.
  */
 
-const fs = require("fs");
-const path = require("path");
-const os = require("os");
+import fs from "fs";
+import path from "path";
+import os from "os";
 
 const CONFIG_DIR = path.join(os.homedir(), ".haxagent");
 const CONFIG_FILE = path.join(CONFIG_DIR, "settings.json");
@@ -64,4 +62,4 @@ function deepMerge(target, ...sources) {
   return target;
 }
 
-module.exports = { loadSettings, reloadSettings, saveSettings, CONFIG_DIR, CONFIG_FILE, DEFAULTS };
+export { loadSettings, reloadSettings, saveSettings, CONFIG_DIR, CONFIG_FILE, DEFAULTS };

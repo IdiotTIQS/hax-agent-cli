@@ -1,5 +1,3 @@
-"use strict";
-
 /**
  * Provider Profiles — manage multiple AI provider configurations.
  * Users can define named profiles (claude, gpt, local, etc.) and switch.
@@ -7,9 +5,9 @@
  * Ported from OpenHarness config/settings.py ProviderProfile.
  */
 
-const fs = require("fs");
-const path = require("path");
-const os = require("os");
+import fs from "fs";
+import path from "path";
+import os from "os";
 
 const PROFILES_FILE = path.join(os.homedir(), ".haxagent", "profiles.json");
 
@@ -77,4 +75,4 @@ class ProfileManager {
   get activeName() { return this._active; }
 }
 
-module.exports = { ProfileManager, BUILTIN, PROFILES_FILE };
+export { ProfileManager, BUILTIN, PROFILES_FILE };

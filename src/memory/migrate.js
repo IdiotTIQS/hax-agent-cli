@@ -1,5 +1,4 @@
-"use strict";
-const fs = require("fs"); const path = require("path"); const { getMemoryDir } = require("./memdir");
+import fs from "fs"; import path from "path"; import { getMemoryDir } from "./memdir.js";
 function migrateLegacyMemories() { const dir=getMemoryDir(); const legacy=path.join(dir,"memories.json");
   if(!fs.existsSync(legacy)) return {migrated:0};
   try { const data=JSON.parse(fs.readFileSync(legacy,"utf-8")); let count=0;
@@ -7,4 +6,4 @@ function migrateLegacyMemories() { const dir=getMemoryDir(); const legacy=path.j
     fs.renameSync(legacy,legacy+".bak"); return {migrated:count}; }
   catch(_) { return {migrated:0,error:_.message}; }
 }
-module.exports = { migrateLegacyMemories };
+export { migrateLegacyMemories };

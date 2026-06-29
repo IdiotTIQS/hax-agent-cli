@@ -1,11 +1,9 @@
-"use strict";
-
 /**
  * Context Compaction — micro-compact and full LLM summarization.
  * Ported from OpenHarness services/compact/.
  */
 
-const { estimateStringTokens } = require("../shared/utils");
+import { estimateStringTokens } from "../shared/utils.js";
 
 // === Micro-compact: clear old tool results ===
 
@@ -129,7 +127,7 @@ class CompactionManager {
   }
 }
 
-module.exports = {
+export {
   microcompact,
   fullCompact,
   estimateMessageTokens,

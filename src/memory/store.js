@@ -1,15 +1,13 @@
-"use strict";
-
 /**
  * Durable Memory — file-based persistent memory with signature dedup,
  * TTL expiry, MEMORY.md index, and auto-extraction from conversation.
  * Ported from OpenHarness memory/schema.py + memory/manager.py.
  */
 
-const fs = require("fs");
-const path = require("path");
-const crypto = require("crypto");
-const os = require("os");
+import fs from "fs";
+import path from "path";
+import crypto from "crypto";
+import os from "os";
 
 const MEMORY_DIR = path.join(os.homedir(), ".haxagent", "memories");
 const INDEX_FILE = "MEMORY.md";
@@ -349,4 +347,4 @@ class SessionMemoryStore {
   }
 }
 
-module.exports = { MemoryEntry, MemoryStore, SessionMemoryStore };
+export { MemoryEntry, MemoryStore, SessionMemoryStore };

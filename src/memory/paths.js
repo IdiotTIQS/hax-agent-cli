@@ -1,5 +1,4 @@
-"use strict";
-const path = require("path"); const os = require("os");
+import path from "path"; import os from "os";
 function getProjectMemoryDir(cwd) { return path.join(cwd||process.cwd(),".hax-agent","memory"); }
 function getUserMemoryDir() { return path.join(os.homedir(),".haxagent","memory"); }
-module.exports = { getProjectMemoryDir, getUserMemoryDir };
+export { getProjectMemoryDir, getUserMemoryDir };

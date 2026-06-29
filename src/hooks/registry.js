@@ -1,5 +1,3 @@
-"use strict";
-
 /**
  * Hook System — repository of all hooks separated by event and type.
  * Ported from OpenHarness hooks/ pattern.
@@ -8,8 +6,8 @@
  * fnmatch matchers, priority ordering, and timeout control.
  */
 
-const { EventEmitter } = require("events");
-const { execSync } = require("child_process");
+import { EventEmitter } from "events";
+import { execSync } from "child_process";
 
 // === Hook Events ===
 
@@ -256,7 +254,7 @@ function createDefaultHookRegistry(opts = {}) {
   return registry;
 }
 
-module.exports = {
+export {
   HookEvent, HookType, HookResult, HookDefinition,
   HookRegistry, HookExecutor, createDefaultHookRegistry,
 };

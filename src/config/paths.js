@@ -1,13 +1,11 @@
-"use strict";
-
 /**
  * Path resolution for HaxAgent configuration and data directories.
  * Ported from OpenHarness config/paths.py
  */
 
-const fs = require("fs");
-const path = require("path");
-const os = require("os");
+import fs from "fs";
+import path from "path";
+import os from "os";
 
 const DEFAULT_BASE_DIR = ".haxagent";
 
@@ -62,7 +60,7 @@ function getProjectConfigDir(cwd) {
   return dir;
 }
 
-module.exports = {
+export {
   getConfigDir, getConfigFilePath, getDataDir, getLogsDir,
   getSessionsDir, getTasksDir, getMemoryDir,
   getCronRegistryPath, getPluginsDir, getSkillsDir,
