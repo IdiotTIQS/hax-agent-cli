@@ -1,9 +1,21 @@
 import { getCost } from "../pricing.js";
 
+interface TurnRecord {
+  model: string;
+  input: number;
+  output: number;
+  cost: number;
+  timestamp: number;
+}
+
 class CostTracker {
+  _turns: TurnRecord[];
+  _totalInput: number;
+  _totalOutput: number;
+
   constructor() { this._turns = []; this._totalInput = 0; this._totalOutput = 0; }
 
-  recordTurn(model, input, output) {
+  recordTurn(model: string, input: number, output: number) {
     this._totalInput += input;
     this._totalOutput += output;
     const cost = getCost(model, input, output);

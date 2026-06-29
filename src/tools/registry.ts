@@ -6,27 +6,55 @@ import { execSync } from "child_process";
 import { extendedTools } from "./extended.js";
 import { validateWorkspacePath, isSensitivePath } from "../sandbox/path-validator.js";
 
+interface ToolContext {
+  root: string;
+  registry?: ToolRegistry;
+  session?: Record<string, unknown>;
+  [key: string]: unknown;
+}
+interface ToolResult {
+  ok: boolean;
+  data?: unknown;
+  error?: { code: string; message: string; [key: string]: unknown };
+  durationMs?: number;
+}
+interface ToolDefinition {
+  name: string;
+  description: string;
+  inputSchema: Record<string, unknown>;
+  execute(args: Record<string, unknown>, ctx: ToolContext): Promise<ToolResult>;
+  isReadOnly(args?: Record<string, unknown>): boolean;
+}
+interface ExecError extends Error {
+  stdout?: string;
+  stderr?: string;
+  status?: number;
+}
+
 class ToolRegistry {
-  constructor(o = {}) { this.root = path.resolve(o.root || process.cwd()); this._tools = new Map(); }
-  register(t) { if (!t?.name) throw new Error("Tool needs name"); this._tools.set(t.name.toLowerCase(), t); return this; }
-  execute(name, args = {}, ctx = {}) { const t = this._tools.get(String(name).toLowerCase()); if (!t) throw new Error(`Tool "${name}" not found`); return t.execute(args, { ...ctx, root: this.root, registry: this }); }
+  root: string;
+  _tools: Map<string, ToolDefinition>;
+
+  constructor(o: { root?: string } = {}) { this.root = path.resolve(o.root || process.cwd()); this._tools = new Map(); }
+  register(t: ToolDefinition) { if (!t?.name) throw new Error("Tool needs name"); this._tools.set(t.name.toLowerCase(), t); return this; }
+  execute(name: string, args: Record<string, unknown> = {}, ctx: Partial<ToolContext> = {}) { const t = this._tools.get(String(name).toLowerCase()); if (!t) throw new Error(`Tool "${name}" not found`); return t.execute(args, { ...ctx, root: this.root, registry: this } as ToolContext); }
   list() { return [...this._tools.values()].map(t => ({ name: t.name, description: t.description })); }
   toApiSchema() { return [...this._tools.values()].map(t => ({ name: t.name, description: t.description, input_schema: t.inputSchema })); }
-  get(n) { return this._tools.get(String(n).toLowerCase()) || null; }
+  get(n: string) { return this._tools.get(String(n).toLowerCase()) || null; }
   names() { return [...this._tools.keys()]; }
 }
 
 // === Helpers ===
-function resolvePath(root, p) {
+function resolvePath(root: string, p: string): string {
   var r = path.resolve(root, p);
   var home = path.join((process.env.HOME || process.env.USERPROFILE || ""), ".haxagent");
   // Allow project root, home .haxagent (tool_artifacts, memory, etc.), and temp dirs
   if (r.startsWith(path.resolve(root)) || (home && r.startsWith(home)) || r.startsWith(os.tmpdir())) return r;
   throw new Error("Path outside workspace: " + p);
 }
-function requireString(v, name) { if (typeof v !== "string" || !v.trim()) throw new Error(`${name} is required`); return v.trim(); }
-function _stripHtml(s) { return String(s || "").replace(/<[^>]+>/g, "").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#x27;/g, "'").replace(/&nbsp;/g, " ").trim(); }
-function _cleanDdgUrl(u) {
+function requireString(v: unknown, name: string): string { if (typeof v !== "string" || !v.trim()) throw new Error(`${name} is required`); return v.trim(); }
+function _stripHtml(s: unknown) { return String(s || "").replace(/<[^>]+>/g, "").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#x27;/g, "'").replace(/&nbsp;/g, " ").trim(); }
+function _cleanDdgUrl(u: string) {
   // DuckDuckGo wraps URLs in a redirect; extract the actual URL
   const m = /[?&]uddg=([^&]+)/.exec(u);
   if (m) return decodeURIComponent(m[1]);
@@ -34,7 +62,7 @@ function _cleanDdgUrl(u) {
 }
 
 // === All Tools ===
-const tools = {
+const tools: Record<string, ToolDefinition> = {
   "file.read": {
     name: "file.read", description: "Read a file from the workspace.",
     inputSchema: { type: "object", required: ["path"], properties: { path: { type: "string" }, maxBytes: { type: "number", default: 50000 } } },
@@ -42,7 +70,7 @@ const tools = {
       const fp = resolvePath(ctx.root, requireString(args.path, "path"));
       const stat = fs.statSync(fp);
       if (!stat.isFile()) throw new Error("Not a file");
-      const content = fs.readFileSync(fp, "utf-8").slice(0, args.maxBytes || 50000);
+      const content = fs.readFileSync(fp, "utf-8").slice(0, (args.maxBytes as number) || 50000);
       return { ok: true, data: { path: args.path, content, bytes: Buffer.byteLength(content), lines: content.split("\n").length } };
     },
     isReadOnly: () => true,
@@ -52,8 +80,8 @@ const tools = {
     name: "file.glob", description: "Find files matching a glob pattern.",
     inputSchema: { type: "object", required: ["pattern"], properties: { pattern: { type: "string" }, maxResults: { type: "number", default: 100 } } },
     async execute(args, ctx) {
-      const matches = globSync(args.pattern, { cwd: ctx.root, nodir: true, ignore: ["node_modules/**", ".git/**"], absolute: false }).slice(0, args.maxResults || 100);
-      return { ok: true, data: { pattern: args.pattern, matches, truncated: matches.length >= (args.maxResults || 100) } };
+      const matches = globSync(args.pattern as string, { cwd: ctx.root, nodir: true, ignore: ["node_modules/**", ".git/**"], absolute: false }).slice(0, (args.maxResults as number) || 100);
+      return { ok: true, data: { pattern: args.pattern, matches, truncated: matches.length >= ((args.maxResults as number) || 100) } };
     },
     isReadOnly: () => true,
   },
@@ -62,10 +90,11 @@ const tools = {
     name: "file.search", description: "Search file contents with regex.",
     inputSchema: { type: "object", required: ["query"], properties: { query: { type: "string" }, path: { type: "string", default: "." }, glob: { type: "string" }, maxResults: { type: "number", default: 50 } } },
     async execute(args, ctx) {
-      const dir = args.path ? resolvePath(ctx.root, args.path) : ctx.root;
-      const pattern = new RegExp(args.query, "gi");
-      const matches = []; const max = args.maxResults || 50;
-      const files = globSync(args.glob || "**/*.{js,ts,py,md,txt,json,yaml,yml,css,html}", { cwd: dir, nodir: true, ignore: ["node_modules/**", ".git/**"] });
+      const dir = args.path ? resolvePath(ctx.root, args.path as string) : ctx.root;
+      const pattern = new RegExp(args.query as string, "gi");
+      const matches: Array<{ path: string; line: number; content: string }> = [];
+      const max = (args.maxResults as number) || 50;
+      const files = globSync((args.glob as string) || "**/*.{js,ts,py,md,txt,json,yaml,yml,css,html}", { cwd: dir, nodir: true, ignore: ["node_modules/**", ".git/**"] });
       for (const f of files.slice(0, 200)) {
         if (matches.length >= max) break;
         try {
@@ -91,8 +120,8 @@ const tools = {
       if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
       const existed = fs.existsSync(fp);
       if (existed && args.overwrite === false) throw new Error("File exists and overwrite is false");
-      fs.writeFileSync(fp, args.content, "utf-8");
-      return { ok: true, data: { path: args.path, bytes: Buffer.byteLength(args.content), overwritten: existed } };
+      fs.writeFileSync(fp, args.content as string, "utf-8");
+      return { ok: true, data: { path: args.path, bytes: Buffer.byteLength(args.content as string), overwritten: existed } };
     },
     isReadOnly: () => false,
   },
@@ -106,7 +135,7 @@ const tools = {
       const fp = resolvePath(ctx.root, targetPath);
       if (!fs.existsSync(fp)) throw new Error("File not found: " + args.path);
       let content = fs.readFileSync(fp, "utf-8");
-      const old = args.old_string, nw = args.new_string;
+      const old = args.old_string as string, nw = args.new_string as string;
       if (!content.includes(old)) throw new Error("old_string not found in file");
       const count = (content.match(new RegExp(old.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g")) || []).length;
       if (count > 1 && !args.replace_all) throw new Error(`old_string appears ${count} times. Use replace_all:true or be more specific.`);
@@ -152,17 +181,17 @@ const tools = {
     name: "shell.run", description: "Run a shell command with optional arguments.",
     inputSchema: { type: "object", required: ["command"], properties: { command: { type: "string" }, args: { type: "array", items: { type: "string" } }, cwd: { type: "string" }, timeoutMs: { type: "number", default: 30000 } } },
     async execute(args, ctx) {
-      var cmd = [args.command, ...(args.args || [])].filter(Boolean).join(" ");
-      var sandbox = ctx.session?.sandbox;
+      var cmd = [args.command, ...((args.args as string[]) || [])].filter(Boolean).join(" ");
+      var sandbox = (ctx.session as Record<string, unknown>)?.sandbox as { isRunning?: boolean; execAsync?: (cmd: string, opts: unknown) => Promise<{ exitCode: number; stdout: string; stderr: string }> } | undefined;
 
       // Use sandbox if available and running
       if (sandbox && sandbox.isRunning) {
         try {
-          var result = await sandbox.execAsync(cmd, { timeoutMs: args.timeoutMs || 30000 });
+          var result = await sandbox.execAsync!(cmd, { timeoutMs: (args.timeoutMs as number) || 30000 });
           if (result.exitCode === 0) return { ok: true, data: { command: cmd, stdout: result.stdout, stderr: result.stderr, exitCode: 0 } };
           else return { ok: false, error: { code: "SHELL_ERROR", message: `Exit code ${result.exitCode}`, stdout: result.stdout, stderr: result.stderr, exitCode: result.exitCode } };
         } catch (err) {
-          return { ok: false, error: { code: "SANDBOX_ERROR", message: err.message } };
+          return { ok: false, error: { code: "SANDBOX_ERROR", message: (err as Error).message } };
         }
       }
 
@@ -174,15 +203,16 @@ const tools = {
         }
       }
       try {
-        const stdout = execSync(cmd, /** @type {any} */ ({ cwd: args.cwd || ctx.root, timeout: args.timeoutMs || 30000, maxBuffer: 1024 * 1024, encoding: "utf-8", shell: true }));
+        const stdout = execSync(cmd, { cwd: (args.cwd as string) || ctx.root, timeout: (args.timeoutMs as number) || 30000, maxBuffer: 1024 * 1024, encoding: "utf-8", shell: true } as unknown as Parameters<typeof execSync>[1]);
         return { ok: true, data: { command: cmd, stdout, stderr: "", exitCode: 0 } };
       } catch (err) {
-        return { ok: false, error: { code: "SHELL_ERROR", message: err.message, stdout: err.stdout || "", stderr: err.stderr || "", exitCode: err.status || 1 } };
+        const e = err as ExecError;
+        return { ok: false, error: { code: "SHELL_ERROR", message: e.message, stdout: e.stdout || "", stderr: e.stderr || "", exitCode: e.status || 1 } };
       }
     },
     isReadOnly: (args) => {
       // Read-only shell commands: echo, ls, cat, pwd, etc.
-      const cmd = (args.command || "").toLowerCase();
+      const cmd = ((args?.command as string) || "").toLowerCase();
       const safe = ["echo", "ls", "dir", "pwd", "whoami", "date", "uname", "cat", "head", "tail", "wc", "which", "where", "env", "printenv", "type"];
       return safe.some(s => cmd === s || cmd.startsWith(s + " "));
     },
@@ -194,9 +224,9 @@ const tools = {
     async execute(args) {
       try {
         const r = await fetch(requireString(args.url, "url"));
-        const text = (await r.text()).slice(0, args.maxBytes || 50000);
+        const text = (await r.text()).slice(0, (args.maxBytes as number) || 50000);
         return { ok: true, data: { url: args.url, status: r.status, contentType: r.headers.get("content-type") || "", content: text } };
-      } catch (err) { return { ok: false, error: { code: "FETCH_ERROR", message: err.message } }; }
+      } catch (err) { return { ok: false, error: { code: "FETCH_ERROR", message: (err as Error).message } }; }
     },
     isReadOnly: () => true,
   },
@@ -206,7 +236,7 @@ const tools = {
     inputSchema: { type: "object", required: ["query"], properties: { query: { type: "string" }, maxResults: { type: "number", default: 8 } } },
     async execute(args) {
       const query = requireString(args.query, "query");
-      const maxResults = args.maxResults || 8;
+      const maxResults = (args.maxResults as number) || 8;
 
       try {
         // Use DuckDuckGo HTML endpoint (no API key required)
@@ -220,12 +250,12 @@ const tools = {
         const html = await resp.text();
 
         // Parse search results from DuckDuckGo HTML
-        const results = [];
+        const results: Array<{ title: string; url: string; snippet: string }> = [];
         // Match result blocks: <a class="result__a" href="...">title</a> + <a class="result__snippet">snippet</a>
         const linkRegex = /<a[^>]+class="result__a"[^>]*href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/gi;
         const snippetRegex = /<a[^>]+class="result__snippet"[^>]*>([\s\S]*?)<\/a>/gi;
 
-        const links = [];
+        const links: Array<{ url: string; title: string }> = [];
         let match;
         while ((match = linkRegex.exec(html)) !== null) {
           links.push({
@@ -234,7 +264,7 @@ const tools = {
           });
         }
 
-        const snippets = [];
+        const snippets: string[] = [];
         while ((match = snippetRegex.exec(html)) !== null) {
           snippets.push(_stripHtml(match[1]));
         }
@@ -266,17 +296,17 @@ const tools = {
 
         return { ok: true, data: { query, results, count: results.length } };
       } catch (err) {
-        return { ok: false, error: { code: "SEARCH_ERROR", message: err.message } };
+        return { ok: false, error: { code: "SEARCH_ERROR", message: (err as Error).message } };
       }
     },
     isReadOnly: () => true,
   },
 };
 
-function createDefaultRegistry(root) {
+function createDefaultRegistry(root: string) {
   const r = new ToolRegistry({ root });
   for (const t of Object.values(tools)) r.register(t);
-  for (const t of extendedTools) r.register(t);
+  for (const t of extendedTools) r.register(t as ToolDefinition);
   return r;
 }
 export { ToolRegistry, createDefaultRegistry, tools };

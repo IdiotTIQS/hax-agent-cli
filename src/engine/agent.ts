@@ -12,15 +12,119 @@ import {
   boundedCompletionTokens, rememberToolContext,
 } from "./query.js";
 import { PermissionChecker as CorePermissionChecker, PermissionMode, SENSITIVE_PATH_PATTERNS } from "../core/permissions/checker.js";
+import type { ToolRegistry } from "../tools/registry.js";
 
+// Suppress unused import warnings — these are re-exported below
+void ANSI; void THEME; void styled;
 
 // === Session ===
 
+interface SessionOptions {
+  id?: string;
+  provider?: SessionProvider | null;
+  toolRegistry?: ToolRegistry | null;
+  permissionManager?: CorePermissionChecker | null;
+  hookExecutor?: HookExecutor | null;
+  pluginRegistry?: PluginRegistry | null;
+  sandbox?: Sandbox | null;
+  goal?: SessionGoal | null;
+}
+
+interface SessionProvider {
+  model?: string;
+  name?: string;
+  stream(opts: unknown): AsyncIterable<StreamChunk>;
+  apiKey?: string;
+  apiUrl?: string;
+}
+
+interface StreamChunk {
+  type: string;
+  delta?: string;
+  text?: string;
+  toolUses?: ToolUse[];
+  usage?: UsageInfo;
+  inputTokens?: number;
+  outputTokens?: number;
+  message?: string;
+  [key: string]: unknown;
+}
+
+interface ToolUse {
+  id?: string;
+  name: string;
+  input?: Record<string, unknown>;
+}
+
+interface UsageInfo {
+  inputTokens?: number;
+  outputTokens?: number;
+  [key: string]: unknown;
+}
+
+interface AgentToolResult {
+  ok: boolean;
+  data?: ToolResultData;
+  error?: { code: string; message: string };
+  durationMs?: number;
+}
+
+interface ToolResultData {
+  content?: string;
+  _offloaded?: unknown;
+  [key: string]: unknown;
+}
+
+interface PluginRegistry {
+  runHook?(event: string, payload: unknown): Promise<void>;
+}
+
+interface Sandbox {
+  isRunning: boolean;
+  execAsync(cmd: string, opts?: unknown): Promise<{ exitCode: number; stdout: string; stderr: string }>;
+}
+
+interface SessionGoal {
+  enabled?: boolean;
+  text?: string;
+  maxContinuations?: number;
+}
+
+interface AssistantMessage {
+  role: string;
+  content: string;
+  reasoning_content?: string;
+  tool_uses?: ToolUse[];
+  internal?: boolean;
+}
+
 class Session {
-  constructor(o = {}) {
+  id: string;
+  provider: SessionProvider | null;
+  toolRegistry: ToolRegistry | null;
+  permissionManager: CorePermissionChecker | null;
+  hookExecutor: HookExecutor | null;
+  pluginRegistry: PluginRegistry | null;
+  sandbox: Sandbox | null;
+  messages: Array<AssistantMessage | { role: string; content: unknown; internal?: boolean }>;
+  isStreaming: boolean;
+  responseInterrupted: boolean;
+  responseAbortController: AbortController | null;
+  inputTokens: number;
+  outputTokens: number;
+  toolCallCount: number;
+  turnCount: number;
+  goal: SessionGoal | null;
+  _modifiedFiles: Set<string>;
+  // Optional fields used by tools/session-memory
+  _thinking?: boolean;
+  _thinkIntensity?: unknown;
+  settings?: unknown;
+
+  constructor(o: SessionOptions = {}) {
     this.id = o.id || `s_${Date.now().toString(36)}`;
-    this.provider = o.provider;
-    this.toolRegistry = o.toolRegistry;
+    this.provider = o.provider || null;
+    this.toolRegistry = o.toolRegistry || null;
     this.permissionManager = o.permissionManager || null;
     this.hookExecutor = o.hookExecutor || null;
     this.pluginRegistry = o.pluginRegistry || null;
@@ -33,7 +137,8 @@ class Session {
     this.goal = o.goal || null;
     this._modifiedFiles = new Set();
   }
-  getStatusLine() {
+
+  getStatusLine(): string {
     const m = this.provider?.model || "?";
     const t = this.inputTokens + this.outputTokens;
     const pm = this.permissionManager?.mode || "normal";
@@ -42,6 +147,34 @@ class Session {
 }
 
 // === Hook Executor ===
+
+interface HookEntry {
+  event: string;
+  handler: (payload: HookPayload) => Promise<HookResult | void>;
+  matcher: string | RegExp | null;
+  priority: number;
+}
+
+interface HookPayload {
+  toolName?: string;
+  pattern?: string;
+  [key: string]: unknown;
+}
+
+interface HookResult {
+  blocked?: boolean;
+  reason?: string;
+}
+
+interface HookRunResult {
+  blocked: boolean;
+  reason?: string;
+  results: HookResult[];
+}
+
+interface HookExecutorOptions {
+  pluginRegistry?: PluginRegistry | null;
+}
 
 class HookEvent {
   static SESSION_START = "session.start";
@@ -57,29 +190,34 @@ class HookEvent {
 }
 
 class HookExecutor {
-  constructor(o = {}) {
-    this._hooks = new Map(); // event -> [{ handler, matcher, priority }]
+  _hooks: Map<string, HookEntry[]>;
+  _registry: PluginRegistry | null;
+
+  constructor(o: HookExecutorOptions = {}) {
+    this._hooks = new Map();
     this._registry = o.pluginRegistry || null;
   }
 
-  register(event, handler, opts = {}) {
+  register(
+    event: string,
+    handler: (payload: HookPayload) => Promise<HookResult | void>,
+    opts: { matcher?: string | RegExp | null; priority?: number } = {}
+  ): void {
     if (!this._hooks.has(event)) this._hooks.set(event, []);
-    const entry = { event, handler, matcher: opts.matcher || null, priority: opts.priority || 0 };
-    const list = this._hooks.get(event);
+    const entry: HookEntry = { event, handler, matcher: opts.matcher || null, priority: opts.priority || 0 };
+    const list = this._hooks.get(event)!;
     list.push(entry);
     list.sort((a, b) => b.priority - a.priority);
   }
 
-  async run(eventName, payload = {}) {
-    // Run plugin hooks first
+  async run(eventName: string, payload: HookPayload = {}): Promise<HookRunResult> {
     if (this._registry) {
       try { await this._registry.runHook?.(eventName, payload); } catch (_) {}
     }
 
     const hooks = this._hooks.get(eventName) || [];
-    const results = [];
+    const results: HookResult[] = [];
     for (const h of hooks) {
-      // Matcher check: if matcher is a string fnmatch against toolName or pattern
       if (h.matcher) {
         const target = payload.toolName || payload.pattern || "";
         if (!this._match(target, h.matcher)) continue;
@@ -87,15 +225,14 @@ class HookExecutor {
       try {
         const r = await h.handler(payload);
         if (r) results.push(r);
-        if (r?.blocked) return { blocked: true, reason: r.reason, results };
+        if (r && r.blocked) return { blocked: true, reason: r.reason, results };
       } catch (_) {}
     }
     return { blocked: false, results };
   }
 
-  _match(target, matcher) {
+  _match(target: string, matcher: string | RegExp): boolean {
     if (typeof matcher === "string") {
-      // fnmatch-style: convert glob to regex
       const re = new RegExp("^" + matcher.replace(/\*/g, ".*").replace(/\?/g, ".") + "$", "i");
       return re.test(target);
     }
@@ -114,10 +251,38 @@ class PermissionChecker extends CorePermissionChecker {}
 
 // === Agent Engine ===
 
+interface AgentEngineOptions {
+  session?: Session;
+  approvalCallback?: ((name: string, input: Record<string, unknown>) => Promise<string>) | null;
+  projectRoot?: string;
+  maxToolTurns?: number;
+  skillRegistry?: SkillRegistry | null;
+  skillSystemPrompt?: string;
+  pluginHooks?: unknown[];
+}
+
+interface SkillRegistry {
+  size?: number;
+  buildSystemPrompt(): string;
+}
+
+interface SendMessageOptions {
+  system?: string;
+}
+
 class AgentEngine extends EventEmitter {
-  constructor(o = {}) {
+  session: Session;
+  _approvalCallback: ((name: string, input: Record<string, unknown>) => Promise<string>) | null;
+  projectRoot: string;
+  maxToolTurns: number;
+  _skillRegistry: SkillRegistry | null;
+  _skillSystemPrompt: string;
+  _pluginHooks: unknown[];
+  _queryContext: QueryContext;
+
+  constructor(o: AgentEngineOptions = {}) {
     super();
-    this.session = o.session;
+    this.session = o.session!;
     this._approvalCallback = o.approvalCallback || null;
     this.projectRoot = o.projectRoot || process.cwd();
     this.maxToolTurns = o.maxToolTurns ?? 200;
@@ -133,20 +298,18 @@ class AgentEngine extends EventEmitter {
     });
   }
 
-  get queryContext() { return this._queryContext; }
+  get queryContext(): QueryContext { return this._queryContext; }
 
-  async *sendMessage(content, opts = {}) {
+  async *sendMessage(content: string, opts: SendMessageOptions = {}): AsyncGenerator<Record<string, unknown>> {
     const s = this.session;
     s.messages.push({ role: "user", content });
     s.isStreaming = true; s.responseInterrupted = false;
     s.responseAbortController = new AbortController(); s.turnCount++;
 
-    // Run user_prompt_submit hooks
     if (s.hookExecutor) {
       await s.hookExecutor.run(HookEvent.USER_PROMPT_SUBMIT, { prompt: content, session: s });
     }
 
-    // Track goal
     this._queryContext.setGoal(content);
 
     yield { type: "turn.started", sessionId: s.id };
@@ -157,7 +320,7 @@ class AgentEngine extends EventEmitter {
       yield* this._runToolLoop(stableSystem, s.responseAbortController.signal, hasCustomSystem);
     } catch (err) {
       if (s.responseInterrupted) yield { type: "turn.interrupted" };
-      else yield { type: "turn.failed", error: { message: err.message } };
+      else yield { type: "turn.failed", error: { message: (err as Error).message } };
     } finally { s.isStreaming = false; s.responseAbortController = null; }
 
     // Goal continuation
@@ -170,19 +333,22 @@ class AgentEngine extends EventEmitter {
         catch (_) { break; }
         finally { s.responseAbortController = null; }
         const last = s.messages[s.messages.length - 1];
-        if (last?.role === "assistant" && (last.content || "").match(/GOAL_STATUS:\s*complete|blocked/i)) break;
+        if (last?.role === "assistant" && typeof last.content === "string" && last.content.match(/GOAL_STATUS:\s*complete|blocked/i)) break;
       }
     }
 
-    // Run session end hooks
     if (s.hookExecutor) {
       await s.hookExecutor.run(HookEvent.SESSION_END, { session: s, turnCount: s.turnCount });
     }
   }
 
-  interrupt() { const s = this.session; s.responseInterrupted = true; s.responseAbortController?.abort(); }
+  interrupt(): void { const s = this.session; s.responseInterrupted = true; s.responseAbortController?.abort(); }
 
-  async *_runToolLoop(stableSystem, signal, hasCustomSystem = false) {
+  async *_runToolLoop(
+    stableSystem: string,
+    signal: AbortSignal,
+    hasCustomSystem = false
+  ): AsyncGenerator<Record<string, unknown>> {
     const s = this.session;
     const registry = s.toolRegistry;
     const pm = s.permissionManager;
@@ -191,26 +357,24 @@ class AgentEngine extends EventEmitter {
     let msgs = [...s.messages];
     let ptlRetries = 0;
     const MAX_PTL_RETRIES = 3;
-    // Only inject dynamic reminder for default system prompt path,
-    // and only for Anthropic (allows consecutive user messages safely).
     const allowReminder = !hasCustomSystem && s.provider?.name === "anthropic";
 
     for (let turn = 0; turn < this.maxToolTurns; turn++) {
       if (signal.aborted) break;
 
-      // 每轮注入动态上下文为 system-reminder(不污染稳定 system 前缀)
       const dynamicReminder = allowReminder ? this._buildDynamicContextReminder() : null;
       const msgsWithReminder = dynamicReminder
         ? [...msgs, { role: "user", content: dynamicReminder, internal: true }]
         : msgs;
 
-      // === API Call with bounded tokens ===
       const maxTok = boundedCompletionTokens(ctx.maxTokens, ctx.contextWindowTokens);
-      let text = ""; let toolUses = []; let usage = null;
-      let reasoningText = ""; // Accumulate DeepSeek V4 reasoning_content
+      let text = "";
+      let toolUses: ToolUse[] = [];
+      let usage: UsageInfo | null = null;
+      let reasoningText = "";
 
       try {
-        for await (const chunk of s.provider.stream({
+        for await (const chunk of s.provider!.stream({
           messages: msgsWithReminder,
           system: stableSystem,
           tools: registry?.toApiSchema() || [],
@@ -219,25 +383,25 @@ class AgentEngine extends EventEmitter {
           thinkIntensity: s._thinkIntensity || null,
           enableCache: s.provider?.name === "anthropic",
         })) {
-          if (chunk.type === "text") { text += chunk.delta; yield { type: "message.delta", delta: chunk.delta }; }
-          else if (chunk.type === "thinking") {
-            if (chunk.delta) reasoningText += chunk.delta;
-            yield chunk;
+          const c = chunk as StreamChunk;
+          if (c.type === "text") { text += c.delta; yield { type: "message.delta", delta: c.delta }; }
+          else if (c.type === "thinking") {
+            if (c.delta) reasoningText += c.delta;
+            yield c as Record<string, unknown>;
           }
-          else if (chunk.type === "tool_uses") { toolUses = chunk.toolUses || []; text = chunk.text || text; usage = chunk.usage; }
-          else if (chunk.type === "usage") { usage = chunk; s.inputTokens += chunk.inputTokens || 0; s.outputTokens += chunk.outputTokens || 0; yield chunk; }
-          else if (chunk.type === "error") {
-            // Reactive compaction: if prompt too long, compact and retry
-            if (isPromptTooLongError(chunk) && ptlRetries < MAX_PTL_RETRIES) {
+          else if (c.type === "tool_uses") { toolUses = c.toolUses || []; text = c.text || text; usage = c.usage || null; }
+          else if (c.type === "usage") { usage = c; s.inputTokens += c.inputTokens || 0; s.outputTokens += c.outputTokens || 0; yield c as Record<string, unknown>; }
+          else if (c.type === "error") {
+            if (isPromptTooLongError(c) && ptlRetries < MAX_PTL_RETRIES) {
               ptlRetries++;
               yield { type: "status", message: `Prompt too long; compacting and retrying (${ptlRetries}/${MAX_PTL_RETRIES})...` };
               if (hooks) await hooks.run(HookEvent.PRE_COMPACT, { messages: msgs, session: s });
               msgs = this._compactMessages(msgs);
               if (hooks) await hooks.run(HookEvent.POST_COMPACT, { messages: msgs, session: s });
-              turn--; // Don't count this turn
-              break; // Retry the loop iteration
+              turn--;
+              break;
             }
-            yield { type: "turn.failed", error: { message: chunk.message } }; return;
+            yield { type: "turn.failed", error: { message: c.message } }; return;
           }
         }
       } catch (err) {
@@ -248,14 +412,13 @@ class AgentEngine extends EventEmitter {
           turn--;
           continue;
         }
-        yield { type: "turn.failed", error: { message: err.message } }; return;
+        yield { type: "turn.failed", error: { message: (err as Error).message } }; return;
       }
 
-      if (usage) yield { type: "usage", inputTokens: usage.inputTokens || 0, outputTokens: usage.outputTokens || 0 };
+      if (usage) yield { type: "usage", inputTokens: (usage as UsageInfo).inputTokens || 0, outputTokens: (usage as UsageInfo).outputTokens || 0 };
 
-      // No tools -> done
       if (!toolUses.length) {
-        var aMsg = { role: "assistant", content: text };
+        const aMsg: AssistantMessage = { role: "assistant", content: text };
         if (reasoningText) aMsg.reasoning_content = reasoningText;
         msgs.push(aMsg);
         s.messages.push({ ...aMsg });
@@ -263,19 +426,16 @@ class AgentEngine extends EventEmitter {
         return;
       }
 
-      // Track assistant message with reasoning_content for DeepSeek V4
-      // and tool_uses (with ids) so subsequent _toMessages can round-trip them.
-      var aMsg = { role: "assistant", content: text };
+      const aMsg: AssistantMessage = { role: "assistant", content: text };
       if (reasoningText) aMsg.reasoning_content = reasoningText;
       if (toolUses.length) aMsg.tool_uses = toolUses;
       msgs.push(aMsg);
 
-      // === Tool Execution (sequential for safety) ===
-      const results = [];
+      const results: unknown[] = [];
       for (const tu of toolUses) {
-        const name = tu.name, input = tu.input || {};
+        const name = tu.name;
+        const input: Record<string, unknown> = (tu.input || {}) as Record<string, unknown>;
 
-        // Pre-tool hook
         if (hooks) {
           const hookResult = await hooks.run(HookEvent.PRE_TOOL_USE, { toolName: name, args: input, session: s });
           if (hookResult?.blocked) {
@@ -284,13 +444,11 @@ class AgentEngine extends EventEmitter {
           }
         }
 
-        // Permission check
         if (pm) {
           const tool = registry?.get ? registry.get(name) : null;
           const isReadOnly = tool?.isReadOnly ? tool.isReadOnly(input) : false;
-          const pr = pm.evaluate(name, { isReadOnly, filePath: input.path || null, command: input.command || null });
+          const pr = pm.evaluate(name, { isReadOnly, args: input });
           if (!pr.allowed) {
-            // If requires confirmation and we have a callback, ask user
             if (pr.requiresConfirmation && this._approvalCallback) {
               const answer = await this._approvalCallback(name, input);
               if (answer !== "approve" && answer !== "always") {
@@ -308,18 +466,16 @@ class AgentEngine extends EventEmitter {
         }
 
         yield { type: "tool.start", name, input };
-        let execResult;
+        let execResult: AgentToolResult;
         try {
-          execResult = await registry.execute(name, input, { root: this.projectRoot, session: s });
+          execResult = await registry!.execute(name, input, { root: this.projectRoot, session: s as unknown as Record<string, unknown> }) as AgentToolResult;
           s.toolCallCount++;
         } catch (err) {
-          execResult = { ok: false, error: { code: "EXECUTION_ERROR", message: err.message } };
+          execResult = { ok: false, error: { code: "EXECUTION_ERROR", message: (err as Error).message } };
         }
 
-        // Offload large outputs
         if (execResult.ok && execResult.data) {
           const output = typeof execResult.data.content === "string" ? execResult.data.content :
-                         typeof execResult.data === "string" ? execResult.data :
                          JSON.stringify(execResult.data);
           const offloaded = offloadToolOutput(name, tu.id || name, output);
           if (offloaded.file) execResult.data._offloaded = offloaded;
@@ -327,10 +483,8 @@ class AgentEngine extends EventEmitter {
 
         yield { type: "tool.result", name, isError: !execResult.ok, data: execResult.data, error: execResult.error, durationMs: execResult.durationMs };
 
-        // Track context
         rememberToolContext(ctx, name, input, execResult.data?.content || JSON.stringify(execResult.data || ""));
 
-        // Post-tool hook
         if (hooks) await hooks.run(HookEvent.POST_TOOL_USE, { toolName: name, args: input, result: execResult, session: s });
 
         results.push({
@@ -342,27 +496,27 @@ class AgentEngine extends EventEmitter {
       }
 
       msgs.push({ role: "user", content: results });
-      s.messages.push(...msgs.slice(-2));
+      s.messages.push(...(msgs.slice(-2) as typeof s.messages));
     }
 
     yield { type: "tool.limit", maxToolTurns: this.maxToolTurns };
   }
 
   /** Simple compaction — truncate old messages */
-  _compactMessages(msgs) {
+  _compactMessages(msgs: typeof Session.prototype.messages): typeof Session.prototype.messages {
     if (msgs.length <= 4) return msgs;
     const keep = msgs.slice(-Math.floor(msgs.length * 0.6));
     const summary = `[Conversation compacted: ${msgs.length - keep.length} older messages summarized. Continue from here.]`;
     return [{ role: "user", content: summary }, ...keep];
   }
 
-  _getSkillsPrompt() {
-    if (this._skillRegistry?.size > 0) return this._skillRegistry.buildSystemPrompt();
+  _getSkillsPrompt(): string {
+    if (this._skillRegistry?.size && this._skillRegistry.size > 0) return this._skillRegistry.buildSystemPrompt();
     return this._skillSystemPrompt || "";
   }
 
   /** Return the stable system prompt prefix (used for prompt caching). */
-  _buildStableSystemPrompt() {
+  _buildStableSystemPrompt(): string {
     const skillsPrompt = this._getSkillsPrompt();
     return [
       "You are Hax Agent, a professional AI coding assistant with deep expertise in software development.",
@@ -393,14 +547,14 @@ class AgentEngine extends EventEmitter {
   }
 
   /** Return the per-turn dynamic context summary, injected as a separate user message. */
-  _buildDynamicContextReminder() {
+  _buildDynamicContextReminder(): string | null {
     const ctx = this._queryContext.buildContextSummary();
     if (!ctx) return null;
     return `<system-reminder>\nCurrent Context:\n${ctx}\n</system-reminder>`;
   }
 
   /** Compatibility: legacy callers can still fetch the full system prompt (not split). */
-  _buildSystemPrompt() {
+  _buildSystemPrompt(): string {
     const stable = this._buildStableSystemPrompt();
     const dynamic = this._buildDynamicContextReminder();
     return dynamic ? `${stable}\n\n${dynamic}` : stable;

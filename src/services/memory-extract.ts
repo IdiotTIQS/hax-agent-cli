@@ -27,17 +27,47 @@ const MemoryCategory = {
   WORKFLOW: "workflow",                 // "The deploy process involves..."
 };
 
+// === Interfaces ===
+
+interface MemoryEntryOptions {
+  id?: string;
+  content?: string;
+  category?: string;
+  confidence?: number;
+  source?: string;
+  timestamp?: number;
+  expiresAt?: number | null;
+  tags?: string[];
+  occurrenceCount?: number;
+}
+
+interface MemoryExtractorOptions {
+  maxExtractionsPerSession?: number;
+  minTurnsBetweenExtractions?: number;
+  existingMemories?: MemoryEntry[];
+}
+
 // === Memory Entry ===
 
 class MemoryEntry {
-  constructor(o = {}) {
+  id: string;
+  content: string;
+  category: string;
+  confidence: number;
+  source: string;
+  timestamp: number;
+  expiresAt: number | null;
+  tags: string[];
+  occurrenceCount: number;
+
+  constructor(o: MemoryEntryOptions = {}) {
     this.id = o.id || crypto.createHash("sha256").update(o.content || "").digest("hex").slice(0, 12);
     this.content = o.content || "";
     this.category = o.category || MemoryCategory.PROJECT_FACT;
     this.confidence = o.confidence || 3; // 1-5
     this.source = o.source || "extracted"; // "extracted" | "manual" | "imported"
     this.timestamp = o.timestamp || Date.now();
-    this.expiresAt = o.expiresAt || null;
+    this.expiresAt = o.expiresAt ?? null;
     this.tags = o.tags || [];
     this.occurrenceCount = o.occurrenceCount || 1;
   }
@@ -61,7 +91,7 @@ class MemoryEntry {
     };
   }
 
-  static fromJSON(json) {
+  static fromJSON(json: MemoryEntryOptions) {
     return new MemoryEntry(json);
   }
 }
@@ -69,7 +99,13 @@ class MemoryEntry {
 // === Memory Extractor ===
 
 class MemoryExtractor {
-  constructor(options = {}) {
+  _lastExtractionTime: number | null;
+  _extractionCount: number;
+  _maxExtractionsPerSession: number;
+  _minTurnsBetweenExtractions: number;
+  _existingMemories: MemoryEntry[];
+
+  constructor(options: MemoryExtractorOptions = {}) {
     this._lastExtractionTime = null;
     this._extractionCount = 0;
     this._maxExtractionsPerSession = options.maxExtractionsPerSession || 5;
@@ -79,10 +115,9 @@ class MemoryExtractor {
 
   /**
    * Check if extraction should run now.
-   * @param {number} turnCount — current turn number
-   * @returns {boolean}
+   * @param turnCount — current turn number
    */
-  shouldExtract(turnCount) {
+  shouldExtract(turnCount: number): boolean {
     if (this._extractionCount >= this._maxExtractionsPerSession) return false;
     if (this._lastExtractionTime) {
       const elapsed = Date.now() - this._lastExtractionTime;
@@ -93,11 +128,10 @@ class MemoryExtractor {
 
   /**
    * Build the extraction prompt for the LLM.
-   * @param {Array} messages — recent conversation messages
-   * @param {Array} existingMemories — current memory entries
-   * @returns {string} prompt for LLM
+   * @param messages — recent conversation messages
+   * @param existingMemories — current memory entries
    */
-  buildExtractionPrompt(messages, existingMemories = []) {
+  buildExtractionPrompt(messages: Array<{ role?: string; content?: unknown }>, existingMemories: MemoryEntry[] = []): string {
     // Format recent messages
     const conversationText = messages
       .slice(-10)
@@ -106,8 +140,8 @@ class MemoryExtractor {
         const content = typeof m.content === "string"
           ? m.content
           : Array.isArray(m.content)
-            ? m.content.filter((c) => c.type === "text" || typeof c === "string")
-                .map((c) => typeof c === "string" ? c : c.text).join(" ")
+            ? (m.content as unknown[]).filter((c) => (c as any).type === "text" || typeof c === "string")
+                .map((c) => typeof c === "string" ? c : (c as any).text).join(" ")
             : String(m.content);
         return `[${role}] ${content.slice(0, 500)}`;
       })
@@ -150,25 +184,24 @@ If nothing new is worth remembering, return an empty array.`;
 
   /**
    * Parse LLM response into memory entries.
-   * @param {string} llmResponse — raw LLM output
-   * @param {Array} existingMemories — current memories for dedup
-   * @returns {Array<MemoryEntry>}
+   * @param llmResponse — raw LLM output
+   * @param existingMemories — current memories for dedup
    */
-  parseExtraction(llmResponse, existingMemories = []) {
+  parseExtraction(llmResponse: string, existingMemories: MemoryEntry[] = []): MemoryEntry[] {
     try {
       // Try to extract JSON from response
       const jsonMatch = llmResponse.match(/\[[\s\S]*\]/);
       if (!jsonMatch) return [];
 
-      const items = JSON.parse(jsonMatch[0]);
-      const entries = [];
+      const items = JSON.parse(jsonMatch[0]) as Array<{ content?: string; category?: string; confidence?: number }>;
+      const entries: MemoryEntry[] = [];
 
       for (const item of items) {
         if (!item.content) continue;
 
         const entry = new MemoryEntry({
           content: item.content,
-          category: Object.values(MemoryCategory).includes(item.category)
+          category: Object.values(MemoryCategory).includes(item.category as string)
             ? item.category
             : MemoryCategory.PROJECT_FACT,
           confidence: Math.min(5, Math.max(1, item.confidence || 3)),
@@ -190,14 +223,13 @@ If nothing new is worth remembering, return an empty array.`;
 
   /**
    * Merge extracted memories with existing ones.
-   * @param {Array<MemoryEntry>} newMemories
-   * @param {Array<MemoryEntry>} existingMemories
-   * @returns {Object} { added, updated, unchanged }
+   * @param newMemories
+   * @param existingMemories
    */
-  mergeMemories(newMemories, existingMemories) {
-    const added = [];
-    const updated = [];
-    const unchanged = [];
+  mergeMemories(newMemories: MemoryEntry[], existingMemories: MemoryEntry[]): { added: MemoryEntry[]; updated: MemoryEntry[]; unchanged: MemoryEntry[] } {
+    const added: MemoryEntry[] = [];
+    const updated: MemoryEntry[] = [];
+    const unchanged: MemoryEntry[] = [];
 
     for (const newMem of newMemories) {
       const existing = existingMemories.find(
@@ -226,7 +258,7 @@ If nothing new is worth remembering, return an empty array.`;
   /**
    * Record an extraction attempt.
    */
-  recordExtraction() {
+  recordExtraction(): void {
     this._lastExtractionTime = Date.now();
     this._extractionCount++;
   }
@@ -234,7 +266,7 @@ If nothing new is worth remembering, return an empty array.`;
   /**
    * Check if a memory entry is a duplicate of existing ones.
    */
-  _isDuplicate(entry, existing) {
+  _isDuplicate(entry: MemoryEntry, existing: MemoryEntry[]): boolean {
     if (existing.length === 0) return false;
 
     const sig = entry.signature;
@@ -263,11 +295,10 @@ If nothing new is worth remembering, return an empty array.`;
 
 /**
  * Build a complete extraction request for a provider.
- * @param {Array} messages
- * @param {Array} existingMemories
- * @returns {Object} { messages, system }
+ * @param messages
+ * @param existingMemories
  */
-function buildExtractionRequest(messages, existingMemories = []) {
+function buildExtractionRequest(messages: Array<{ role?: string; content?: unknown }>, existingMemories: MemoryEntry[] = []): { messages: Array<{ role: string; content: string }>; system: string; maxTokens: number; temperature: number } {
   const extractor = new MemoryExtractor();
   const prompt = extractor.buildExtractionPrompt(messages, existingMemories);
 

@@ -10,16 +10,68 @@
  *   toolRegistry.registerMCP(tools);
  */
 
-import { spawn } from "child_process";
+import { spawn, ChildProcessWithoutNullStreams } from "child_process";
 import { EventEmitter } from "events";
 import path from "path";
 import fs from "fs";
 import os from "os";
 
+// === Interfaces ===
+
+interface McpServerConfigOptions {
+  name?: string;
+  type?: string;
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
+  cwd?: string;
+  url?: string;
+  headers?: Record<string, string>;
+  enabled?: boolean;
+  configDir?: string;
+}
+
+interface McpToolInfo {
+  name: string;
+  description: string;
+  inputSchema: Record<string, unknown>;
+  isReadOnly: () => boolean;
+}
+
+interface McpServerEntry {
+  config: McpServerConfig;
+  process: ChildProcessWithoutNullStreams | null;
+  tools: McpToolInfo[];
+  status: string;
+  error: string | null;
+  restartCount: number;
+  _httpClient?: { url: string; headers: Record<string, string> };
+}
+
+interface JsonRpcResponse {
+  id?: unknown;
+  error?: { message?: string };
+  tools?: unknown[];
+  resources?: unknown[];
+  contents?: unknown;
+  content?: unknown;
+  [key: string]: unknown;
+}
+
 // === MCP Server Config ===
 
 class McpServerConfig {
-  constructor(o = {}) {
+  name: string;
+  type: string;
+  command: string;
+  args: string[];
+  env: Record<string, string>;
+  cwd: string;
+  url: string;
+  headers: Record<string, string>;
+  enabled: boolean;
+
+  constructor(o: McpServerConfigOptions = {}) {
     this.name = o.name || "";
     this.type = o.type || "stdio"; // "stdio" | "http" | "ws"
     // stdio
@@ -37,7 +89,11 @@ class McpServerConfig {
 // === MCP Client Manager ===
 
 class McpClientManager extends EventEmitter {
-  constructor(o = {}) {
+  _servers: Map<string, McpServerEntry>;
+  _configDir: string;
+  _defaultConfigPath: string;
+
+  constructor(o: McpServerConfigOptions = {}) {
     super();
     this._servers = new Map(); // name -> { config, process, tools, status }
     this._configDir = o.configDir || path.join(os.homedir(), ".haxagent", "mcp");
@@ -45,7 +101,7 @@ class McpClientManager extends EventEmitter {
   }
 
   /** Add a server configuration */
-  addServer(name, config) {
+  addServer(name: string, config: McpServerConfigOptions | McpServerConfig) {
     const cfg = config instanceof McpServerConfig ? config : new McpServerConfig({ ...config, name });
     this._servers.set(name, {
       config: cfg,
@@ -59,7 +115,7 @@ class McpClientManager extends EventEmitter {
   }
 
   /** Remove a server and stop it if running */
-  removeServer(name) {
+  removeServer(name: string) {
     const info = this._servers.get(name);
     if (info) this._stopServer(name, info);
     this._servers.delete(name);
@@ -68,7 +124,7 @@ class McpClientManager extends EventEmitter {
 
   /** Start all enabled servers */
   async startAll() {
-    const promises = [];
+    const promises: Promise<McpServerEntry>[] = [];
     for (const [name, info] of this._servers) {
       if (info.config.enabled) promises.push(this.startServer(name));
     }
@@ -76,7 +132,7 @@ class McpClientManager extends EventEmitter {
   }
 
   /** Start a single server */
-  async startServer(name) {
+  async startServer(name: string): Promise<McpServerEntry> {
     const info = this._servers.get(name);
     if (!info) throw new Error(`Unknown MCP server: ${name}`);
     if (info.status === "running") return info;
@@ -98,14 +154,14 @@ class McpClientManager extends EventEmitter {
       this.emit("started", { name, tools: info.tools.length });
     } catch (err) {
       info.status = "error";
-      info.error = err.message;
-      this.emit("error", { name, error: err.message });
+      info.error = (err as Error).message;
+      this.emit("error", { name, error: (err as Error).message });
     }
     return info;
   }
 
   /** Stop a server */
-  stopServer(name) {
+  stopServer(name: string) {
     const info = this._servers.get(name);
     if (!info) return;
     this._stopServer(name, info);
@@ -118,9 +174,9 @@ class McpClientManager extends EventEmitter {
   }
 
   /** Discover all tools from running servers */
-  async discoverTools(name = null) {
-    const tools = [];
-    const servers = name ? [[name, this._servers.get(name)]] : [...this._servers.entries()];
+  async discoverTools(name: string | null = null) {
+    const tools: Array<McpToolInfo & { _mcpServer: string; execute: (args: Record<string, unknown>, ctx: unknown) => Promise<unknown> }> = [];
+    const servers = name ? [[name, this._servers.get(name)] as [string, McpServerEntry | undefined]] : [...this._servers.entries()];
 
     for (const [n, info] of servers) {
       if (!info || info.status !== "running") continue;
@@ -140,12 +196,12 @@ class McpClientManager extends EventEmitter {
   }
 
   /** Get server status */
-  getStatus(name = null) {
+  getStatus(name: string | null = null) {
     if (name) {
       const info = this._servers.get(name);
       return info ? { name, status: info.status, tools: info.tools.length, error: info.error } : null;
     }
-    const statuses = {};
+    const statuses: Record<string, { status: string; tools: number; error: string | null }> = {};
     for (const [n, info] of this._servers) {
       statuses[n] = { status: info.status, tools: info.tools.length, error: info.error };
     }
@@ -153,23 +209,23 @@ class McpClientManager extends EventEmitter {
   }
 
   /** Load MCP config from JSON */
-  loadConfig(filePath = null) {
+  loadConfig(filePath: string | null = null) {
     const fp = filePath || this._defaultConfigPath;
     if (!fs.existsSync(fp)) return;
     try {
       const config = JSON.parse(fs.readFileSync(fp, "utf-8"));
       const servers = config.mcpServers || config.servers || config;
       for (const [name, cfg] of Object.entries(servers)) {
-        this.addServer(name, cfg);
+        this.addServer(name, cfg as McpServerConfigOptions);
       }
     } catch (_) {}
   }
 
   /** Save current config to JSON */
-  saveConfig(filePath = null) {
+  saveConfig(filePath: string | null = null) {
     const fp = filePath || this._defaultConfigPath;
     if (!fs.existsSync(path.dirname(fp))) fs.mkdirSync(path.dirname(fp), { recursive: true });
-    const servers = {};
+    const servers: Record<string, McpServerConfig> = {};
     for (const [name, info] of this._servers) {
       servers[name] = info.config;
     }
@@ -177,7 +233,7 @@ class McpClientManager extends EventEmitter {
   }
 
   /** Register MCP tools into a ToolRegistry */
-  async registerToRegistry(registry) {
+  async registerToRegistry(registry: { register: (t: unknown) => void }) {
     const tools = await this.discoverTools();
     for (const t of tools) {
       registry.register(t);
@@ -187,7 +243,7 @@ class McpClientManager extends EventEmitter {
 
   // === Private ===
 
-  async _startStdio(name, info, cfg) {
+  async _startStdio(name: string, info: McpServerEntry, cfg: McpServerConfig) {
     if (!cfg.command) throw new Error("stdio server requires 'command'");
 
     const env = { ...process.env, ...cfg.env };
@@ -208,7 +264,7 @@ class McpClientManager extends EventEmitter {
         capabilities: { tools: {} },
         clientInfo: { name: "hax-agent", version: "1.0.0" },
       },
-    });
+    }) as JsonRpcResponse;
 
     if (!initResult || initResult.error) {
       child.kill();
@@ -229,7 +285,7 @@ class McpClientManager extends EventEmitter {
     });
   }
 
-  async _startHttp(name, info, cfg) {
+  async _startHttp(name: string, info: McpServerEntry, cfg: McpServerConfig) {
     if (!cfg.url) throw new Error("HTTP server requires 'url'");
     // HTTP transport — verify reachability
     try {
@@ -241,24 +297,24 @@ class McpClientManager extends EventEmitter {
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       info._httpClient = { url: cfg.url, headers: cfg.headers };
     } catch (err) {
-      throw new Error(`HTTP MCP server unreachable: ${err.message}`);
+      throw new Error(`HTTP MCP server unreachable: ${(err as Error).message}`);
     }
   }
 
-  _stopServer(name, info) {
+  _stopServer(name: string, info: McpServerEntry) {
     if (info.process) {
       try { info.process.kill("SIGTERM"); } catch (_) {}
       info.process = null;
     }
   }
 
-  async _listTools(name, info) {
+  async _listTools(name: string, info: McpServerEntry): Promise<McpToolInfo[]> {
     if (info.process) {
       const result = await this._sendMCPRequest(info.process, {
         jsonrpc: "2.0", id: Date.now(),
         method: "tools/list",
-      });
-      return (result?.tools || []).map(t => ({
+      }) as JsonRpcResponse;
+      return ((result?.tools || []) as Array<{ name: string; description?: string; inputSchema?: Record<string, unknown> }>).map(t => ({
         name: `mcp.${name}.${t.name}`,
         description: t.description || `MCP tool: ${t.name}`,
         inputSchema: t.inputSchema || { type: "object", properties: {} },
@@ -271,8 +327,8 @@ class McpClientManager extends EventEmitter {
         headers: { "Content-Type": "application/json", ...info._httpClient.headers },
         body: JSON.stringify({ jsonrpc: "2.0", id: Date.now(), method: "tools/list" }),
       });
-      const data = /** @type {any} */ (await r.json());
-      return (data?.tools || []).map(t => ({
+      const data = await r.json() as JsonRpcResponse;
+      return ((data?.tools || []) as Array<{ name: string; description?: string; inputSchema?: Record<string, unknown> }>).map(t => ({
         name: `mcp.${name}.${t.name}`,
         description: t.description || `MCP tool: ${t.name}`,
         inputSchema: t.inputSchema || { type: "object", properties: {} },
@@ -282,8 +338,8 @@ class McpClientManager extends EventEmitter {
     return [];
   }
 
-  _createMcpExecutor(serverName, toolName) {
-    return async (args, ctx) => {
+  _createMcpExecutor(serverName: string, toolName: string) {
+    return async (args: Record<string, unknown>, ctx: unknown) => {
       const info = this._servers.get(serverName);
       if (!info) throw new Error(`MCP server ${serverName} not found`);
       try {
@@ -293,7 +349,7 @@ class McpClientManager extends EventEmitter {
           params: { name: toolName.replace(`mcp.${serverName}.`, ""), arguments: args },
         };
         if (info.process) {
-          const result = await this._sendMCPRequest(info.process, callParams);
+          const result = await this._sendMCPRequest(info.process, callParams) as JsonRpcResponse;
           if (result?.error) throw new Error(result.error.message);
           return { ok: true, data: result?.content || result };
         }
@@ -303,31 +359,31 @@ class McpClientManager extends EventEmitter {
             headers: { "Content-Type": "application/json", ...info._httpClient.headers },
             body: JSON.stringify(callParams),
           });
-          const data = /** @type {any} */ (await r.json());
+          const data = await r.json() as JsonRpcResponse;
           if (data?.error) throw new Error(data.error.message);
           return { ok: true, data: data?.content || data };
         }
         throw new Error("Server not running");
       } catch (err) {
-        return { ok: false, error: { code: "MCP_ERROR", message: err.message } };
+        return { ok: false, error: { code: "MCP_ERROR", message: (err as Error).message } };
       }
     };
   }
 
   /** Send JSON-RPC request to stdio process and await response */
-  _sendMCPRequest(child, request, timeoutMs = 10000) {
-    return new Promise((resolve, reject) => {
+  _sendMCPRequest(child: ChildProcessWithoutNullStreams, request: Record<string, unknown>, timeoutMs = 10000): Promise<unknown> {
+    return new Promise<unknown>((resolve, reject) => {
       const timer = setTimeout(() => { cleanup(); reject(new Error("MCP request timeout")); }, timeoutMs);
 
       let buffer = "";
-      const onData = (data) => {
+      const onData = (data: Buffer) => {
         buffer += data.toString();
         const lines = buffer.split("\n");
         buffer = lines.pop() || "";
         for (const line of lines) {
           if (!line.trim()) continue;
           try {
-            const msg = JSON.parse(line);
+            const msg = JSON.parse(line) as JsonRpcResponse;
             if (msg.id === request.id || msg.id === (request.id + "result")) {
               cleanup();
               resolve(msg);
@@ -347,12 +403,12 @@ class McpClientManager extends EventEmitter {
     });
   }
 
-  _sendMCPNotify(child, notification) {
+  _sendMCPNotify(child: ChildProcessWithoutNullStreams, notification: Record<string, unknown>) {
     child.stdin.write(JSON.stringify(notification) + "\n");
   }
 
-  _startStderrReader(name, child) {
-    child.stderr.on("data", (data) => {
+  _startStderrReader(name: string, child: ChildProcessWithoutNullStreams) {
+    child.stderr.on("data", (data: Buffer) => {
       this.emit("log", { server: name, message: data.toString().trim() });
     });
   }

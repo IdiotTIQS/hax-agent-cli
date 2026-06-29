@@ -10,6 +10,26 @@
  * The MCP manager is injected via context (ctx.mcpManager).
  */
 
+// Internal shape accessed from McpClientManager — justified any boundary
+interface McpManagerLike {
+  _servers: Map<string, McpServerEntryLike>;
+  _sendMCPRequest(child: unknown, request: Record<string, unknown>): Promise<unknown>;
+  discoverTools(name?: string | null): Promise<Array<{ name: string; description: string; _mcpServer?: string; [key: string]: unknown }>>;
+}
+interface McpServerEntryLike {
+  status: string;
+  process: unknown;
+  tools: Array<{ name: string }>;
+  error?: string | null;
+  _httpClient?: { url: string; headers: Record<string, string> };
+}
+interface McpRpcResult {
+  error?: { message?: string };
+  resources?: unknown[];
+  contents?: unknown;
+  [key: string]: unknown;
+}
+
 // === List MCP Resources ===
 
 const listMcpResourcesTool = {
@@ -31,8 +51,8 @@ const listMcpResourcesTool = {
 
   isReadOnly: () => true,
 
-  async execute(args, ctx) {
-    const manager = ctx.mcpManager;
+  async execute(args: Record<string, unknown>, ctx: Record<string, unknown>) {
+    const manager = ctx.mcpManager as McpManagerLike | undefined;
     if (!manager) {
       return {
         ok: false,
@@ -43,11 +63,11 @@ const listMcpResourcesTool = {
       };
     }
 
-    const serverName = args.server || null;
-    const resources = [];
+    const serverName = (args.server as string) || null;
+    const resources: Array<{ server: string; status: string; resources: unknown[]; count?: number; error?: string | null }> = [];
 
     try {
-      const servers = serverName
+      const servers: Array<[string, McpServerEntryLike | undefined]> = serverName
         ? [[serverName, manager._servers.get(serverName)]]
         : [...manager._servers.entries()];
 
@@ -74,7 +94,7 @@ const listMcpResourcesTool = {
           resources.push({
             server: name,
             status: "error",
-            error: err.message,
+            error: (err as Error).message,
             resources: [],
           });
         }
@@ -93,7 +113,7 @@ const listMcpResourcesTool = {
     } catch (err) {
       return {
         ok: false,
-        error: { code: "MCP_LIST_ERROR", message: err.message },
+        error: { code: "MCP_LIST_ERROR", message: (err as Error).message },
       };
     }
   },
@@ -123,8 +143,8 @@ const readMcpResourceTool = {
 
   isReadOnly: () => true,
 
-  async execute(args, ctx) {
-    const manager = ctx.mcpManager;
+  async execute(args: Record<string, unknown>, ctx: Record<string, unknown>) {
+    const manager = ctx.mcpManager as McpManagerLike | undefined;
     if (!manager) {
       return {
         ok: false,
@@ -135,8 +155,8 @@ const readMcpResourceTool = {
       };
     }
 
-    const serverName = args.server;
-    const uri = args.uri;
+    const serverName = args.server as string;
+    const uri = args.uri as string;
 
     if (!serverName || !uri) {
       return {
@@ -177,7 +197,7 @@ const readMcpResourceTool = {
     } catch (err) {
       return {
         ok: false,
-        error: { code: "MCP_READ_ERROR", message: err.message },
+        error: { code: "MCP_READ_ERROR", message: (err as Error).message },
       };
     }
   },
@@ -203,8 +223,8 @@ const listMcpToolsTool = {
 
   isReadOnly: () => true,
 
-  async execute(args, ctx) {
-    const manager = ctx.mcpManager;
+  async execute(args: Record<string, unknown>, ctx: Record<string, unknown>) {
+    const manager = ctx.mcpManager as McpManagerLike | undefined;
     if (!manager) {
       return {
         ok: false,
@@ -216,8 +236,8 @@ const listMcpToolsTool = {
     }
 
     try {
-      const tools = await manager.discoverTools(args.server || null);
-      const byServer = {};
+      const tools = await manager.discoverTools((args.server as string) || null);
+      const byServer: Record<string, Array<{ name: string; description: string }>> = {};
 
       for (const tool of tools) {
         const server = tool._mcpServer || "unknown";
@@ -239,7 +259,7 @@ const listMcpToolsTool = {
     } catch (err) {
       return {
         ok: false,
-        error: { code: "MCP_TOOLS_ERROR", message: err.message },
+        error: { code: "MCP_TOOLS_ERROR", message: (err as Error).message },
       };
     }
   },
@@ -247,7 +267,7 @@ const listMcpToolsTool = {
 
 // === Internal Helpers ===
 
-async function _listResources(manager, serverName, info) {
+async function _listResources(manager: McpManagerLike, serverName: string, info: McpServerEntryLike) {
   const request = {
     jsonrpc: "2.0",
     id: Date.now(),
@@ -255,8 +275,8 @@ async function _listResources(manager, serverName, info) {
   };
 
   if (info.process) {
-    const result = await manager._sendMCPRequest(info.process, request);
-    return (result?.resources || []).map((r) => ({
+    const result = await manager._sendMCPRequest(info.process, request) as McpRpcResult;
+    return ((result?.resources || []) as Array<{ uri: string; name?: string; description?: string; mimeType?: string }>).map((r) => ({
       uri: r.uri,
       name: r.name || r.uri,
       description: r.description || "",
@@ -270,8 +290,8 @@ async function _listResources(manager, serverName, info) {
       headers: { "Content-Type": "application/json", ...info._httpClient.headers },
       body: JSON.stringify(request),
     });
-    const data = /** @type {any} */ (await r.json());
-    return (data?.resources || []).map((r) => ({
+    const data = await r.json() as McpRpcResult;
+    return ((data?.resources || []) as Array<{ uri: string; name?: string; description?: string; mimeType?: string }>).map((r) => ({
       uri: r.uri,
       name: r.name || r.uri,
       description: r.description || "",
@@ -282,7 +302,7 @@ async function _listResources(manager, serverName, info) {
   return [];
 }
 
-async function _readResource(manager, serverName, info, uri) {
+async function _readResource(manager: McpManagerLike, serverName: string, info: McpServerEntryLike, uri: string) {
   const request = {
     jsonrpc: "2.0",
     id: Date.now(),
@@ -291,7 +311,7 @@ async function _readResource(manager, serverName, info, uri) {
   };
 
   if (info.process) {
-    const result = await manager._sendMCPRequest(info.process, request);
+    const result = await manager._sendMCPRequest(info.process, request) as McpRpcResult;
     if (result?.error) throw new Error(result.error.message);
     return result?.contents || result;
   }
@@ -302,7 +322,7 @@ async function _readResource(manager, serverName, info, uri) {
       headers: { "Content-Type": "application/json", ...info._httpClient.headers },
       body: JSON.stringify(request),
     });
-    const data = /** @type {any} */ (await r.json());
+    const data = await r.json() as McpRpcResult;
     if (data?.error) throw new Error(data.error.message);
     return data?.contents || data;
   }

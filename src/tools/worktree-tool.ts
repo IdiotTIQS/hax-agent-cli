@@ -10,6 +10,21 @@ import { execSync } from "child_process";
 import fs from "fs";
 import path from "path";
 
+interface WorktreeInfo {
+  path?: string;
+  head?: string;
+  branch?: string;
+  detached?: boolean;
+  bare?: boolean;
+  status?: string;
+}
+
+interface ExecError extends Error {
+  stdout?: string;
+  stderr?: string;
+  status?: number;
+}
+
 // === Worktree Tool ===
 
 const enterWorktreeTool = {
@@ -40,8 +55,8 @@ const enterWorktreeTool = {
 
   isReadOnly: () => false,
 
-  async execute(args, ctx) {
-    const cwd = ctx.root || process.cwd();
+  async execute(args: Record<string, unknown>, ctx: Record<string, unknown>) {
+    const cwd = (ctx.root as string) || process.cwd();
 
     // Check if we're in a git repo
     if (!_isGitRepo(cwd)) {
@@ -54,8 +69,8 @@ const enterWorktreeTool = {
       };
     }
 
-    const branch = args.branch || _generateBranchName(args.description);
-    const baseRef = args.base_ref || "HEAD";
+    const branch = (args.branch as string) || _generateBranchName(args.description as string | null | undefined);
+    const baseRef = (args.base_ref as string) || "HEAD";
 
     try {
       // Verify branch doesn't already exist
@@ -83,13 +98,14 @@ const enterWorktreeTool = {
             branch,
             worktree_path: worktreePath,
             base_ref: baseRef,
-            description: args.description || null,
+            description: (args.description as string) || null,
             output,
             message: `Worktree created at "${worktreePath}" on branch "${branch}". Session will use this isolated directory.`,
           },
         };
       } catch (err) {
-        const stderr = (err.stderr || "").trim();
+        const e = err as ExecError;
+        const stderr = (e.stderr || "").trim();
 
         // Branch already exists but no worktree — create worktree from existing branch
         if (stderr.includes("already exists") || stderr.includes("already checked out")) {
@@ -104,17 +120,18 @@ const enterWorktreeTool = {
                 branch,
                 worktree_path: worktreePath,
                 base_ref: baseRef,
-                description: args.description || null,
+                description: (args.description as string) || null,
                 output,
                 message: `Worktree created for existing branch "${branch}".`,
               },
             };
           } catch (err2) {
+            const e2 = err2 as ExecError;
             return {
               ok: false,
               error: {
                 code: "WORKTREE_CREATE_FAILED",
-                message: `Failed to create worktree: ${(err2.stderr || err2.message).trim()}`,
+                message: `Failed to create worktree: ${(e2.stderr || e2.message || "").trim()}`,
               },
             };
           }
@@ -124,7 +141,7 @@ const enterWorktreeTool = {
           ok: false,
           error: {
             code: "WORKTREE_CREATE_FAILED",
-            message: `Failed to create worktree: ${stderr || err.message}`,
+            message: `Failed to create worktree: ${stderr || e.message}`,
           },
         };
       }
@@ -133,7 +150,7 @@ const enterWorktreeTool = {
         ok: false,
         error: {
           code: "WORKTREE_ERROR",
-          message: `Worktree operation failed: ${err.message}`,
+          message: `Worktree operation failed: ${(err as Error).message}`,
         },
       };
     }
@@ -170,8 +187,8 @@ const exitWorktreeTool = {
 
   isReadOnly: () => false,
 
-  async execute(args, ctx) {
-    const cwd = ctx.root || process.cwd();
+  async execute(args: Record<string, unknown>, ctx: Record<string, unknown>) {
+    const cwd = (ctx.root as string) || process.cwd();
 
     if (!_isGitRepo(cwd)) {
       return {
@@ -183,7 +200,7 @@ const exitWorktreeTool = {
       };
     }
 
-    const branch = args.branch || _getCurrentBranch(cwd);
+    const branch = (args.branch as string) || _getCurrentBranch(cwd);
 
     try {
       const worktreePath = path.join(cwd, ".worktrees", branch);
@@ -234,11 +251,12 @@ const exitWorktreeTool = {
         },
       };
     } catch (err) {
+      const e = err as ExecError;
       return {
         ok: false,
         error: {
           code: "WORKTREE_REMOVE_FAILED",
-          message: `Failed to remove worktree: ${(err.stderr || err.message).trim()}`,
+          message: `Failed to remove worktree: ${(e.stderr || e.message).trim()}`,
         },
       };
     }
@@ -258,8 +276,8 @@ const listWorktreesTool = {
 
   isReadOnly: () => true,
 
-  async execute(args, ctx) {
-    const cwd = ctx.root || process.cwd();
+  async execute(args: Record<string, unknown>, ctx: Record<string, unknown>) {
+    const cwd = (ctx.root as string) || process.cwd();
 
     if (!_isGitRepo(cwd)) {
       return {
@@ -299,7 +317,7 @@ const listWorktreesTool = {
         ok: false,
         error: {
           code: "WORKTREE_LIST_FAILED",
-          message: err.message,
+          message: (err as Error).message,
         },
       };
     }
@@ -308,7 +326,7 @@ const listWorktreesTool = {
 
 // === Helper Functions ===
 
-function _isGitRepo(cwd) {
+function _isGitRepo(cwd: string): boolean {
   try {
     execSync("git rev-parse --git-dir", { cwd, encoding: "utf-8", timeout: 5000, stdio: "pipe" });
     return true;
@@ -317,7 +335,7 @@ function _isGitRepo(cwd) {
   }
 }
 
-function _getCurrentBranch(cwd) {
+function _getCurrentBranch(cwd: string): string {
   try {
     return execSync("git rev-parse --abbrev-ref HEAD", {
       cwd, encoding: "utf-8", timeout: 5000,
@@ -327,14 +345,14 @@ function _getCurrentBranch(cwd) {
   }
 }
 
-function _listWorktrees(cwd) {
+function _listWorktrees(cwd: string): WorktreeInfo[] {
   try {
     const output = execSync("git worktree list --porcelain", {
       cwd, encoding: "utf-8", timeout: 10000,
     }).trim();
 
-    const worktrees = [];
-    let current = {};
+    const worktrees: WorktreeInfo[] = [];
+    let current: WorktreeInfo = {};
 
     for (const line of output.split("\n")) {
       if (line.startsWith("worktree ")) {
@@ -358,7 +376,7 @@ function _listWorktrees(cwd) {
   }
 }
 
-function _generateBranchName(description) {
+function _generateBranchName(description?: string | null): string {
   const prefix = "hax";
   const timestamp = Date.now().toString(36).slice(-6);
   if (description) {

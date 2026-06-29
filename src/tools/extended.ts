@@ -62,17 +62,18 @@ const agentTool = {
       var cmd = '"' + process.execPath + '" "' + cliPath + '" --batch "' + escaped + '"';
       var timeout = Math.min(args.maxTurns || 10, 20) * 60000;
 
-      var stdout = execSync(cmd, /** @type {any} */ ({
+      var stdout = (execSync(cmd, {
         cwd: ctx.root, timeout: timeout, encoding: "utf-8", maxBuffer: 500 * 1024, shell: true,
-      })).trim().slice(0, 30000);
+      } as unknown as Parameters<typeof execSync>[1]) as string).trim().slice(0, 30000);
 
       return { ok: true, data: { agentId: id, description: desc, output: stdout, status: "completed" } };
     } catch (err) {
+      const e = err as { stdout?: unknown; stderr?: unknown; message?: string };
       return {
         ok: true,
         data: {
           agentId: id, description: desc, status: "failed",
-          output: (err.stdout || err.stderr || err.message || "").toString().slice(0, 5000),
+          output: (e.stdout || e.stderr || e.message || "").toString().slice(0, 5000),
           message: "Sub-agent finished. For complex parallel tasks, process files sequentially instead."
         }
       };
@@ -280,7 +281,7 @@ const enterWorktreeTool = {
       execSync(`git worktree add "${wp}" -b "${branch}"`, { cwd: ctx.root || process.cwd(), encoding: "utf-8" });
       return { ok: true, data: { branch, path: wp, message: `Worktree created at ${wp} on branch ${branch}` } };
     } catch (err) {
-      return { ok: false, error: { code: "WORKTREE_ERROR", message: err.message } };
+      return { ok: false, error: { code: "WORKTREE_ERROR", message: (err as Error).message } };
     }
   },
   isReadOnly: () => false,
@@ -295,7 +296,7 @@ const exitWorktreeTool = {
       execSync(`git worktree remove "${args.path}"`, { cwd: ctx.root || process.cwd(), encoding: "utf-8" });
       return { ok: true, data: { removed: args.path } };
     } catch (err) {
-      return { ok: false, error: { code: "WORKTREE_ERROR", message: err.message } };
+      return { ok: false, error: { code: "WORKTREE_ERROR", message: (err as Error).message } };
     }
   },
   isReadOnly: () => false,
@@ -486,7 +487,7 @@ const globTool = {
     const ignore = args.ignore || ["node_modules/**", ".git/**", "**/__pycache__/**", "**/.venv/**"];
     const dir = args.path ? resolvePath(ctx.root, args.path) : ctx.root;
     const matches = globSync(args.pattern, { cwd: dir, nodir: true, ignore, absolute: false }).slice(0, args.maxResults || 500);
-    const result = { pattern: args.pattern, matches, count: matches.length, truncated: matches.length >= (args.maxResults || 500) };
+    const result: { pattern: unknown; matches: string[]; count: number; truncated: boolean; files?: Array<{ path: string; size: number }> } = { pattern: args.pattern, matches, count: matches.length, truncated: matches.length >= (args.maxResults || 500) };
     if (args.includeStats) result.files = matches.map(f => ({ path: f, size: fs.statSync(path.join(dir, f)).size }));
     return { ok: true, data: result };
   },
@@ -515,7 +516,7 @@ const grepTool = {
     const files = globSync(include, { cwd: dir, nodir: true, ignore });
     const flags = args.ignoreCase !== false ? "gi" : "g";
     const re = new RegExp(args.pattern, flags);
-    const matches = [];
+    const matches: Array<{ file: string; line: number; content: string; before?: string[]; after?: string[] }> = [];
 
     for (const f of files.slice(0, 500)) {
       if (matches.length >= (args.maxResults || 200)) break;
@@ -670,7 +671,7 @@ const notebookEditTool = {
         return { ok: true, data: { path: args.path, updated: args.cell_index } };
       }
       return { ok: false, error: { code: "INVALID_ACTION", message: `Unknown action: ${args.action}` } };
-    } catch (err) { return { ok: false, error: { code: "NOTEBOOK_ERROR", message: err.message } }; }
+    } catch (err) { return { ok: false, error: { code: "NOTEBOOK_ERROR", message: (err as Error).message } }; }
   },
   isReadOnly: (args) => args?.action === "read",
 };

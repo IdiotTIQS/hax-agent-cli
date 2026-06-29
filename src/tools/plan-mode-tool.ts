@@ -11,11 +11,18 @@
 
 // === Shared Plan Mode State ===
 
+interface PermissionCheckerLike {
+  mode: string;
+  setMode: (m: string) => void;
+}
+
 /**
  * Manages plan mode transitions across sessions.
  * Tracks the previous permission mode for proper restoration.
  */
 class PlanModeState {
+  _planSessions: Map<string, { previousMode: string; enteredAt: number }>;
+
   constructor() {
     this._planSessions = new Map(); // sessionId → { previousMode, enteredAt }
   }
@@ -26,7 +33,7 @@ class PlanModeState {
    * @param {Object} permissionChecker — PermissionChecker instance with setMode()
    * @returns {Object} { ok, previousMode }
    */
-  enter(sessionId, permissionChecker) {
+  enter(sessionId: string, permissionChecker: PermissionCheckerLike) {
     if (!permissionChecker || !permissionChecker.mode) {
       return { ok: false, error: "No permission checker available" };
     }
@@ -53,7 +60,7 @@ class PlanModeState {
    * @param {Object} permissionChecker
    * @returns {Object} { ok, restoredMode }
    */
-  exit(sessionId, permissionChecker) {
+  exit(sessionId: string, permissionChecker: PermissionCheckerLike) {
     if (!permissionChecker || !permissionChecker.mode) {
       return { ok: false, error: "No permission checker available" };
     }
@@ -79,7 +86,7 @@ class PlanModeState {
   /**
    * Check if a session is currently in plan mode.
    */
-  isInPlanMode(sessionId, permissionChecker) {
+  isInPlanMode(sessionId: string, permissionChecker: PermissionCheckerLike) {
     return permissionChecker?.mode === "plan";
   }
 }
@@ -108,9 +115,9 @@ const enterPlanModeTool = {
 
   isReadOnly: () => true,
 
-  async execute(args, ctx) {
-    const sessionId = ctx.sessionId || "default";
-    const permissionChecker = ctx.permissionChecker || ctx.permissions;
+  async execute(args: Record<string, unknown>, ctx: Record<string, unknown>) {
+    const sessionId = (ctx.sessionId as string) || "default";
+    const permissionChecker = (ctx.permissionChecker || ctx.permissions) as PermissionCheckerLike | undefined;
 
     if (!permissionChecker) {
       return {
@@ -136,7 +143,7 @@ const enterPlanModeTool = {
       data: {
         mode: "plan",
         previous_mode: result.previousMode,
-        reason: args.reason || "Exploration and planning",
+        reason: (args.reason as string) || "Exploration and planning",
         message: result.message,
       },
     };
@@ -163,9 +170,9 @@ const exitPlanModeTool = {
 
   isReadOnly: () => false,
 
-  async execute(args, ctx) {
-    const sessionId = ctx.sessionId || "default";
-    const permissionChecker = ctx.permissionChecker || ctx.permissions;
+  async execute(args: Record<string, unknown>, ctx: Record<string, unknown>) {
+    const sessionId = (ctx.sessionId as string) || "default";
+    const permissionChecker = (ctx.permissionChecker || ctx.permissions) as PermissionCheckerLike | undefined;
 
     if (!permissionChecker) {
       return {
@@ -190,7 +197,7 @@ const exitPlanModeTool = {
       ok: true,
       data: {
         restored_mode: result.restoredMode,
-        plan_summary: args.plan_summary || null,
+        plan_summary: (args.plan_summary as string) || null,
         message: result.message,
       },
     };

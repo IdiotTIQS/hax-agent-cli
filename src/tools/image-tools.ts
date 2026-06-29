@@ -10,6 +10,12 @@
 import fs from "fs";
 import path from "path";
 
+interface ImageOptions {
+  size?: string;
+  quality?: string;
+  style?: string;
+}
+
 // === Image to Text (Vision) ===
 
 const imageToTextTool = {
@@ -40,13 +46,13 @@ const imageToTextTool = {
 
   isReadOnly: () => true,
 
-  async execute(args, ctx) {
-    const imagePath = args.path;
+  async execute(args: Record<string, unknown>, ctx: Record<string, unknown>) {
+    const imagePath = args.path as string;
     if (!imagePath) {
       return { ok: false, error: { code: "MISSING_PATH", message: "Image path is required" } };
     }
 
-    const cwd = ctx.root || process.cwd();
+    const cwd = (ctx.root as string) || process.cwd();
     const fp = path.resolve(cwd, imagePath);
 
     // Validate file exists
@@ -75,7 +81,7 @@ const imageToTextTool = {
       const mediaType = _getMediaType(ext);
 
       // Build vision request
-      const provider = ctx.provider || ctx.session?.provider;
+      const provider = (ctx.provider || (ctx.session as Record<string, unknown>)?.provider) as Record<string, unknown> | undefined;
       if (!provider) {
         return {
           ok: true,
@@ -91,8 +97,8 @@ const imageToTextTool = {
       }
 
       // Try vision-capable API
-      const prompt = args.prompt || "Describe this image in detail. Include any visible text, objects, people, colors, and layout.";
-      const maxTokens = args.max_tokens || 1000;
+      const prompt = (args.prompt as string) || "Describe this image in detail. Include any visible text, objects, people, colors, and layout.";
+      const maxTokens = (args.max_tokens as number) || 1000;
 
       const visionResult = await _callVisionAPI(provider, base64, mediaType, prompt, maxTokens);
 
@@ -110,7 +116,7 @@ const imageToTextTool = {
     } catch (err) {
       return {
         ok: false,
-        error: { code: "VISION_ERROR", message: `Image analysis failed: ${err.message}` },
+        error: { code: "VISION_ERROR", message: `Image analysis failed: ${(err as Error).message}` },
       };
     }
   },
@@ -158,8 +164,8 @@ const imageGenerationTool = {
 
   isReadOnly: () => false,
 
-  async execute(args, ctx) {
-    const cwd = ctx.root || process.cwd();
+  async execute(args: Record<string, unknown>, ctx: Record<string, unknown>) {
+    const cwd = (ctx.root as string) || process.cwd();
 
     if (!args.prompt) {
       return { ok: false, error: { code: "MISSING_PROMPT", message: "Image generation prompt is required" } };
@@ -169,7 +175,7 @@ const imageGenerationTool = {
       return { ok: false, error: { code: "MISSING_OUTPUT", message: "Output file path is required" } };
     }
 
-    const outputPath = path.resolve(cwd, args.output);
+    const outputPath = path.resolve(cwd, args.output as string);
 
     // Ensure output directory exists
     const outputDir = path.dirname(outputPath);
@@ -178,10 +184,10 @@ const imageGenerationTool = {
     }
 
     try {
-      const result = await _generateImage(args.prompt, {
-        size: args.size || "1024x1024",
-        quality: args.quality || "standard",
-        style: args.style || "vivid",
+      const result = await _generateImage(args.prompt as string, {
+        size: (args.size as string) || "1024x1024",
+        quality: (args.quality as string) || "standard",
+        style: (args.style as string) || "vivid",
       });
 
       if (result.ok) {
@@ -195,7 +201,7 @@ const imageGenerationTool = {
             output: args.output,
             output_path: outputPath,
             prompt: args.prompt,
-            size: args.size || "1024x1024",
+            size: (args.size as string) || "1024x1024",
             bytes: imageBuffer.length,
             message: `Image saved to ${args.output} (${(imageBuffer.length / 1024).toFixed(1)} KB)`,
           },
@@ -206,7 +212,7 @@ const imageGenerationTool = {
     } catch (err) {
       return {
         ok: false,
-        error: { code: "GENERATION_ERROR", message: `Image generation failed: ${err.message}` },
+        error: { code: "GENERATION_ERROR", message: `Image generation failed: ${(err as Error).message}` },
       };
     }
   },
@@ -214,8 +220,8 @@ const imageGenerationTool = {
 
 // === Internal Helpers ===
 
-function _getMediaType(ext) {
-  const types = {
+function _getMediaType(ext: string): string {
+  const types: Record<string, string> = {
     ".png": "image/png",
     ".jpg": "image/jpeg",
     ".jpeg": "image/jpeg",
@@ -232,7 +238,8 @@ function _getMediaType(ext) {
  * @param {string} name - package name
  * @returns {Promise<any|null>}
  */
-async function _tryRequire(name) {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function _tryRequire(name: string): Promise<any | null> {
   try {
     return await import(name);
   } catch (_) {
@@ -244,7 +251,7 @@ async function _tryRequire(name) {
  * Call the vision API through the provider.
  * Tries Anthropic first (native image support), falls back to OpenAI.
  */
-async function _callVisionAPI(provider, base64Image, mediaType, prompt, maxTokens) {
+async function _callVisionAPI(provider: Record<string, unknown>, base64Image: string, mediaType: string, prompt: string, maxTokens: number) {
   const Anthropic = await _tryRequire("@anthropic-ai/sdk");
   const OpenAI = await _tryRequire("openai");
 
@@ -271,8 +278,8 @@ async function _callVisionAPI(provider, base64Image, mediaType, prompt, maxToken
       });
 
       const text = response.content
-        .filter((c) => c.type === "text")
-        .map((c) => c.text)
+        .filter((c: { type: string }) => c.type === "text")
+        .map((c: { text: string }) => c.text)
         .join("\n");
 
       return { text, model: provider.model, provider: "anthropic" };
@@ -310,7 +317,7 @@ async function _callVisionAPI(provider, base64Image, mediaType, prompt, maxToken
       const text = response.choices?.[0]?.message?.content || "";
       return { text, model: "gpt-4o", provider: "openai" };
     } catch (err) {
-      throw new Error(`Vision API failed: ${err.message}`);
+      throw new Error(`Vision API failed: ${(err as Error).message}`);
     }
   }
 
@@ -320,7 +327,7 @@ async function _callVisionAPI(provider, base64Image, mediaType, prompt, maxToken
 /**
  * Generate an image using DALL-E (via OpenAI) or fallback.
  */
-async function _generateImage(prompt, options = {}) {
+async function _generateImage(prompt: string, options: ImageOptions = {}): Promise<{ ok: boolean; data: Buffer; format?: string }> {
   const OpenAI = await _tryRequire("openai");
 
   if (OpenAI) {
@@ -361,7 +368,7 @@ async function _generateImage(prompt, options = {}) {
 /**
  * Generate a placeholder SVG when no image generation API is available.
  */
-function _generatePlaceholderSVG(prompt, options = {}) {
+function _generatePlaceholderSVG(prompt: string, options: ImageOptions = {}): string {
   const [w, h] = (options.size || "1024x1024").split("x").map(Number);
   const width = w || 1024;
   const height = h || 1024;
@@ -387,7 +394,7 @@ function _generatePlaceholderSVG(prompt, options = {}) {
 </svg>`;
 }
 
-function _escapeXml(str) {
+function _escapeXml(str: string): string {
   return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 

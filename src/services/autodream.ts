@@ -35,15 +35,61 @@ const DEFAULT_CONFIG = {
   minConfidence: 2,        // Minimum confidence to keep (1-2 get archived)
 };
 
+// === Interfaces ===
+
+interface AutodreamConfig {
+  turnInterval: number;
+  timeIntervalMs: number;
+  maxMemoriesBeforeCompact: number;
+  backupRetention: number;
+  staleThresholdDays: number;
+  minConfidence: number;
+}
+
+interface AutodreamManagerOptions {
+  memoryDir?: string;
+  config?: Partial<AutodreamConfig>;
+}
+
+interface RunOptions {
+  memories?: MemoryItem[];
+  onProgress?: (msg: string) => void;
+}
+
+interface AutodreamSchedulerOptions {
+  intervalMs?: number;
+}
+
+interface MemoryItem {
+  content?: string;
+  confidence?: number;
+  occurrenceCount?: number;
+  timestamp?: number;
+  category?: string;
+  [key: string]: unknown;
+}
+
+interface DuplicateGroup {
+  original: MemoryItem;
+  copies: MemoryItem[];
+  signature: string;
+}
+
 // === Autodream Manager ===
 
 class AutodreamManager {
+  _memoryDir: string;
+  _config: AutodreamConfig;
+  _lastRun: number | null;
+  _runCount: number;
+  _isRunning: boolean;
+
   /**
-   * @param {Object} options
-   * @param {string} [options.memoryDir] - memory storage directory
-   * @param {Object} [options.config] - autodream config overrides
+   * @param options
+   * @param options.memoryDir - memory storage directory
+   * @param options.config - autodream config overrides
    */
-  constructor(options = {}) {
+  constructor(options: AutodreamManagerOptions = {}) {
     this._memoryDir = options.memoryDir || path.join(os.homedir(), ".haxagent", "memory");
     this._config = { ...DEFAULT_CONFIG, ...options.config };
     this._lastRun = null;
@@ -53,11 +99,10 @@ class AutodreamManager {
 
   /**
    * Check if consolidation should run based on turn count and time.
-   * @param {number} turnCount
-   * @param {number} memoryCount
-   * @returns {boolean}
+   * @param turnCount
+   * @param memoryCount
    */
-  shouldRun(turnCount, memoryCount) {
+  shouldRun(turnCount: number, memoryCount: number): boolean {
     // Time-based
     if (this._lastRun) {
       const elapsed = Date.now() - this._lastRun;
@@ -72,12 +117,11 @@ class AutodreamManager {
 
   /**
    * Run the consolidation process.
-   * @param {Object} options
-   * @param {Array} [options.memories] - current memory entries
-   * @param {Function} [options.onProgress] - progress callback
-   * @returns {Promise<Object>} { consolidated, removed, merged, backupPath }
+   * @param options
+   * @param options.memories - current memory entries
+   * @param options.onProgress - progress callback
    */
-  async run(options = {}) {
+  async run(options: RunOptions = {}): Promise<Record<string, unknown>> {
     if (this._isRunning) return { skipped: true, reason: "Already running" };
 
     this._isRunning = true;
@@ -135,9 +179,9 @@ class AutodreamManager {
 
   /**
    * Create a backup of current memories.
-   * @returns {string} backup file path
+   * @returns backup file path
    */
-  _createBackup(memories) {
+  _createBackup(memories: MemoryItem[]): string {
     const backupDir = path.join(this._memoryDir, "backups");
     if (!fs.existsSync(backupDir)) fs.mkdirSync(backupDir, { recursive: true });
 
@@ -150,7 +194,7 @@ class AutodreamManager {
   /**
    * Prune old backups beyond retention limit.
    */
-  _pruneBackups() {
+  _pruneBackups(): void {
     const backupDir = path.join(this._memoryDir, "backups");
     if (!fs.existsSync(backupDir)) return;
 
@@ -169,17 +213,16 @@ class AutodreamManager {
 
   /**
    * Find and separate duplicate memories.
-   * @returns {{ unique: Array, duplicates: Array }}
    */
-  _deduplicate(memories) {
-    const seen = new Map(); // normalized content → { original, copies[] }
-    const unique = [];
-    const duplicates = [];
+  _deduplicate(memories: MemoryItem[]): { unique: MemoryItem[]; duplicates: DuplicateGroup[] } {
+    const seen = new Map<string, { original: MemoryItem; copies: MemoryItem[] }>();
+    const unique: MemoryItem[] = [];
+    const duplicates: DuplicateGroup[] = [];
 
     for (const m of memories) {
       const sig = this._normalizeContent(m.content);
       if (seen.has(sig)) {
-        seen.get(sig).copies.push(m);
+        seen.get(sig)!.copies.push(m);
       } else {
         seen.set(sig, { original: m, copies: [] });
         unique.push(m);
@@ -204,8 +247,8 @@ class AutodreamManager {
    * Merge duplicate groups, keeping the highest-confidence version
    * and aggregating occurrence counts.
    */
-  _mergeDuplicates(duplicateGroups) {
-    const merged = [];
+  _mergeDuplicates(duplicateGroups: DuplicateGroup[]): MemoryItem[] {
+    const merged: MemoryItem[] = [];
 
     for (const group of duplicateGroups) {
       const allEntries = [group.original, ...group.copies];
@@ -218,7 +261,7 @@ class AutodreamManager {
         sum + (e.occurrenceCount || 1), 0
       );
       // Boost confidence slightly for repeated confirmation
-      if (best.occurrenceCount >= 3 && best.confidence < 5) {
+      if (best.occurrenceCount >= 3 && (best.confidence || 3) < 5) {
         best.confidence = Math.min(5, (best.confidence || 3) + 1);
       }
       merged.push(best);
@@ -230,13 +273,13 @@ class AutodreamManager {
   /**
    * Separate stale memories (old, low confidence, unreinforced).
    */
-  _separateStale(memories) {
+  _separateStale(memories: MemoryItem[]): { active: MemoryItem[]; stale: MemoryItem[] } {
     const now = Date.now();
     const staleThresholdMs = this._config.staleThresholdDays * 24 * 60 * 60 * 1000;
     const minConfidence = this._config.minConfidence;
 
-    const active = [];
-    const stale = [];
+    const active: MemoryItem[] = [];
+    const stale: MemoryItem[] = [];
 
     for (const m of memories) {
       const age = now - (m.timestamp || 0);
@@ -257,10 +300,10 @@ class AutodreamManager {
   /**
    * Archive stale memories to a separate file.
    */
-  _archiveStale(stale) {
+  _archiveStale(stale: MemoryItem[]): void {
     if (stale.length === 0) return;
     const archivePath = path.join(this._memoryDir, "archive.json");
-    let archive = [];
+    let archive: unknown[] = [];
     if (fs.existsSync(archivePath)) {
       try { archive = JSON.parse(fs.readFileSync(archivePath, "utf-8")); } catch (_) {}
     }
@@ -273,7 +316,7 @@ class AutodreamManager {
   /**
    * Boost confidence for memories that are actively being reinforced.
    */
-  _boostConfidence(memories) {
+  _boostConfidence(memories: MemoryItem[]): MemoryItem[] {
     for (const m of memories) {
       const count = m.occurrenceCount || 1;
       // Gradually boost confidence with repeated reinforcement
@@ -287,11 +330,11 @@ class AutodreamManager {
   /**
    * Load current memories from disk.
    */
-  _loadMemories() {
+  _loadMemories(): MemoryItem[] {
     const memPath = path.join(this._memoryDir, "memories.json");
     if (!fs.existsSync(memPath)) return [];
     try {
-      return JSON.parse(fs.readFileSync(memPath, "utf-8"));
+      return JSON.parse(fs.readFileSync(memPath, "utf-8")) as MemoryItem[];
     } catch (_) {
       return [];
     }
@@ -300,7 +343,7 @@ class AutodreamManager {
   /**
    * Save memories to disk.
    */
-  _saveMemories(memories) {
+  _saveMemories(memories: MemoryItem[]): void {
     const memPath = path.join(this._memoryDir, "memories.json");
     const dir = path.dirname(memPath);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
@@ -310,7 +353,7 @@ class AutodreamManager {
   /**
    * Normalize content for signature comparison.
    */
-  _normalizeContent(content) {
+  _normalizeContent(content?: string): string {
     return (content || "")
       .toLowerCase()
       .replace(/\s+/g, " ")
@@ -322,17 +365,17 @@ class AutodreamManager {
   /**
    * Get consolidation statistics.
    */
-  getStats() {
+  getStats(): Record<string, unknown> {
     const memories = this._loadMemories();
     const archivePath = path.join(this._memoryDir, "archive.json");
     let archivedCount = 0;
     if (fs.existsSync(archivePath)) {
-      try { archivedCount = JSON.parse(fs.readFileSync(archivePath, "utf-8")).length; } catch (_) {}
+      try { archivedCount = (JSON.parse(fs.readFileSync(archivePath, "utf-8")) as unknown[]).length; } catch (_) {}
     }
 
-    const byCategory = {};
+    const byCategory: Record<string, number> = {};
     for (const m of memories) {
-      const cat = m.category || "unknown";
+      const cat = (m.category as string) || "unknown";
       byCategory[cat] = (byCategory[cat] || 0) + 1;
     }
 
@@ -353,7 +396,13 @@ class AutodreamManager {
  * Can be started/stopped and configured with intervals.
  */
 class AutodreamScheduler {
-  constructor(manager, options = {}) {
+  _manager: AutodreamManager;
+  _interval: number;
+  _timer: NodeJS.Timeout | null;
+  _session: { turnCount?: number } | null;
+  _callbacks: Array<(result: unknown) => void>;
+
+  constructor(manager: AutodreamManager, options: AutodreamSchedulerOptions = {}) {
     this._manager = manager;
     this._interval = options.intervalMs || 5 * 60 * 1000; // 5 minutes
     this._timer = null;
@@ -364,7 +413,7 @@ class AutodreamScheduler {
   /**
    * Start the scheduler for a session.
    */
-  start(session) {
+  start(session: { turnCount?: number }): void {
     if (this._timer) return;
     this._session = session;
     this._timer = setInterval(() => {
@@ -376,7 +425,7 @@ class AutodreamScheduler {
   /**
    * Stop the scheduler.
    */
-  stop() {
+  stop(): void {
     if (this._timer) {
       clearInterval(this._timer);
       this._timer = null;
@@ -386,11 +435,11 @@ class AutodreamScheduler {
   /**
    * Register a callback for consolidation results.
    */
-  onConsolidate(callback) {
+  onConsolidate(callback: (result: unknown) => void): void {
     this._callbacks.push(callback);
   }
 
-  async _tick() {
+  async _tick(): Promise<void> {
     if (!this._manager.shouldRun(
       this._session?.turnCount || 0,
       this._manager._loadMemories().length
@@ -410,7 +459,7 @@ class AutodreamScheduler {
       }
     } catch (err) {
       for (const cb of this._callbacks) {
-        cb({ type: "error", error: err.message });
+        cb({ type: "error", error: (err as Error).message });
       }
     }
   }

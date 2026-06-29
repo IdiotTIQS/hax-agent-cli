@@ -3,7 +3,21 @@
  * Ported from OpenHarness personalization/extractor.py.
  */
 
-const FACT_PATTERNS = [
+interface FactEntry {
+  key: string;
+  type: string;
+  label: string;
+  value: string;
+  confidence: number;
+}
+
+interface FactPattern {
+  type: string;
+  label: string;
+  pattern: RegExp;
+}
+
+const FACT_PATTERNS: FactPattern[] = [
   { type: "ssh_host", label: "SSH Hosts", pattern: /ssh\s+\S+@(\S+)/g },
   { type: "ip_address", label: "Known Servers", pattern: /\b(?:10\.\d{1,3}|172\.(?:1[6-9]|2\d|3[01])|192\.168)\.\d{1,3}\.\d{1,3}\b/g },
   { type: "data_path", label: "Data Paths", pattern: /(?:\/[\w.-]+){2,}/g },
@@ -18,9 +32,9 @@ const FACT_PATTERNS = [
 
 const FALSE_POSITIVE_IPS = new Set(["127.0.0.1", "0.0.0.0", "255.255.255.255"]);
 
-function extractFacts(text) {
-  const facts = [];
-  const seen = new Set();
+function extractFacts(text: unknown): FactEntry[] {
+  const facts: FactEntry[] = [];
+  const seen = new Set<string>();
   const ct = String(text || "");
 
   for (const { type, label, pattern } of FACT_PATTERNS) {
@@ -39,28 +53,28 @@ function extractFacts(text) {
   return facts;
 }
 
-function extractLocalRules(messages) {
-  const texts = [];
+function extractLocalRules(messages: Array<{ content?: unknown }>): FactEntry[] {
+  const texts: string[] = [];
   for (const m of messages || []) {
     if (typeof m.content === "string") texts.push(m.content);
     else if (Array.isArray(m.content)) {
-      for (const b of m.content) {
+      for (const b of m.content as unknown[]) {
         if (typeof b === "string") texts.push(b);
-        else if (b?.text) texts.push(b.text);
+        else if (b && typeof b === "object" && "text" in b && typeof (b as { text: unknown }).text === "string") texts.push((b as { text: string }).text);
       }
     }
   }
   return extractFacts(texts.join("\n"));
 }
 
-function factsToMarkdown(facts) {
-  const groups = {};
+function factsToMarkdown(facts: FactEntry[]): string {
+  const groups: Record<string, FactEntry[]> = {};
   for (const f of facts) {
     if (!groups[f.label]) groups[f.label] = [];
     groups[f.label].push(f);
   }
 
-  const lines = ["# Environment Facts", `Auto-generated: ${new Date().toISOString()}`, ""];
+  const lines: string[] = ["# Environment Facts", `Auto-generated: ${new Date().toISOString()}`, ""];
   for (const [label, items] of Object.entries(groups)) {
     lines.push(`## ${label}`, "");
     for (const item of items) lines.push(`- ${item.value}`);

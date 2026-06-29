@@ -10,10 +10,52 @@ import fs from "fs";
 import path from "path";
 import os from "os";
 
+// === Interfaces ===
+
+interface SessionSnapshotOptions {
+  sessionId?: string;
+  timestamp?: number;
+  turnCount?: number;
+  inputTokens?: number;
+  outputTokens?: number;
+  toolCallCount?: number;
+  messages?: Array<{ role: string; content: string | unknown }>;
+  goal?: string | null;
+  provider?: string | null;
+  permissionMode?: string;
+  modifiedFiles?: string[];
+  metadata?: Record<string, unknown>;
+}
+
+interface SessionMemoryStoreOptions {
+  memoryDir?: string;
+  maxSnapshots?: number;
+}
+
+interface SnapshotEntry {
+  path: string;
+  timestamp: number;
+  turnCount: number;
+  tokenCount: number;
+}
+
 // === Session Snapshot ===
 
 class SessionSnapshot {
-  constructor(o = {}) {
+  sessionId: string;
+  timestamp: number;
+  turnCount: number;
+  inputTokens: number;
+  outputTokens: number;
+  toolCallCount: number;
+  messages: Array<{ role: string; content: string | unknown }>;
+  goal: string | null;
+  provider: string | null;
+  permissionMode: string;
+  modifiedFiles: string[];
+  metadata: Record<string, unknown>;
+
+  constructor(o: SessionSnapshotOptions = {}) {
     this.sessionId = o.sessionId || "";
     this.timestamp = o.timestamp || Date.now();
     this.turnCount = o.turnCount || 0;
@@ -49,7 +91,7 @@ class SessionSnapshot {
     };
   }
 
-  static fromJSON(json) {
+  static fromJSON(json: SessionSnapshotOptions) {
     return new SessionSnapshot(json);
   }
 }
@@ -57,12 +99,16 @@ class SessionSnapshot {
 // === Session Memory Store ===
 
 class SessionMemoryStore {
+  _memoryDir: string;
+  _sessionsDir: string;
+  _maxSnapshots: number;
+
   /**
-   * @param {Object} options
-   * @param {string} [options.memoryDir] - base directory for memory storage
-   * @param {number} [options.maxSnapshots] - max snapshots to retain
+   * @param options
+   * @param options.memoryDir - base directory for memory storage
+   * @param options.maxSnapshots - max snapshots to retain
    */
-  constructor(options = {}) {
+  constructor(options: SessionMemoryStoreOptions = {}) {
     this._memoryDir = options.memoryDir || path.join(os.homedir(), ".haxagent", "memory");
     this._sessionsDir = path.join(this._memoryDir, "sessions");
     this._maxSnapshots = options.maxSnapshots || 10;
@@ -70,10 +116,10 @@ class SessionMemoryStore {
 
   /**
    * Save a session snapshot to disk.
-   * @param {Object} session - session object with id, messages, etc.
-   * @returns {string} path to saved snapshot
+   * @param session - session object with id, messages, etc.
+   * @returns path to saved snapshot
    */
-  saveSnapshot(session) {
+  saveSnapshot(session: Record<string, any>): string {
     if (!fs.existsSync(this._sessionsDir)) {
       fs.mkdirSync(this._sessionsDir, { recursive: true });
     }
@@ -109,10 +155,9 @@ class SessionMemoryStore {
 
   /**
    * Load a session snapshot from disk.
-   * @param {string} filePath - path to snapshot file
-   * @returns {SessionSnapshot|null}
+   * @param filePath - path to snapshot file
    */
-  loadSnapshot(filePath) {
+  loadSnapshot(filePath: string): SessionSnapshot | null {
     if (!fs.existsSync(filePath)) return null;
     try {
       const data = JSON.parse(fs.readFileSync(filePath, "utf-8"));
@@ -124,14 +169,13 @@ class SessionMemoryStore {
 
   /**
    * List all snapshots for a session.
-   * @param {string} sessionId
-   * @returns {Array<{path: string, timestamp: number, turnCount: number, tokenCount: number}>}
+   * @param sessionId
    */
-  listSnapshots(sessionId) {
+  listSnapshots(sessionId: string): SnapshotEntry[] {
     if (!fs.existsSync(this._sessionsDir)) return [];
     try {
       const files = fs.readdirSync(this._sessionsDir);
-      return files
+      return (files
         .filter((f) => f.startsWith(sessionId) && f.endsWith(".json"))
         .map((f) => {
           const filePath = path.join(this._sessionsDir, f);
@@ -142,13 +186,13 @@ class SessionMemoryStore {
               timestamp: data.timestamp,
               turnCount: data.turnCount || 0,
               tokenCount: (data.inputTokens || 0) + (data.outputTokens || 0),
-            };
+            } as SnapshotEntry;
           } catch (_) {
             return null;
           }
         })
-        .filter(Boolean)
-        .sort((a, b) => b.timestamp - a.timestamp);
+        .filter((x): x is SnapshotEntry => x !== null)
+        .sort((a, b) => b.timestamp - a.timestamp));
     } catch (_) {
       return [];
     }
@@ -156,10 +200,9 @@ class SessionMemoryStore {
 
   /**
    * Get the most recent snapshot for a session.
-   * @param {string} sessionId
-   * @returns {SessionSnapshot|null}
+   * @param sessionId
    */
-  getLatestSnapshot(sessionId) {
+  getLatestSnapshot(sessionId: string): SessionSnapshot | null {
     const snapshots = this.listSnapshots(sessionId);
     if (snapshots.length === 0) return null;
     return this.loadSnapshot(snapshots[0].path);
@@ -167,9 +210,9 @@ class SessionMemoryStore {
 
   /**
    * Prune old snapshots, keeping only the most recent ones.
-   * @param {string} sessionId
+   * @param sessionId
    */
-  _pruneOldSnapshots(sessionId) {
+  _pruneOldSnapshots(sessionId: string): void {
     const snapshots = this.listSnapshots(sessionId);
     if (snapshots.length <= this._maxSnapshots) return;
 
@@ -183,9 +226,9 @@ class SessionMemoryStore {
 
   /**
    * Delete all snapshots for a session.
-   * @param {string} sessionId
+   * @param sessionId
    */
-  deleteAllSnapshots(sessionId) {
+  deleteAllSnapshots(sessionId: string): void {
     const snapshots = this.listSnapshots(sessionId);
     for (const snap of snapshots) {
       try {

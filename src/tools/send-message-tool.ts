@@ -11,11 +11,27 @@
 
 // === Message Store ===
 
+interface AgentMessage {
+  type: string;
+  sender?: string;
+  content?: string;
+  summary?: string;
+  timestamp: number;
+  recipient?: string;
+  team?: string | null;
+  requestId?: string;
+  receivedAt?: number;
+  [key: string]: unknown;
+}
+
 /**
  * In-memory message queue for inter-agent communication.
  * In a production system, this would be a database or IPC mechanism.
  */
 class AgentMessageStore {
+  _queues: Map<string, AgentMessage[]>;
+  _callbacks: Map<string, (msg: AgentMessage) => void>;
+
   constructor() {
     this._queues = new Map(); // agentName → messages[]
     this._callbacks = new Map(); // agentName → callback fn
@@ -24,11 +40,11 @@ class AgentMessageStore {
   /**
    * Send a message to an agent's queue.
    */
-  send(recipient, message) {
+  send(recipient: string, message: AgentMessage) {
     if (!this._queues.has(recipient)) {
       this._queues.set(recipient, []);
     }
-    this._queues.get(recipient).push({
+    this._queues.get(recipient)!.push({
       ...message,
       receivedAt: Date.now(),
     });
@@ -43,14 +59,14 @@ class AgentMessageStore {
   /**
    * Listen for messages for a specific agent.
    */
-  onMessage(agentName, callback) {
+  onMessage(agentName: string, callback: (msg: AgentMessage) => void) {
     this._callbacks.set(agentName, callback);
   }
 
   /**
    * Get pending messages for an agent.
    */
-  getPending(agentName, clear = true) {
+  getPending(agentName: string, clear = true): AgentMessage[] {
     const queue = this._queues.get(agentName) || [];
     if (clear) {
       this._queues.delete(agentName);
@@ -61,7 +77,7 @@ class AgentMessageStore {
   /**
    * Get count of pending messages.
    */
-  pendingCount(agentName) {
+  pendingCount(agentName: string) {
     return (this._queues.get(agentName) || []).length;
   }
 }
@@ -118,16 +134,16 @@ const sendMessageTool = {
   /**
    * Execute the send_message tool.
    */
-  async execute(args, ctx) {
-    const type = args.type || SendMessageType.MESSAGE;
-    const content = args.content || "";
-    const recipient = args.recipient || "";
-    const summary = args.summary || "";
+  async execute(args: Record<string, unknown>, ctx: Record<string, unknown>) {
+    const type = (args.type as string) || SendMessageType.MESSAGE;
+    const content = (args.content as string) || "";
+    const recipient = (args.recipient as string) || "";
+    const summary = (args.summary as string) || "";
 
     // Get sender info from context
-    const sender = ctx.agentId || ctx.sessionId || "main";
+    const sender = (ctx.agentId as string) || (ctx.sessionId as string) || "main";
 
-    const message = {
+    const message: AgentMessage = {
       type,
       sender,
       content: content.slice(0, 50000),
@@ -159,14 +175,14 @@ const sendMessageTool = {
   /**
    * Get pending messages for the current agent.
    */
-  getPendingMessages(agentId) {
+  getPendingMessages(agentId: string) {
     return messageStore.getPending(agentId);
   },
 
   /**
    * Check for pending messages.
    */
-  hasPendingMessages(agentId) {
+  hasPendingMessages(agentId: string) {
     return messageStore.pendingCount(agentId) > 0;
   },
 };
@@ -174,7 +190,7 @@ const sendMessageTool = {
 /**
  * Handle a direct message to a named recipient.
  */
-function _handleDirectMessage(sender, recipient, message) {
+function _handleDirectMessage(sender: string, recipient: string, message: AgentMessage) {
   if (!recipient) {
     return {
       ok: false,
@@ -209,9 +225,9 @@ function _handleDirectMessage(sender, recipient, message) {
 /**
  * Handle a broadcast to all agents.
  */
-function _handleBroadcast(sender, message) {
+function _handleBroadcast(sender: string, message: AgentMessage) {
   // Broadcast: send to all known agents in the message store
-  const recipients = [];
+  const recipients: string[] = [];
   for (const [name] of messageStore._queues) {
     if (name !== sender) {
       messageStore.send(name, { ...message, type: "broadcast" });
@@ -235,7 +251,7 @@ function _handleBroadcast(sender, message) {
 /**
  * Handle a shutdown request to a specific agent.
  */
-function _handleShutdownRequest(sender, recipient, message, args) {
+function _handleShutdownRequest(sender: string, recipient: string, message: AgentMessage, args: Record<string, unknown>) {
   if (!recipient) {
     return {
       ok: false,
@@ -249,7 +265,7 @@ function _handleShutdownRequest(sender, recipient, message, args) {
   const { agentName, teamName } = _parseRecipient(recipient);
   message.recipient = agentName;
   message.type = "shutdown_request";
-  message.requestId = args.request_id || `shutdown_${Date.now().toString(36)}`;
+  message.requestId = (args.request_id as string) || `shutdown_${Date.now().toString(36)}`;
 
   messageStore.send(agentName, message);
 
@@ -268,7 +284,7 @@ function _handleShutdownRequest(sender, recipient, message, args) {
 /**
  * Parse a recipient string in "name@team" format.
  */
-function _parseRecipient(recipient) {
+function _parseRecipient(recipient: string): { agentName: string; teamName: string | null } {
   const atIndex = recipient.lastIndexOf("@");
   if (atIndex > 0) {
     return {
@@ -286,21 +302,24 @@ function _parseRecipient(recipient) {
  * Routes messages between team members and tracks team state.
  */
 class TeamMessageCoordinator {
-  constructor(teamName) {
+  teamName: string;
+  members: Set<string>;
+
+  constructor(teamName: string) {
     this.teamName = teamName;
     this.members = new Set();
   }
 
-  addMember(agentName) {
+  addMember(agentName: string) {
     this.members.add(agentName);
   }
 
-  removeMember(agentName) {
+  removeMember(agentName: string) {
     this.members.delete(agentName);
   }
 
-  broadcast(content, sender) {
-    const results = [];
+  broadcast(content: string, sender: string) {
+    const results: string[] = [];
     for (const member of this.members) {
       if (member !== sender) {
         messageStore.send(member, {
@@ -316,7 +335,7 @@ class TeamMessageCoordinator {
     return results;
   }
 
-  sendTo(recipient, content, sender) {
+  sendTo(recipient: string, content: string, sender: string) {
     if (!this.members.has(recipient)) {
       return { ok: false, error: `Agent "${recipient}" is not a member of team "${this.teamName}"` };
     }

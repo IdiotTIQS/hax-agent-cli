@@ -13,6 +13,12 @@ import { execSync } from "child_process";
 import fs from "fs";
 import path from "path";
 
+interface ExecError extends Error {
+  stdout?: string;
+  stderr?: string;
+  status?: number;
+}
+
 // === Agent Tool ===
 
 const agentTool = {
@@ -61,11 +67,11 @@ const agentTool = {
   /**
    * Execute the agent tool.
    */
-  async execute(args, ctx) {
-    const description = args.description || "Unnamed task";
-    const prompt = args.prompt || args.description || "";
-    const mode = args.mode || "local_agent";
-    const maxTurns = Math.min(args.max_turns || 15, 50); // cap at 50
+  async execute(args: Record<string, unknown>, ctx: Record<string, unknown>) {
+    const description = (args.description as string) || "Unnamed task";
+    const prompt = (args.prompt as string) || (args.description as string) || "";
+    const mode = (args.mode as string) || "local_agent";
+    const maxTurns = Math.min((args.max_turns as number) || 15, 50); // cap at 50
     const runInBackground = !!args.run_in_background;
 
     // Generate unique agent ID
@@ -110,13 +116,13 @@ const agentTool = {
  * Run a local sub-agent using the current HaxAgent CLI.
  * Spawns a child process with hax-agent --batch mode.
  */
-async function _runLocalAgent(agentId, description, prompt, maxTurns, ctx) {
+async function _runLocalAgent(agentId: string, description: string, prompt: string, maxTurns: number, ctx: Record<string, unknown>) {
   const startTime = Date.now();
 
   try {
     // Build the batch command
-    const haxPath = ctx.haxAgentPath || _findHaxAgentPath();
-    const cwd = ctx.root || process.cwd();
+    const haxPath = (ctx.haxAgentPath as string) || _findHaxAgentPath();
+    const cwd = (ctx.root as string) || process.cwd();
 
     if (!haxPath) {
       // No CLI available — return simulated result for now
@@ -159,8 +165,9 @@ async function _runLocalAgent(agentId, description, prompt, maxTurns, ctx) {
         },
       };
     } catch (err) {
-      const stderr = err.stderr || "";
-      const stdout = err.stdout || "";
+      const e = err as ExecError;
+      const stderr = e.stderr || "";
+      const stdout = e.stdout || "";
 
       return {
         ok: false,
@@ -174,8 +181,8 @@ async function _runLocalAgent(agentId, description, prompt, maxTurns, ctx) {
         },
         error: {
           code: "AGENT_EXECUTION_FAILED",
-          message: err.message,
-          exitCode: err.status || 1,
+          message: e.message,
+          exitCode: e.status || 1,
         },
       };
     }
@@ -184,7 +191,7 @@ async function _runLocalAgent(agentId, description, prompt, maxTurns, ctx) {
       ok: false,
       error: {
         code: "AGENT_SPAWN_FAILED",
-        message: `Failed to spawn local agent: ${err.message}`,
+        message: `Failed to spawn local agent: ${(err as Error).message}`,
       },
     };
   }
@@ -193,7 +200,7 @@ async function _runLocalAgent(agentId, description, prompt, maxTurns, ctx) {
 /**
  * Deferred: run a remote sub-agent via network.
  */
-function _runRemoteAgent(agentId, description, prompt, maxTurns, ctx) {
+function _runRemoteAgent(agentId: string, description: string, prompt: string, maxTurns: number, ctx: Record<string, unknown>) {
   return {
     ok: true,
     data: {
@@ -209,7 +216,7 @@ function _runRemoteAgent(agentId, description, prompt, maxTurns, ctx) {
 /**
  * Find the hax-agent CLI binary path.
  */
-function _findHaxAgentPath() {
+function _findHaxAgentPath(): string | null {
   try {
     // Try to find hax-agent in node_modules/.bin
     const candidates = [

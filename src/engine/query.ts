@@ -17,8 +17,57 @@ const MAX_TRACKED_VERIFIED_WORK = 10;
 const MAX_SAFE_COMPLETION_TOKENS = 128000;
 const TOOL_INLINE_MAX_CHARS = 8000;
 
+interface TaskFocusState {
+  goal: string;
+  recent_goals: string[];
+  active_artifacts: string[];
+  verified_state: string[];
+  next_step: string;
+}
+
+interface ReadFileEntry {
+  path: string;
+  span: string;
+  preview: string;
+  timestamp: number;
+}
+
+interface ToolMetadata {
+  task_focus_state: TaskFocusState;
+  read_file_state: ReadFileEntry[];
+  invoked_skills: string[];
+  recent_work_log: string[];
+  [key: string]: unknown;
+}
+
+interface QueryContextOptions {
+  cwd?: string;
+  model?: string;
+  systemPrompt?: string;
+  maxTokens?: number;
+  effort?: string | null;
+  contextWindowTokens?: number | null;
+  autoCompactThresholdTokens?: number | null;
+  maxTurns?: number;
+  permissionChecker?: unknown;
+  hookExecutor?: unknown;
+  toolMetadata?: Partial<ToolMetadata>;
+}
+
 class QueryContext {
-  constructor(o = {}) {
+  cwd: string;
+  model: string;
+  systemPrompt: string;
+  maxTokens: number;
+  effort: string | null;
+  contextWindowTokens: number | null;
+  autoCompactThresholdTokens: number | null;
+  maxTurns: number;
+  permissionChecker: unknown;
+  hookExecutor: unknown;
+  toolMetadata: ToolMetadata;
+
+  constructor(o: QueryContextOptions = {}) {
     this.cwd = o.cwd || process.cwd();
     this.model = o.model || "";
     this.systemPrompt = o.systemPrompt || "";
@@ -29,7 +78,7 @@ class QueryContext {
     this.maxTurns = o.maxTurns ?? 200;
     this.permissionChecker = o.permissionChecker || null;
     this.hookExecutor = o.hookExecutor || null;
-    this.toolMetadata = o.toolMetadata || {};
+    this.toolMetadata = (o.toolMetadata || {}) as ToolMetadata;
 
     // Initialize task focus state
     if (!this.toolMetadata.task_focus_state) {
@@ -43,13 +92,13 @@ class QueryContext {
     if (!this.toolMetadata.recent_work_log) this.toolMetadata.recent_work_log = [];
   }
 
-  get taskFocus() { return this.toolMetadata.task_focus_state || {}; }
-  get readFiles() { return this.toolMetadata.read_file_state || []; }
-  get invokedSkills() { return this.toolMetadata.invoked_skills || []; }
-  get workLog() { return this.toolMetadata.recent_work_log || []; }
+  get taskFocus(): TaskFocusState { return this.toolMetadata.task_focus_state; }
+  get readFiles(): ReadFileEntry[] { return this.toolMetadata.read_file_state; }
+  get invokedSkills(): string[] { return this.toolMetadata.invoked_skills; }
+  get workLog(): string[] { return this.toolMetadata.recent_work_log; }
 
   /** Append to a capped unique list */
-  _appendCapped(bucket, value, limit) {
+  _appendCapped(bucket: unknown[], value: unknown, limit: number) {
     const idx = bucket.indexOf(value);
     if (idx >= 0) bucket.splice(idx, 1);
     bucket.push(value);
@@ -57,9 +106,9 @@ class QueryContext {
   }
 
   /** Track a read file operation */
-  rememberReadFile(filePath, offset, limit, output) {
+  rememberReadFile(filePath: string, offset: number, limit: number, output: string) {
     const preview = output.split("\n").slice(0, 6).map(l => l.trim()).filter(Boolean).join(" | ").slice(0, 320);
-    const entry = { path: filePath, span: `lines ${offset + 1}-${offset + limit}`, preview, timestamp: Date.now() };
+    const entry: ReadFileEntry = { path: filePath, span: `lines ${offset + 1}-${offset + limit}`, preview, timestamp: Date.now() };
     const bucket = this.toolMetadata.read_file_state;
     const idx = bucket.findIndex(e => e.path === filePath);
     if (idx >= 0) bucket.splice(idx, 1);
@@ -68,26 +117,26 @@ class QueryContext {
   }
 
   /** Track a skill invocation */
-  rememberSkill(skillName) {
+  rememberSkill(skillName: string) {
     const n = (skillName || "").trim();
     if (!n) return;
     this._appendCapped(this.toolMetadata.invoked_skills, n, MAX_TRACKED_SKILLS);
   }
 
   /** Track a work log entry */
-  rememberWorkLog(entry) {
+  rememberWorkLog(entry: string) {
     if (!entry) return;
     this._appendCapped(this.toolMetadata.recent_work_log, entry.trim().slice(0, 320), MAX_TRACKED_WORK_LOG);
   }
 
   /** Track verified work */
-  rememberVerifiedWork(entry) {
+  rememberVerifiedWork(entry: string) {
     if (!entry) return;
     this._appendCapped(this.toolMetadata.task_focus_state.verified_state, entry.trim().slice(0, 320), MAX_TRACKED_VERIFIED_WORK);
   }
 
   /** Set current goal */
-  setGoal(goal) {
+  setGoal(goal: string) {
     const summary = (goal || "").replace(/\s+/g, " ").trim().slice(0, 240);
     if (!summary) return;
     const tf = this.toolMetadata.task_focus_state;
@@ -96,8 +145,8 @@ class QueryContext {
   }
 
   /** Build context summary for system prompt injection */
-  buildContextSummary() {
-    const parts = [];
+  buildContextSummary(): string {
+    const parts: string[] = [];
     const tf = this.taskFocus;
     if (tf.goal) parts.push(`Current goal: ${tf.goal}`);
     if (tf.next_step) parts.push(`Next step: ${tf.next_step}`);
@@ -117,22 +166,22 @@ class QueryContext {
 
 // === Tool Output Offloading ===
 
-function offloadToolOutput(toolName, toolUseId, output) {
-  if (typeof output !== "string") output = JSON.stringify(output);
-  if (output.length <= TOOL_INLINE_MAX_CHARS) return { inline: output, file: null };
+function offloadToolOutput(toolName: string, toolUseId: string, output: unknown): { inline: string; file: string | null } {
+  let out: string = typeof output === "string" ? output : JSON.stringify(output);
+  if (out.length <= TOOL_INLINE_MAX_CHARS) return { inline: out, file: null };
 
   const dir = path.join(os.homedir(), ".haxagent", "tool_artifacts");
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
   const ts = new Date().toISOString().replace(/[:.]/g, "-");
   const safe = toolName.replace(/[^A-Za-z0-9_.-]+/g, "_").slice(0, 80);
   const fp = path.join(dir, `${ts}-${safe}-${Date.now().toString(36)}.txt`);
-  fs.writeFileSync(fp, output, "utf-8");
+  fs.writeFileSync(fp, out, "utf-8");
 
-  const preview = output.slice(0, 500);
-  const omitted = output.length - preview.length;
+  const preview = out.slice(0, 500);
+  const omitted = out.length - preview.length;
   const inline = [
     "[Tool output truncated]",
-    `Tool: ${toolName}`, `Original size: ${output.length.toLocaleString()} chars`,
+    `Tool: ${toolName}`, `Original size: ${out.length.toLocaleString()} chars`,
     `Full output saved to: ${fp}`,
     `\nPreview (${preview.length.toLocaleString()} chars):\n${preview}${omitted > 0 ? `\n... ${omitted.toLocaleString()} chars omitted` : ""}`,
   ].join("\n");
@@ -149,11 +198,11 @@ import { classifyApiError, isContextTooLongError } from "../core/api/errors.js";
  * @deprecated Use isContextTooLongError from core/api/errors instead.
  * Kept for backward compatibility.
  */
-function isPromptTooLongError(err) {
+function isPromptTooLongError(err: unknown): boolean {
   return isContextTooLongError(err);
 }
 
-function boundedCompletionTokens(maxTokens, contextWindow) {
+function boundedCompletionTokens(maxTokens: number, contextWindow: number | null | undefined): number {
   let limit = MAX_SAFE_COMPLETION_TOKENS;
   if (contextWindow && contextWindow > 0) limit = Math.min(limit, contextWindow);
   return Math.max(1, Math.min(maxTokens, limit));
@@ -163,7 +212,7 @@ function boundedCompletionTokens(maxTokens, contextWindow) {
 
 const IMAGE_PREPROCESS_STATUS = "Converting image to text description via vision model...";
 
-function hasImageBlocks(messages) {
+function hasImageBlocks(messages: Array<{ content?: unknown }>): boolean {
   for (const m of messages) {
     if (Array.isArray(m.content)) {
       for (const b of m.content) if (b && b.type === "image") return true;
@@ -174,13 +223,13 @@ function hasImageBlocks(messages) {
 
 // === Tool Context Tracking ===
 
-function rememberToolContext(ctx, toolName, toolInput, toolOutput) {
+function rememberToolContext(ctx: QueryContext | null, toolName: string, toolInput: Record<string, unknown>, toolOutput: unknown): void {
   if (!ctx || !(ctx instanceof QueryContext)) return;
 
   const input = toolInput || {};
   // File read tracking
   if (toolName === "file.read" && input.path) {
-    ctx.rememberReadFile(input.path, input.offset || 0, input.limit || 200, typeof toolOutput === "string" ? toolOutput : "");
+    ctx.rememberReadFile(String(input.path), Number(input.offset) || 0, Number(input.limit) || 200, typeof toolOutput === "string" ? toolOutput : "");
     ctx.rememberWorkLog(`Read file ${input.path}`);
   }
   // File write/edit tracking
@@ -194,24 +243,24 @@ function rememberToolContext(ctx, toolName, toolInput, toolOutput) {
   }
   // Shell tracking
   else if (toolName === "shell.run") {
-    const cmd = input.command || "";
+    const cmd = String(input.command || "");
     const summary = (typeof toolOutput === "string" ? toolOutput : "").split("\n")[0]?.trim().slice(0, 120) || "ran";
     ctx.rememberWorkLog(`Ran ${cmd.slice(0, 160)} [${summary}]`);
     ctx.rememberVerifiedWork(`Ran shell: ${cmd.slice(0, 180)}`);
   }
   // Web search tracking
   else if (toolName === "web.search" && input.query) {
-    ctx.rememberVerifiedWork(`Searched web for ${input.query.slice(0, 180)}`);
+    ctx.rememberVerifiedWork(`Searched web for ${String(input.query).slice(0, 180)}`);
   }
   else if (toolName === "web.fetch" && input.url) {
-    ctx.rememberVerifiedWork(`Fetched ${input.url.slice(0, 180)}`);
+    ctx.rememberVerifiedWork(`Fetched ${String(input.url).slice(0, 180)}`);
   }
   else if (toolName === "file.glob" && input.pattern) {
-    ctx.rememberVerifiedWork(`Glob ${input.pattern.slice(0, 180)}`);
+    ctx.rememberVerifiedWork(`Glob ${String(input.pattern).slice(0, 180)}`);
   }
   else if (toolName === "skill") {
-    ctx.rememberSkill(input.name || "");
-    ctx.rememberWorkLog(`Loaded skill ${input.name || ""}`);
+    ctx.rememberSkill(String(input.name || ""));
+    ctx.rememberWorkLog(`Loaded skill ${String(input.name || "")}`);
   }
 }
 
