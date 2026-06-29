@@ -14,6 +14,7 @@ const nodeArgs = [
   'test/anthropic-provider.test.ts',
   'test/engine-system-prompt.test.ts',
   'test/engine-tool-result.test.ts',
+  'test/tui-ink-markdown.test.ts',
 ];
 
 const major = parseInt(process.versions.node.split('.')[0], 10);
