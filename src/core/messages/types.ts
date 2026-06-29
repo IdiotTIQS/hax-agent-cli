@@ -17,27 +17,48 @@ const ContentBlockType = {
   TOOL_USE: "tool_use",
   TOOL_RESULT: "tool_result",
   THINKING: "thinking",
-};
+} as const;
 
-/**
- * TextBlock - plain text content
- * @typedef {Object} TextBlock
- * @property {"text"} type
- * @property {string} text
- */
-function createTextBlock(text) {
+// === Content Block Interfaces ===
+
+interface TextBlock {
+  type: "text";
+  text: string;
+}
+
+interface ImageBlock {
+  type: "image";
+  source_type: string;
+  media_type: string;
+  data: string;
+}
+
+interface ToolUseBlock {
+  type: "tool_use";
+  id: string;
+  name: string;
+  input: Record<string, unknown>;
+}
+
+interface ToolResultBlock {
+  type: "tool_result";
+  tool_use_id: string;
+  content: string;
+  is_error: boolean;
+}
+
+interface ThinkingBlock {
+  type: "thinking";
+  thinking: string;
+}
+
+type ContentBlock = TextBlock | ImageBlock | ToolUseBlock | ToolResultBlock | ThinkingBlock;
+
+function createTextBlock(text: string): TextBlock {
   return { type: ContentBlockType.TEXT, text: String(text) };
 }
 
-/**
- * ImageBlock - base64-encoded image
- * @typedef {Object} ImageBlock
- * @property {"image"} type
- * @property {string} source_type - "base64"
- * @property {string} media_type - e.g. "image/png"
- * @property {string} data - base64-encoded data
- */
-function createImageBlock(base64Data, mediaType = "image/png") {
+function createImageBlock(base64Data: string, mediaType = "image/png"): ImageBlock {
   return {
     type: ContentBlockType.IMAGE,
     source_type: "base64",
@@ -46,27 +67,11 @@ function createImageBlock(base64Data, mediaType = "image/png") {
   };
 }
 
-/**
- * ToolUseBlock - LLM requests a tool call
- * @typedef {Object} ToolUseBlock
- * @property {"tool_use"} type
- * @property {string} id - unique tool_use ID
- * @property {string} name - tool name
- * @property {Object} input - tool arguments
- */
-function createToolUseBlock(id, name, input = {}) {
+function createToolUseBlock(id: string, name: string, input: Record<string, unknown> = {}): ToolUseBlock {
   return { type: ContentBlockType.TOOL_USE, id, name, input };
 }
 
-/**
- * ToolResultBlock - result from a tool execution
- * @typedef {Object} ToolResultBlock
- * @property {"tool_result"} type
- * @property {string} tool_use_id - matches ToolUseBlock.id
- * @property {string} content - result text
- * @property {boolean} [is_error] - whether the tool call failed
- */
-function createToolResultBlock(toolUseId, content, isError = false) {
+function createToolResultBlock(toolUseId: string, content: string | unknown, isError = false): ToolResultBlock {
   return {
     type: ContentBlockType.TOOL_RESULT,
     tool_use_id: toolUseId,
@@ -75,13 +80,7 @@ function createToolResultBlock(toolUseId, content, isError = false) {
   };
 }
 
-/**
- * ThinkingBlock - reasoning/thinking content (Claude extended thinking)
- * @typedef {Object} ThinkingBlock
- * @property {"thinking"} type
- * @property {string} thinking - reasoning content
- */
-function createThinkingBlock(thinking) {
+function createThinkingBlock(thinking: string): ThinkingBlock {
   return { type: ContentBlockType.THINKING, thinking: String(thinking) };
 }
 
@@ -91,7 +90,27 @@ const MessageRole = {
   USER: "user",
   ASSISTANT: "assistant",
   SYSTEM: "system",
-};
+} as const;
+
+interface MessageMetadata {
+  model?: string;
+  usage?: Record<string, number>;
+  timestamp?: number;
+  [key: string]: unknown;
+}
+
+interface StandardMessageOptions {
+  role?: string;
+  content?: ContentBlock[];
+  metadata?: MessageMetadata;
+}
+
+// Typed result object for toOpenAIFormat
+interface OpenAIMessage {
+  role: string;
+  content?: string;
+  tool_calls?: Array<{ id: string; type: string; function: { name: string; arguments: string } }>;
+}
 
 /**
  * StandardMessage - typed conversation message
@@ -99,48 +118,48 @@ const MessageRole = {
  * Mirrors OpenHarness's ConversationMessage(BaseModel):
  * - role: "user" | "assistant"
  * - content: list[ContentBlock] (discriminated by type)
- *
- * @property {"user"|"assistant"} role
- * @property {Array<TextBlock|ImageBlock|ToolUseBlock|ToolResultBlock|ThinkingBlock>} content
- * @property {Object} [metadata] - optional metadata (model, usage, timestamp)
  */
 class StandardMessage {
-  constructor(o = {}) {
+  role: string;
+  content: ContentBlock[];
+  metadata: MessageMetadata;
+
+  constructor(o: StandardMessageOptions = {}) {
     this.role = o.role || MessageRole.USER;
     this.content = o.content || [];
     this.metadata = o.metadata || {};
   }
 
   /** Get all text content concatenated */
-  get text() {
+  get text(): string {
     return this.content
       .filter((c) => c.type === ContentBlockType.TEXT)
-      .map((c) => c.text)
+      .map((c) => (c as TextBlock).text)
       .join("");
   }
 
   /** Get all tool_use blocks */
-  get toolUses() {
-    return this.content.filter((c) => c.type === ContentBlockType.TOOL_USE);
+  get toolUses(): ToolUseBlock[] {
+    return this.content.filter((c): c is ToolUseBlock => c.type === ContentBlockType.TOOL_USE);
   }
 
   /** Get all tool_result blocks */
-  get toolResults() {
-    return this.content.filter((c) => c.type === ContentBlockType.TOOL_RESULT);
+  get toolResults(): ToolResultBlock[] {
+    return this.content.filter((c): c is ToolResultBlock => c.type === ContentBlockType.TOOL_RESULT);
   }
 
   /** Get all image blocks */
-  get images() {
-    return this.content.filter((c) => c.type === ContentBlockType.IMAGE);
+  get images(): ImageBlock[] {
+    return this.content.filter((c): c is ImageBlock => c.type === ContentBlockType.IMAGE);
   }
 
   /** Check if this message contains any tool calls */
-  get hasToolUses() {
+  get hasToolUses(): boolean {
     return this.content.some((c) => c.type === ContentBlockType.TOOL_USE);
   }
 
   /** Quick factory: user message with text */
-  static user(text) {
+  static user(text: string): StandardMessage {
     return new StandardMessage({
       role: MessageRole.USER,
       content: [createTextBlock(text)],
@@ -148,7 +167,7 @@ class StandardMessage {
   }
 
   /** Quick factory: assistant message with text */
-  static assistant(text) {
+  static assistant(text: string): StandardMessage {
     return new StandardMessage({
       role: MessageRole.ASSISTANT,
       content: [createTextBlock(text)],
@@ -156,7 +175,7 @@ class StandardMessage {
   }
 
   /** Quick factory: tool result message */
-  static toolResult(toolUseId, result, isError = false) {
+  static toolResult(toolUseId: string, result: unknown, isError = false): StandardMessage {
     return new StandardMessage({
       role: MessageRole.USER,
       content: [createToolResultBlock(toolUseId, result, isError)],
@@ -165,9 +184,8 @@ class StandardMessage {
 
   /**
    * Convert to Anthropic API format
-   * @returns {Object} { role, content }
    */
-  toAnthropicFormat() {
+  toAnthropicFormat(): { role: string; content: unknown[] } {
     const content = this.content.map((block) => {
       switch (block.type) {
         case ContentBlockType.TEXT:
@@ -194,13 +212,13 @@ class StandardMessage {
   }
 
   /**
-   * Convert to OpenAI API format
+   * Convert to OpenAI API format.
    * Returns a plain { role, content } object. Tool calls/results are handled
    * separately by the OpenAI adapter (tool_calls / tool role).
    */
-  toOpenAIFormat() {
+  toOpenAIFormat(): OpenAIMessage {
     let textContent = "";
-    const toolCalls = [];
+    const toolCalls: Array<{ id: string; type: string; function: { name: string; arguments: string } }> = [];
 
     for (const block of this.content) {
       switch (block.type) {
@@ -220,7 +238,7 @@ class StandardMessage {
       }
     }
 
-    const result = { role: this.role };
+    const result: OpenAIMessage = { role: this.role };
     if (textContent) result.content = textContent;
     if (toolCalls.length > 0) result.tool_calls = toolCalls;
     return result;
@@ -229,7 +247,7 @@ class StandardMessage {
   /**
    * Convert to a compact serializable form for persistence
    */
-  toJSON() {
+  toJSON(): { role: string; content: ContentBlock[]; metadata: MessageMetadata } {
     return {
       role: this.role,
       content: this.content,
@@ -240,15 +258,15 @@ class StandardMessage {
   /**
    * Restore from serialized JSON
    */
-  static fromJSON(json) {
+  static fromJSON(json: StandardMessageOptions): StandardMessage {
     return new StandardMessage(json);
   }
 
   /**
-   * Estimate token count for this message
+   * Estimate token count for this message.
    * Uses character-based heuristic with CJK awareness (~1.5 chars/token for Latin, ~0.6 for CJK)
    */
-  estimateTokens() {
+  estimateTokens(): number {
     let count = 0;
     for (const block of this.content) {
       if (block.type === ContentBlockType.TEXT) {
@@ -291,13 +309,18 @@ const StreamEventType = {
   RETRY: "retry",
   COMPACT_PROGRESS: "compact_progress",
   STATUS: "status",
-};
+} as const;
+
+interface StreamEventData {
+  timestamp?: number;
+  [key: string]: unknown;
+}
 
 /**
  * Create a standardized stream event
  */
-function createStreamEvent(type, data = {}) {
-  return { type, ...data, timestamp: data.timestamp || Date.now() };
+function createStreamEvent(type: string, data: StreamEventData = {}): StreamEventData & { type: string; timestamp: number } {
+  return { type, ...data, timestamp: data.timestamp ?? Date.now() };
 }
 
 // === Helper: Token Estimation ===
@@ -306,11 +329,11 @@ function createStreamEvent(type, data = {}) {
  * Estimate token count for a text string.
  * Uses CJK-aware heuristic: CJK characters ~0.6 tokens/char, Latin ~0.25 tokens/char.
  */
-function estimateTextTokens(text) {
+function estimateTextTokens(text: string | null | undefined): number {
   if (!text) return 0;
   let tokens = 0;
   for (const ch of text) {
-    const code = ch.codePointAt(0);
+    const code = ch.codePointAt(0) ?? 0;
     if (
       (code >= 0x4E00 && code <= 0x9FFF) || // CJK Unified
       (code >= 0x3400 && code <= 0x4DBF) || // CJK Extension A
@@ -328,10 +351,17 @@ function estimateTextTokens(text) {
   return Math.ceil(tokens) + 4; // +4 for message overhead
 }
 
+/** Shape accepted by estimateMessageTokens — loosely typed for interop */
+interface MessageLike {
+  estimateTokens?: () => number;
+  role?: string;
+  content?: unknown;
+}
+
 /**
  * Estimate total tokens for a list of messages
  */
-function estimateMessageTokens(messages) {
+function estimateMessageTokens(messages: MessageLike[]): number {
   return messages.reduce((sum, m) => {
     if (m instanceof StandardMessage) return sum + m.estimateTokens();
     if (typeof m.estimateTokens === "function") return sum + m.estimateTokens();
@@ -345,12 +375,14 @@ function estimateMessageTokens(messages) {
  * Sanitize a conversation by removing empty/duplicate messages
  * and ensuring tool_use/tool_result pairing integrity.
  */
-function sanitizeConversation(messages) {
-  const result = [];
-  const pendingToolUseIds = new Set();
+function sanitizeConversation(messages: MessageLike[]): StandardMessage[] {
+  const result: StandardMessage[] = [];
+  const pendingToolUseIds = new Set<string>();
 
   for (const msg of messages) {
-    const m = msg instanceof StandardMessage ? msg : new StandardMessage({ role: msg.role, content: msg.content || [] });
+    const m = msg instanceof StandardMessage
+      ? msg
+      : new StandardMessage({ role: msg.role, content: (msg.content as ContentBlock[]) || [] });
 
     // Skip empty messages
     if (!m.content || m.content.length === 0) continue;
@@ -385,9 +417,9 @@ function sanitizeConversation(messages) {
  * Create an ImageBlock from a local file path.
  * Reads the file and base64-encodes it.
  */
-function createImageFromPath(filePath) {
+function createImageFromPath(filePath: string): ImageBlock {
   const ext = path.extname(filePath).toLowerCase();
-  const mediaTypes = {
+  const mediaTypes: Record<string, string> = {
     ".png": "image/png",
     ".jpg": "image/jpeg",
     ".jpeg": "image/jpeg",
@@ -405,7 +437,7 @@ function createImageFromPath(filePath) {
 /**
  * Convert a list of StandardMessages to Anthropic API format
  */
-function toAnthropicMessages(messages) {
+function toAnthropicMessages(messages: MessageLike[]): unknown[] {
   return messages.map((m) =>
     m instanceof StandardMessage ? m.toAnthropicFormat() : { role: m.role, content: m.content }
   );
@@ -414,13 +446,15 @@ function toAnthropicMessages(messages) {
 /**
  * Convert a list of StandardMessages to OpenAI API format
  */
-function toOpenAIMessages(messages, systemPrompt = null) {
-  const result = [];
+function toOpenAIMessages(messages: MessageLike[], systemPrompt: string | null = null): unknown[] {
+  const result: unknown[] = [];
   if (systemPrompt) {
     result.push({ role: "system", content: String(systemPrompt) });
   }
   for (const m of messages) {
-    const standard = m instanceof StandardMessage ? m : new StandardMessage({ role: m.role, content: m.content });
+    const standard = m instanceof StandardMessage
+      ? m
+      : new StandardMessage({ role: m.role, content: (m.content as ContentBlock[]) || [] });
     const formatted = standard.toOpenAIFormat();
     if (formatted.content || formatted.tool_calls) {
       result.push(formatted);
@@ -457,4 +491,18 @@ export {
   createImageFromPath,
   toAnthropicMessages,
   toOpenAIMessages,
+};
+
+export type {
+  ContentBlock,
+  TextBlock,
+  ImageBlock,
+  ToolUseBlock,
+  ToolResultBlock,
+  ThinkingBlock,
+  MessageMetadata,
+  StandardMessageOptions,
+  MessageLike,
+  OpenAIMessage,
+  StreamEventData,
 };

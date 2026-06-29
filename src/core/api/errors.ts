@@ -31,38 +31,49 @@ const ApiErrorCode = {
   NETWORK_ERROR: "NETWORK_ERROR",
   ABORTED: "ABORTED",
   UNKNOWN: "UNKNOWN",
-};
+} as const;
+
+// === Options interface for ApiError ===
+
+interface ApiErrorOptions {
+  /** ApiErrorCode value */
+  code?: string;
+  /** Whether retrying may succeed */
+  retryable?: boolean;
+  /** HTTP status code if applicable */
+  status?: number | null;
+  /** Additional context (model, provider, etc.) */
+  details?: Record<string, unknown>;
+  /** Suggested retry delay from rate-limit headers (ms) */
+  retryAfterMs?: number | null;
+}
 
 // === Base API Error ===
 
-/**
- * @typedef {Object} ApiErrorOptions
- * @property {string} [code] - ApiErrorCode
- * @property {boolean} [retryable] - whether retrying may succeed
- * @property {number} [status] - HTTP status code if applicable
- * @property {Object} [details] - additional context (model, provider, etc.)
- * @property {number} [retryAfterMs] - suggested retry delay from headers (rate limits)
- */
-
 class ApiError extends Error {
+  code: string;
+  retryable: boolean;
+  status: number | null;
+  details: Record<string, unknown>;
+
   /**
-   * @param {string} message - human-readable error message
-   * @param {ApiErrorOptions} options
+   * @param message - human-readable error message
+   * @param options
    */
-  constructor(message, options = {}) {
+  constructor(message: string, options: ApiErrorOptions = {}) {
     super(message);
     this.name = "ApiError";
-    this.code = options.code || ApiErrorCode.UNKNOWN;
+    this.code = options.code ?? ApiErrorCode.UNKNOWN;
     this.retryable = options.retryable !== undefined ? options.retryable : false;
-    this.status = options.status || null;
-    this.details = options.details || {};
+    this.status = options.status ?? null;
+    this.details = options.details ?? {};
   }
 }
 
 // === Context Too Long Error ===
 
 class ContextTooLongError extends ApiError {
-  constructor(message, options = {}) {
+  constructor(message: string, options: ApiErrorOptions = {}) {
     super(message, {
       code: ApiErrorCode.CONTEXT_TOO_LONG,
       retryable: false,
@@ -75,11 +86,9 @@ class ContextTooLongError extends ApiError {
 // === Rate Limit Error ===
 
 class RateLimitError extends ApiError {
-  /**
-   * @param {string} message
-   * @param {ApiErrorOptions} options
-   */
-  constructor(message, options = {}) {
+  retryAfterMs: number | null;
+
+  constructor(message: string, options: ApiErrorOptions = {}) {
     super(message, {
       code: ApiErrorCode.RATE_LIMITED,
       retryable: true,
@@ -87,18 +96,18 @@ class RateLimitError extends ApiError {
       ...options,
     });
     this.name = "RateLimitError";
-    this.retryAfterMs = options.retryAfterMs || null;
+    this.retryAfterMs = options.retryAfterMs ?? null;
   }
 }
 
 // === Server Error ===
 
 class ServerError extends ApiError {
-  constructor(message, options = {}) {
+  constructor(message: string, options: ApiErrorOptions = {}) {
     super(message, {
       code: ApiErrorCode.SERVER_ERROR,
       retryable: true,
-      status: options.status || 500,
+      status: options.status ?? 500,
       ...options,
     });
     this.name = "ServerError";
@@ -108,11 +117,11 @@ class ServerError extends ApiError {
 // === Auth Error ===
 
 class AuthError extends ApiError {
-  constructor(message, options = {}) {
+  constructor(message: string, options: ApiErrorOptions = {}) {
     super(message, {
       code: ApiErrorCode.AUTH_ERROR,
       retryable: false,
-      status: options.status || 401,
+      status: options.status ?? 401,
       ...options,
     });
     this.name = "AuthError";
@@ -122,7 +131,7 @@ class AuthError extends ApiError {
 // === Bad Request Error ===
 
 class BadRequestError extends ApiError {
-  constructor(message, options = {}) {
+  constructor(message: string, options: ApiErrorOptions = {}) {
     super(message, {
       code: ApiErrorCode.BAD_REQUEST,
       retryable: false,
@@ -136,7 +145,7 @@ class BadRequestError extends ApiError {
 // === Timeout Error ===
 
 class TimeoutError extends ApiError {
-  constructor(message, options = {}) {
+  constructor(message: string, options: ApiErrorOptions = {}) {
     super(message, {
       code: ApiErrorCode.TIMEOUT,
       retryable: true,
@@ -149,7 +158,7 @@ class TimeoutError extends ApiError {
 // === Network Error ===
 
 class NetworkError extends ApiError {
-  constructor(message, options = {}) {
+  constructor(message: string, options: ApiErrorOptions = {}) {
     super(message, {
       code: ApiErrorCode.NETWORK_ERROR,
       retryable: true,
@@ -162,7 +171,7 @@ class NetworkError extends ApiError {
 // === Abort Error ===
 
 class AbortError extends ApiError {
-  constructor(message = "Request was aborted", options = {}) {
+  constructor(message = "Request was aborted", options: ApiErrorOptions = {}) {
     super(message, {
       code: ApiErrorCode.ABORTED,
       retryable: false,
@@ -175,7 +184,7 @@ class AbortError extends ApiError {
 // === Unknown Error ===
 
 class UnknownError extends ApiError {
-  constructor(message, options = {}) {
+  constructor(message: string, options: ApiErrorOptions = {}) {
     super(message, {
       code: ApiErrorCode.UNKNOWN,
       retryable: options.retryable !== undefined ? options.retryable : true,
@@ -187,22 +196,35 @@ class UnknownError extends ApiError {
 
 // === Error Classifier ===
 
+/** Shape of a raw error from an API call (deliberately loose — external sources) */
+interface RawApiError {
+  message?: string;
+  name?: string;
+  status?: number;
+  statusCode?: number;
+  response?: {
+    status?: number;
+    headers?: Record<string, string>;
+  };
+  headers?: Record<string, string>;
+}
+
 /**
  * Classify a raw error into a typed ApiError.
  *
- * @param {Error|string|Object} err - raw error from API call
- * @param {Object} [context] - { provider, model }
- * @returns {ApiError}
+ * @param err - raw error from API call
+ * @param context - { provider, model }
  */
-function classifyApiError(err, context = {}) {
+function classifyApiError(err: unknown, context: Record<string, unknown> = {}): ApiError {
   if (err instanceof ApiError) return err;
 
-  const message = err?.message || String(err);
-  const status = err?.status || err?.statusCode || err?.response?.status;
+  const raw = err as RawApiError;
+  const message = raw?.message || String(err);
+  const status = raw?.status ?? raw?.statusCode ?? raw?.response?.status;
 
   // Abort / cancel
   if (
-    err?.name === "AbortError" ||
+    raw?.name === "AbortError" ||
     message.includes("aborted") ||
     message.includes("canceled") ||
     message.includes("Request was aborted")
@@ -212,7 +234,7 @@ function classifyApiError(err, context = {}) {
 
   // Rate limiting (429)
   if (status === 429 || message.match(/rate limit|too many requests|quota exceeded/i)) {
-    const retryAfterMs = _parseRetryAfter(err);
+    const retryAfterMs = _parseRetryAfter(raw);
     return new RateLimitError(message, {
       status: 429,
       retryAfterMs,
@@ -223,7 +245,7 @@ function classifyApiError(err, context = {}) {
   // Authentication (401, 403)
   if (status === 401 || status === 403 || message.match(/unauthorized|forbidden|invalid api key|authentication/i)) {
     return new AuthError(message, {
-      status: status || 401,
+      status: status ?? 401,
       details: { ...context, originalError: err },
     });
   }
@@ -252,7 +274,7 @@ function classifyApiError(err, context = {}) {
   }
 
   // Server errors (5xx)
-  if (status && status >= 500) {
+  if (status !== undefined && status >= 500) {
     return new ServerError(message, {
       status,
       details: { ...context, originalError: err },
@@ -294,11 +316,8 @@ function classifyApiError(err, context = {}) {
 /**
  * Check if an error is a "context too long" error.
  * Replaces the old isPromptTooLongError() string match.
- *
- * @param {Error|Object} err
- * @returns {boolean}
  */
-function isContextTooLongError(err) {
+function isContextTooLongError(err: unknown): boolean {
   if (err instanceof ContextTooLongError) return true;
   const classified = classifyApiError(err);
   return classified instanceof ContextTooLongError;
@@ -306,11 +325,8 @@ function isContextTooLongError(err) {
 
 /**
  * Check if an error is retryable.
- *
- * @param {Error|Object} err
- * @returns {boolean}
  */
-function isRetryableError(err) {
+function isRetryableError(err: unknown): boolean {
   if (err instanceof ApiError) return err.retryable;
   const classified = classifyApiError(err);
   return classified.retryable;
@@ -318,10 +334,10 @@ function isRetryableError(err) {
 
 // === Retry-After Parser ===
 
-function _parseRetryAfter(err) {
+function _parseRetryAfter(err: RawApiError): number | null {
   // Try to extract from response headers
-  const headers = err?.response?.headers || err?.headers || {};
-  const retryAfter = headers["retry-after"] || headers["Retry-After"];
+  const headers = err?.response?.headers ?? err?.headers ?? {};
+  const retryAfter = headers["retry-after"] ?? headers["Retry-After"];
   if (retryAfter) {
     const seconds = parseInt(retryAfter, 10);
     if (!isNaN(seconds)) return seconds * 1000;
@@ -335,7 +351,7 @@ function _parseRetryAfter(err) {
  * Legacy string-based check for prompt-too-long errors.
  * @deprecated Use isContextTooLongError() instead.
  */
-function isPromptTooLongError(err) {
+function isPromptTooLongError(err: unknown): boolean {
   return isContextTooLongError(err);
 }
 

@@ -3,11 +3,28 @@
  * Ported from OpenHarness utils/shell.py
  */
 
-import { spawn, execSync, spawnSync } from "child_process";
+import { spawn, execSync, spawnSync, ChildProcess, StdioOptions } from "child_process";
 import path from "path";
-import { getPlatform, PlatformName } from "../platforms.js";
+import { getPlatform, PlatformName, PlatformNameValue } from "../platforms.js";
 
-function resolveShellCommand(command, opts = {}) {
+interface ResolveShellOptions {
+  platformName?: PlatformNameValue;
+}
+
+interface ResolvedShellCommand {
+  argv: string[];
+  shell: string;
+}
+
+interface SpawnShellOptions {
+  platformName?: PlatformNameValue;
+  cwd?: string;
+  stdio?: StdioOptions;
+  env?: NodeJS.ProcessEnv;
+  timeoutMs?: number;
+}
+
+function resolveShellCommand(command: string, opts: ResolveShellOptions = {}): ResolvedShellCommand {
   const plat = opts.platformName || getPlatform();
 
   if (plat === PlatformName.WINDOWS) {
@@ -27,7 +44,7 @@ function resolveShellCommand(command, opts = {}) {
   return { argv: [sh, "-lc", command], shell: "sh" };
 }
 
-function spawnShell(command, opts = {}) {
+function spawnShell(command: string, opts: SpawnShellOptions = {}): ChildProcess {
   const { argv } = resolveShellCommand(command, opts);
   const cwd = opts.cwd || process.cwd();
   return spawn(argv[0], argv.slice(1), {
@@ -37,7 +54,7 @@ function spawnShell(command, opts = {}) {
   });
 }
 
-function _which(cmd) {
+function _which(cmd: string): string | null {
   try {
     const result = execSync(
       process.platform === "win32" ? `where ${cmd} 2>nul` : `which ${cmd} 2>/dev/null`,
@@ -47,7 +64,7 @@ function _which(cmd) {
   } catch (_) { return null; }
 }
 
-function _bashIsUsable(bashPath) {
+function _bashIsUsable(bashPath: string): boolean {
   try {
     const result = spawnSync(bashPath, ["-lc", "exit 0"], { timeout: 5000 });
     return result.status === 0;
@@ -55,3 +72,4 @@ function _bashIsUsable(bashPath) {
 }
 
 export { resolveShellCommand, spawnShell };
+export type { ResolveShellOptions, ResolvedShellCommand, SpawnShellOptions };

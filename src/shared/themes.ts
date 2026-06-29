@@ -3,7 +3,19 @@
  * Ported from OpenHarness themes/ pattern.
  */
 
-const THEMES = {
+interface ThemeColors {
+  name: string;
+  description: string;
+  accent: string;
+  success: string;
+  warning: string;
+  error: string;
+  dim: string;
+  heading: string;
+  spinner: string;
+}
+
+const THEMES: Record<string, ThemeColors> = {
   default: {
     name: "Default",
     description: "Clean dark theme with blue accents",
@@ -62,16 +74,17 @@ const THEMES = {
 };
 
 /** Apply a theme to the global THEME object */
-function applyTheme(themeName, targetTheme) {
-  const theme = THEMES[themeName] || THEMES.default;
+function applyTheme(themeName: string, targetTheme?: Record<string, unknown> | null): ThemeColors {
+  const theme = THEMES[themeName] || THEMES.default!;
   if (!targetTheme) return theme;
   Object.assign(targetTheme, theme);
-  return targetTheme;
+  return targetTheme as unknown as ThemeColors;
 }
 
 /** List all available themes */
-function listThemes() {
-  return Object.entries(THEMES).map(([name, t]) => ({ name, ...t }));
+function listThemes(): Array<ThemeColors & { name: string }> {
+  return Object.entries(THEMES).map(([name, t]) => ({ ...t, name }));
 }
 
 export { THEMES, applyTheme, listThemes };
+export type { ThemeColors };

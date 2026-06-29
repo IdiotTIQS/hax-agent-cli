@@ -7,22 +7,25 @@
 
 import fs from "fs";
 import path from "path";
-import { getPlatform, PlatformName } from "../platforms.js";
+import { getPlatform, PlatformName, PlatformNameValue } from "../platforms.js";
 import { sleep } from "../shared/utils.js";
 
-class SwarmLockError extends Error { constructor(m) { super(m); this.name = "SwarmLockError"; } }
-class SwarmLockUnavailableError extends SwarmLockError { constructor(m) { super(m); this.name = "SwarmLockUnavailableError"; } }
+class SwarmLockError extends Error { constructor(m: string) { super(m); this.name = "SwarmLockError"; } }
+class SwarmLockUnavailableError extends SwarmLockError { constructor(m: string) { super(m); this.name = "SwarmLockUnavailableError"; } }
 
-function exclusiveFileLock(lockPath, fn, opts = {}) {
+interface FileLockOptions {
+  platformName?: PlatformNameValue;
+}
+
+function exclusiveFileLock<T>(lockPath: string, fn: () => T, opts: FileLockOptions = {}): T {
   const plat = opts.platformName || getPlatform();
-  const p = typeof lockPath === "string" ? lockPath : lockPath;
 
-  if (plat === PlatformName.WINDOWS) return _windowsLock(p, fn);
-  if (plat === PlatformName.MACOS || plat === PlatformName.LINUX || plat === PlatformName.WSL) return _posixLock(p, fn);
+  if (plat === PlatformName.WINDOWS) return _windowsLock(lockPath, fn);
+  if (plat === PlatformName.MACOS || plat === PlatformName.LINUX || plat === PlatformName.WSL) return _posixLock(lockPath, fn);
   throw new SwarmLockUnavailableError(`File locking not supported on platform ${plat}`);
 }
 
-function _posixLock(lockPath, fn) {
+function _posixLock<T>(lockPath: string, fn: () => T): T {
   const dir = path.dirname(lockPath);
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
   if (!fs.existsSync(lockPath)) fs.writeFileSync(lockPath, "");
@@ -43,8 +46,9 @@ function _posixLock(lockPath, fn) {
   }
 }
 
-function _windowsLock(lockPath, fn) {
+function _windowsLock<T>(lockPath: string, fn: () => T): T {
   return _posixLock(lockPath, fn); // Same fallback for Windows
 }
 
 export { exclusiveFileLock, SwarmLockError, SwarmLockUnavailableError };
+export type { FileLockOptions };

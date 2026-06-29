@@ -21,7 +21,7 @@ const PermissionMode = {
   PLAN: "plan",
   FULL_AUTO: "full_auto",
   YOLO: "yolo",
-};
+} as const;
 
 // === Sensitive Path Patterns ===
 
@@ -86,10 +86,46 @@ const SAFE_COMMANDS = [
   "git branch", "git tag", "git remote", "git config --list",
 ];
 
+// === Interfaces ===
+
+interface PermissionDecisionOptions {
+  allowed?: boolean;
+  requiresConfirmation?: boolean;
+  reason?: string;
+  isSensitive?: boolean;
+  isPackageInstall?: boolean;
+}
+
+interface PathRule {
+  pattern: string;
+  allow: boolean;
+}
+
+interface PermissionCheckerOptions {
+  mode?: string;
+  allowedTools?: string[];
+  deniedTools?: string[];
+  pathRules?: PathRule[];
+  deniedCommands?: string[];
+  sensitivePaths?: string[];
+}
+
+interface EvaluateOptions {
+  args?: Record<string, unknown>;
+  isReadOnly?: ((args: Record<string, unknown>) => boolean) | boolean;
+  cwd?: string;
+}
+
 // === Permission Decision ===
 
 class PermissionDecision {
-  constructor(o = {}) {
+  allowed: boolean;
+  requiresConfirmation: boolean;
+  reason: string;
+  isSensitive: boolean;
+  isPackageInstall: boolean;
+
+  constructor(o: PermissionDecisionOptions = {}) {
     this.allowed = o.allowed !== undefined ? o.allowed : true;
     this.requiresConfirmation = o.requiresConfirmation || false;
     this.reason = o.reason || "";
@@ -98,17 +134,17 @@ class PermissionDecision {
   }
 
   /** Quick factory: allowed without confirmation */
-  static allow(reason = "") {
+  static allow(reason = ""): PermissionDecision {
     return new PermissionDecision({ allowed: true, requiresConfirmation: false, reason });
   }
 
   /** Quick factory: denied */
-  static deny(reason = "") {
+  static deny(reason = ""): PermissionDecision {
     return new PermissionDecision({ allowed: false, reason });
   }
 
   /** Quick factory: requires user confirmation */
-  static confirm(reason = "", extra = {}) {
+  static confirm(reason = "", extra: PermissionDecisionOptions = {}): PermissionDecision {
     return new PermissionDecision({ allowed: false, requiresConfirmation: true, reason, ...extra });
   }
 }
@@ -116,16 +152,23 @@ class PermissionDecision {
 // === Permission Checker ===
 
 class PermissionChecker {
+  mode: string;
+  _alwaysAllow: Set<string>;
+  _alwaysDeny: Set<string>;
+  _pathRules: PathRule[];
+  _deniedCommands: string[];
+  _sensitivePaths: string[];
+
   /**
-   * @param {Object} options
-   * @param {string} [options.mode="default"] - permission mode
-   * @param {string[]} [options.allowedTools] - always-allowed tool names
-   * @param {string[]} [options.deniedTools] - always-denied tool names
-   * @param {Object[]} [options.pathRules] - [{ pattern: string, allow: boolean }]
-   * @param {string[]} [options.deniedCommands] - additional denied command patterns
-   * @param {string[]} [options.sensitivePaths] - additional sensitive path patterns
+   * @param options
+   * @param options.mode - permission mode
+   * @param options.allowedTools - always-allowed tool names
+   * @param options.deniedTools - always-denied tool names
+   * @param options.pathRules - [{ pattern: string, allow: boolean }]
+   * @param options.deniedCommands - additional denied command patterns
+   * @param options.sensitivePaths - additional sensitive path patterns
    */
-  constructor(o = {}) {
+  constructor(o: PermissionCheckerOptions = {}) {
     this.mode = o.mode || PermissionMode.DEFAULT;
     this._alwaysAllow = new Set((o.allowedTools || []).map((t) => t.toLowerCase()));
     this._alwaysDeny = new Set((o.deniedTools || []).map((t) => t.toLowerCase()));
@@ -137,14 +180,13 @@ class PermissionChecker {
   /**
    * Evaluate whether a tool call is permitted.
    *
-   * @param {string} toolName - tool name
-   * @param {Object} options
-   * @param {Object} [options.args] - tool arguments
-   * @param {Function} [options.isReadOnly] - fn(args) => boolean (from tool definition)
-   * @param {string} [options.cwd] - working directory (for path resolution)
-   * @returns {PermissionDecision}
+   * @param toolName - tool name
+   * @param opts
+   * @param opts.args - tool arguments
+   * @param opts.isReadOnly - fn(args) => boolean (from tool definition)
+   * @param opts.cwd - working directory (for path resolution)
    */
-  evaluate(toolName, opts = {}) {
+  evaluate(toolName: string, opts: EvaluateOptions = {}): PermissionDecision {
     const name = String(toolName).toLowerCase();
     const args = opts.args || {};
     const cwd = opts.cwd || process.cwd();
@@ -204,7 +246,7 @@ class PermissionChecker {
         );
 
       case PermissionMode.DEFAULT:
-      default:
+      default: {
         // Modifying operations require confirmation
         const isModifying = !this._isReadOnlyByDefault(name, args);
         if (isModifying) {
@@ -213,14 +255,14 @@ class PermissionChecker {
           );
         }
         return PermissionDecision.allow(`Tool "${name}" appears to be read-only`);
+      }
     }
   }
 
   /**
    * Check if a path matches any sensitive pattern.
-   * @returns {{ pattern: string, path: string } | null}
    */
-  _checkSensitivePaths(args, cwd) {
+  _checkSensitivePaths(args: Record<string, unknown>, cwd: string): { pattern: string; path: string } | null {
     const filePaths = this._extractFilePaths(args, cwd);
     for (const filePath of filePaths) {
       for (const pattern of this._sensitivePaths) {
@@ -235,7 +277,7 @@ class PermissionChecker {
   /**
    * Check path-based allow/deny rules.
    */
-  _checkPathRules(args, cwd) {
+  _checkPathRules(args: Record<string, unknown>, cwd: string): PermissionDecision | null {
     const filePaths = this._extractFilePaths(args, cwd);
     for (const rule of this._pathRules) {
       for (const filePath of filePaths) {
@@ -254,21 +296,21 @@ class PermissionChecker {
   /**
    * Extract file paths from tool arguments.
    */
-  _extractFilePaths(args, cwd) {
-    const paths = [];
-    if (args.path) paths.push(this._normalizePath(args.path, cwd));
-    if (args.filePath) paths.push(this._normalizePath(args.filePath, cwd));
-    if (args.target) paths.push(this._normalizePath(args.target, cwd));
-    if (args.output) paths.push(this._normalizePath(args.output, cwd));
-    if (args.source) paths.push(this._normalizePath(args.source, cwd));
-    if (args.dest) paths.push(this._normalizePath(args.dest, cwd));
+  _extractFilePaths(args: Record<string, unknown>, cwd: string): string[] {
+    const paths: string[] = [];
+    if (args.path) paths.push(this._normalizePath(String(args.path), cwd));
+    if (args.filePath) paths.push(this._normalizePath(String(args.filePath), cwd));
+    if (args.target) paths.push(this._normalizePath(String(args.target), cwd));
+    if (args.output) paths.push(this._normalizePath(String(args.output), cwd));
+    if (args.source) paths.push(this._normalizePath(String(args.source), cwd));
+    if (args.dest) paths.push(this._normalizePath(String(args.dest), cwd));
     if (Array.isArray(args.paths)) {
-      for (const p of args.paths) paths.push(this._normalizePath(p, cwd));
+      for (const p of args.paths) paths.push(this._normalizePath(String(p), cwd));
     }
     return paths;
   }
 
-  _normalizePath(p, cwd) {
+  _normalizePath(p: string, cwd: string): string {
     if (!p || typeof p !== "string") return "";
     try {
       const resolved = path.resolve(cwd, p);
@@ -281,8 +323,8 @@ class PermissionChecker {
   /**
    * Check if a command matches any dangerous pattern.
    */
-  _checkDangerousCommands(args) {
-    const cmd = (args.command || "").toLowerCase().trim();
+  _checkDangerousCommands(args: Record<string, unknown>): PermissionDecision | null {
+    const cmd = (String(args.command || "")).toLowerCase().trim();
     if (!cmd) return null;
 
     for (const pattern of this._deniedCommands) {
@@ -298,8 +340,8 @@ class PermissionChecker {
   /**
    * Check if command is a package install operation.
    */
-  _checkPackageInstall(args) {
-    const cmd = (args.command || "").trim();
+  _checkPackageInstall(args: Record<string, unknown>): PermissionDecision | null {
+    const cmd = (String(args.command || "")).trim();
     for (const marker of PACKAGE_INSTALL_MARKERS) {
       if (cmd.startsWith(marker) || cmd.includes(" " + marker)) {
         return PermissionDecision.confirm(
@@ -314,7 +356,7 @@ class PermissionChecker {
   /**
    * Default read-only check based on tool name.
    */
-  _isReadOnlyByDefault(name, args) {
+  _isReadOnlyByDefault(name: string, args: Record<string, unknown>): boolean {
     const readOnlyTools = new Set([
       "file.read", "file.glob", "file.search", "file.readdir",
       "web.fetch", "web.search",
@@ -326,7 +368,7 @@ class PermissionChecker {
 
     // shell.run with safe commands
     if (name === "shell.run") {
-      const cmd = (args.command || "").toLowerCase();
+      const cmd = (String(args.command || "")).toLowerCase();
       return SAFE_COMMANDS.some((s) => cmd === s || cmd.startsWith(s + " "));
     }
 
@@ -337,7 +379,7 @@ class PermissionChecker {
    * fnmatch-style glob matching.
    * Supports *, ?, [charset]
    */
-  _fnmatch(str, pattern) {
+  _fnmatch(str: string, pattern: string): boolean {
     if (!str || !pattern) return false;
     const reStr = "^" + pattern
       .replace(/[.+^${}()|[\]\\]/g, "\\$&")  // Escape regex specials
@@ -354,9 +396,9 @@ class PermissionChecker {
   /**
    * Change permission mode.
    */
-  setMode(mode) {
+  setMode(mode: string): boolean {
     const valid = [PermissionMode.DEFAULT, PermissionMode.PLAN, PermissionMode.FULL_AUTO, PermissionMode.YOLO];
-    if (valid.includes(mode)) {
+    if ((valid as string[]).includes(mode)) {
       this.mode = mode;
       return true;
     }
@@ -366,14 +408,14 @@ class PermissionChecker {
   /**
    * Add a tool to the always-allow list.
    */
-  allowTool(name) {
+  allowTool(name: string): void {
     this._alwaysAllow.add(name.toLowerCase());
   }
 
   /**
    * Add a tool to the always-deny list.
    */
-  denyTool(name) {
+  denyTool(name: string): void {
     this._alwaysDeny.add(name.toLowerCase());
     this._alwaysAllow.delete(name.toLowerCase());
   }
@@ -381,21 +423,21 @@ class PermissionChecker {
   /**
    * Add a path rule.
    */
-  addPathRule(pattern, allow = true) {
+  addPathRule(pattern: string, allow = true): void {
     this._pathRules.push({ pattern, allow });
   }
 
   /**
    * Add a sensitive path pattern.
    */
-  addSensitivePath(pattern) {
+  addSensitivePath(pattern: string): void {
     this._sensitivePaths.push(pattern);
   }
 
   /**
    * Get a human-readable summary of current configuration.
    */
-  getStatus() {
+  getStatus(): Record<string, unknown> {
     return {
       mode: this.mode,
       allowedTools: [...this._alwaysAllow],
@@ -418,3 +460,5 @@ export {
   PACKAGE_INSTALL_MARKERS,
   SAFE_COMMANDS,
 };
+
+export type { PermissionDecisionOptions, PathRule, PermissionCheckerOptions, EvaluateOptions };

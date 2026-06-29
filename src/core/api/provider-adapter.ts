@@ -39,35 +39,62 @@ const ApiStreamEventType = {
   ERROR: "error",
   RETRY: "retry",
   USAGE: "usage",
-};
+} as const;
 
 // === API Stream Events ===
 
 class ApiTextDeltaEvent {
-  constructor(text) { this.type = ApiStreamEventType.TEXT_DELTA; this.text = text; }
+  type: string;
+  text: string;
+  constructor(text: string) { this.type = ApiStreamEventType.TEXT_DELTA; this.text = text; }
 }
 
 class ApiThinkingDeltaEvent {
-  constructor(text) { this.type = ApiStreamEventType.THINKING_DELTA; this.text = text; }
+  type: string;
+  text: string;
+  constructor(text: string) { this.type = ApiStreamEventType.THINKING_DELTA; this.text = text; }
 }
 
 class ApiToolUseStartEvent {
-  constructor(id, name) { this.type = ApiStreamEventType.TOOL_USE_START; this.id = id; this.name = name; }
+  type: string;
+  id: string;
+  name: string;
+  constructor(id: string, name: string) { this.type = ApiStreamEventType.TOOL_USE_START; this.id = id; this.name = name; }
 }
 
 class ApiToolUseDeltaEvent {
-  constructor(id, delta) { this.type = ApiStreamEventType.TOOL_USE_DELTA; this.id = id; this.delta = delta; }
+  type: string;
+  id: string;
+  delta: string;
+  constructor(id: string, delta: string) { this.type = ApiStreamEventType.TOOL_USE_DELTA; this.id = id; this.delta = delta; }
+}
+
+interface ToolUse {
+  id: string;
+  name: string;
+  input: string | Record<string, unknown>;
+}
+
+interface UsageInfo {
+  inputTokens: number;
+  outputTokens: number;
+}
+
+interface ApiMessageCompleteOptions {
+  toolUses?: ToolUse[];
+  text?: string;
+  stopReason?: string;
+  usage?: UsageInfo | null;
 }
 
 class ApiMessageCompleteEvent {
-  /**
-   * @param {Object} options
-   * @param {Object[]} [options.toolUses] - [{ id, name, input }]
-   * @param {string} [options.text] - accumulated text
-   * @param {string} [options.stopReason] - "end_turn" | "max_tokens" | "tool_use" | "stop_sequence"
-   * @param {Object} [options.usage] - { inputTokens, outputTokens }
-   */
-  constructor(o = {}) {
+  type: string;
+  toolUses: ToolUse[];
+  text: string;
+  stopReason: string;
+  usage: UsageInfo | null;
+
+  constructor(o: ApiMessageCompleteOptions = {}) {
     this.type = ApiStreamEventType.MESSAGE_COMPLETE;
     this.toolUses = o.toolUses || [];
     this.text = o.text || "";
@@ -77,7 +104,11 @@ class ApiMessageCompleteEvent {
 }
 
 class ApiErrorEvent {
-  constructor(message, code = "UNKNOWN", retryable = false) {
+  type: string;
+  message: string;
+  code: string;
+  retryable: boolean;
+  constructor(message: string, code = "UNKNOWN", retryable = false) {
     this.type = ApiStreamEventType.ERROR;
     this.message = String(message);
     this.code = code;
@@ -86,7 +117,11 @@ class ApiErrorEvent {
 }
 
 class ApiRetryEvent {
-  constructor(attempt, delayMs, reason) {
+  type: string;
+  attempt: number;
+  delayMs: number;
+  reason: string;
+  constructor(attempt: number, delayMs: number, reason: string) {
     this.type = ApiStreamEventType.RETRY;
     this.attempt = attempt;
     this.delayMs = delayMs;
@@ -95,7 +130,11 @@ class ApiRetryEvent {
 }
 
 class ApiUsageEvent {
-  constructor(inputTokens, outputTokens) {
+  type: string;
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  constructor(inputTokens: number, outputTokens: number) {
     this.type = ApiStreamEventType.USAGE;
     this.inputTokens = inputTokens || 0;
     this.outputTokens = outputTokens || 0;
@@ -103,25 +142,45 @@ class ApiUsageEvent {
   }
 }
 
+/** Union of all stream event types yielded by streamMessage(). */
+type ApiStreamEvent =
+  | ApiTextDeltaEvent
+  | ApiThinkingDeltaEvent
+  | ApiToolUseStartEvent
+  | ApiToolUseDeltaEvent
+  | ApiMessageCompleteEvent
+  | ApiErrorEvent
+  | ApiRetryEvent
+  | ApiUsageEvent;
+
 // === API Message Request ===
 
-/**
- * Union of all stream event types yielded by streamMessage().
- * @typedef {ApiTextDeltaEvent|ApiThinkingDeltaEvent|ApiToolUseStartEvent|ApiToolUseDeltaEvent|ApiMessageCompleteEvent|ApiErrorEvent|ApiRetryEvent|ApiUsageEvent} ApiStreamEvent
- */
+interface ApiMessageRequestOptions {
+  model?: string | null;
+  messages?: unknown[];
+  system?: string | null;
+  tools?: unknown[];
+  maxTokens?: number;
+  signal?: AbortSignal | null;
+  metadata?: Record<string, unknown>;
+  thinking?: boolean;
+  thinkIntensity?: string | null;
+  enableCache?: boolean;
+}
 
 class ApiMessageRequest {
-  /**
-   * @param {Object} options
-   * @param {string} [options.model] - model name
-   * @param {Object[]} options.messages - conversation messages
-   * @param {string} [options.system] - system prompt
-   * @param {Object[]} [options.tools] - tool definitions [{ name, description, input_schema }]
-   * @param {number} [options.maxTokens] - max completion tokens
-   * @param {AbortSignal} [options.signal] - abort signal
-   * @param {Object} [options.metadata] - extra metadata for the request
-   */
-  constructor(o = {}) {
+  model: string | null;
+  messages: unknown[];
+  system: string | null;
+  tools: unknown[];
+  maxTokens: number;
+  signal: AbortSignal | null;
+  metadata: Record<string, unknown>;
+  thinking: boolean;
+  thinkIntensity: string | null;
+  enableCache: boolean;
+
+  constructor(o: ApiMessageRequestOptions = {}) {
     this.model = o.model || null;
     this.messages = o.messages || [];
     this.system = o.system || null;
@@ -137,12 +196,26 @@ class ApiMessageRequest {
 
 // === Base Provider Adapter ===
 
+interface ProviderAdapterOptions {
+  name?: string;
+  model?: string;
+  apiKey?: string | null;
+  apiUrl?: string | null;
+  maxTokens?: number;
+}
+
 /**
  * Abstract base class for provider adapters.
  * Subclasses must implement streamMessage().
  */
 class ProviderAdapter {
-  constructor(o = {}) {
+  name: string;
+  model: string;
+  apiKey: string | null;
+  apiUrl: string | null;
+  _maxTokens: number;
+
+  constructor(o: ProviderAdapterOptions = {}) {
     this.name = o.name || "base";
     this.model = o.model || "";
     this.apiKey = o.apiKey || null;
@@ -153,19 +226,15 @@ class ProviderAdapter {
   /**
    * Stream a message from the LLM.
    * Must be implemented by subclasses.
-   *
-   * @param {ApiMessageRequest} request
-   * @returns {AsyncGenerator<ApiStreamEvent, void, unknown>}
    */
-  async *streamMessage(request) {
+  async *streamMessage(_request: ApiMessageRequest): AsyncGenerator<ApiStreamEvent, void, unknown> {
     throw new Error("ProviderAdapter.streamMessage() must be implemented by subclass");
   }
 
   /**
    * List available models for this provider.
-   * @returns {Promise<Array<{id: string, name: string}>>}
    */
-  async listModels() {
+  async listModels(): Promise<Array<{ id: string; name: string }>> {
     return [{ id: this.model, name: this.model }];
   }
 
@@ -173,14 +242,14 @@ class ProviderAdapter {
    * Get the provider's maximum context window (in tokens).
    * Override in subclass for model-specific values.
    */
-  getMaxContextTokens() {
+  getMaxContextTokens(): number {
     return 200000; // default for Claude
   }
 
   /**
    * Get the recommended auto-compaction threshold.
    */
-  getAutocompactThreshold() {
+  getAutocompactThreshold(): number {
     return Math.floor(this.getMaxContextTokens() * 0.7);
   }
 }
@@ -188,17 +257,18 @@ class ProviderAdapter {
 // === Anthropic Provider Adapter ===
 
 class AnthropicProviderAdapter extends ProviderAdapter {
-  constructor(o = {}) {
+  constructor(o: ProviderAdapterOptions = {}) {
     super({ ...o, name: "anthropic" });
-    this.apiKey = o.apiKey || process.env.ANTHROPIC_API_KEY;
+    this.apiKey = o.apiKey || process.env.ANTHROPIC_API_KEY || null;
     this.apiUrl = o.apiUrl || "https://api.anthropic.com";
     this.model = o.model || "claude-sonnet-4-6";
   }
 
-  async *streamMessage(request) {
-    let Anthropic;
+  async *streamMessage(request: ApiMessageRequest): AsyncGenerator<ApiStreamEvent, void, unknown> {
+    // deliberate any: dynamic import of optional dep, shape unknown until runtime
+    let Anthropic: any; // eslint-disable-line @typescript-eslint/no-explicit-any
     try {
-      const mod = /** @type {any} */ (await import("@anthropic-ai/sdk"));
+      const mod = await import("@anthropic-ai/sdk") as any; // eslint-disable-line @typescript-eslint/no-explicit-any
       Anthropic = mod.default || mod;
     } catch {
       yield new ApiErrorEvent("@anthropic-ai/sdk is not installed. Run: npm install @anthropic-ai/sdk", "MISSING_DEPENDENCY", false);
@@ -216,13 +286,13 @@ class AnthropicProviderAdapter extends ProviderAdapter {
     const maxTokens = request.maxTokens || this._maxTokens;
 
     let text = "";
-    let usage = null;
-    const toolUses = [];
-    const toolUseMap = new Map(); // id → { name, input: "" }
+    let usage: Record<string, number> | null = null;
+    const toolUses: ToolUse[] = [];
+    const toolUseMap = new Map<string, { id: string; name: string; input: string }>();
 
     try {
-      /** @type {any} */
-      const body = {
+      // deliberate any: Anthropic SDK body has many optional fields not worth retyping
+      const body: any = { // eslint-disable-line @typescript-eslint/no-explicit-any
         model,
         max_tokens: maxTokens,
         stream: true,
@@ -238,7 +308,7 @@ class AnthropicProviderAdapter extends ProviderAdapter {
                 : String(request.system),
             }
           : {}),
-        ...(request.tools?.length ? { tools: this._formatTools(request.tools) } : {}),
+        ...((request.tools as unknown[])?.length ? { tools: this._formatTools(request.tools) } : {}),
       };
       if (request.thinking) {
         body.thinking = { type: "adaptive" };
@@ -268,10 +338,7 @@ class AnthropicProviderAdapter extends ProviderAdapter {
               yield new ApiTextDeltaEvent(event.delta.text);
             } else if (event.delta?.type === "input_json_delta") {
               const idx = event.index;
-              const tu = [...toolUseMap.values()].find((t) => {
-                const toolUsesArr = [...toolUseMap.values()];
-                return toolUsesArr.indexOf(t) === idx;
-              });
+              const tu = [...toolUseMap.values()].find((_t, i) => i === idx);
               if (tu) {
                 tu.input += event.delta.partial_json;
                 yield new ApiToolUseDeltaEvent(tu.id, event.delta.partial_json);
@@ -295,58 +362,65 @@ class AnthropicProviderAdapter extends ProviderAdapter {
 
       // Parse completed tool uses
       for (const tu of toolUseMap.values()) {
+        let parsedInput: Record<string, unknown>;
         try {
-          tu.input = JSON.parse(tu.input || "{}");
+          parsedInput = JSON.parse(tu.input || "{}") as Record<string, unknown>;
         } catch (_) {
-          tu.input = {};
+          parsedInput = {};
         }
-        toolUses.push(tu);
+        toolUses.push({ id: tu.id, name: tu.name, input: parsedInput });
       }
 
-    } catch (err) {
-      if (err.name === "AbortError") {
+    } catch (err: unknown) {
+      const e = err as { name?: string; status?: number; message?: string };
+      if (e.name === "AbortError") {
         yield new ApiErrorEvent("Request aborted", "ABORTED", false);
-      } else if (err.status === 429) {
-        yield new ApiErrorEvent(`Rate limited: ${err.message}`, "RATE_LIMITED", true);
-      } else if (err.status >= 500) {
-        yield new ApiErrorEvent(`Server error (${err.status}): ${err.message}`, "SERVER_ERROR", true);
-      } else if (err.message?.includes("prompt is too long") || err.message?.includes("context_length_exceeded")) {
-        yield new ApiErrorEvent(`Context length exceeded: ${err.message}`, "CONTEXT_TOO_LONG", false);
+      } else if (e.status === 429) {
+        yield new ApiErrorEvent(`Rate limited: ${e.message}`, "RATE_LIMITED", true);
+      } else if (typeof e.status === "number" && e.status >= 500) {
+        yield new ApiErrorEvent(`Server error (${e.status}): ${e.message}`, "SERVER_ERROR", true);
+      } else if (e.message?.includes("prompt is too long") || e.message?.includes("context_length_exceeded")) {
+        yield new ApiErrorEvent(`Context length exceeded: ${e.message}`, "CONTEXT_TOO_LONG", false);
       } else {
-        yield new ApiErrorEvent(err.message, "REQUEST_FAILED", err.status >= 400 && err.status < 500);
+        const retryable = typeof e.status === "number" && e.status >= 400 && e.status < 500;
+        yield new ApiErrorEvent(e.message ?? String(err), "REQUEST_FAILED", retryable);
       }
       return;
     }
 
     if (usage) {
-      yield new ApiUsageEvent(usage.input_tokens || 0, usage.output_tokens || 0);
+      yield new ApiUsageEvent((usage as Record<string, number>).input_tokens || 0, (usage as Record<string, number>).output_tokens || 0);
     }
 
     yield new ApiMessageCompleteEvent({
       toolUses,
       text,
       stopReason: toolUses.length > 0 ? "tool_use" : "end_turn",
-      usage: usage ? { inputTokens: usage.input_tokens, outputTokens: usage.output_tokens } : null,
+      usage: usage ? { inputTokens: (usage as Record<string, number>).input_tokens, outputTokens: (usage as Record<string, number>).output_tokens } : null,
     });
   }
 
-  _formatMessages(messages) {
+  _formatMessages(messages: unknown[]): unknown[] {
     return messages.map((m) => {
-      if (m.toAnthropicFormat) return m.toAnthropicFormat();
-      return { role: m.role, content: m.content };
+      const msg = m as { toAnthropicFormat?: () => unknown; role: string; content: unknown };
+      if (msg.toAnthropicFormat) return msg.toAnthropicFormat();
+      return { role: msg.role, content: msg.content };
     });
   }
 
-  _formatTools(tools) {
-    return tools.map((t) => ({
-      name: t.name,
-      description: t.description || "",
-      input_schema: t.input_schema || t.inputSchema || { type: "object", properties: {} },
-    }));
+  _formatTools(tools: unknown[]): unknown[] {
+    return tools.map((t) => {
+      const tool = t as { name: string; description?: string; input_schema?: unknown; inputSchema?: unknown };
+      return {
+        name: tool.name,
+        description: tool.description || "",
+        input_schema: tool.input_schema || tool.inputSchema || { type: "object", properties: {} },
+      };
+    });
   }
 
-  getMaxContextTokens() {
-    const modelTokens = {
+  getMaxContextTokens(): number {
+    const modelTokens: Record<string, number> = {
       "claude-opus-4-7": 200000,
       "claude-sonnet-4-6": 200000,
       "claude-haiku-4-5-20251001": 200000,
@@ -361,17 +435,18 @@ class AnthropicProviderAdapter extends ProviderAdapter {
 // === OpenAI-compatible Provider Adapter ===
 
 class OpenAIProviderAdapter extends ProviderAdapter {
-  constructor(o = {}) {
+  constructor(o: ProviderAdapterOptions = {}) {
     super({ ...o, name: o.name || "openai" });
-    this.apiKey = o.apiKey || process.env.OPENAI_API_KEY;
+    this.apiKey = o.apiKey || process.env.OPENAI_API_KEY || null;
     this.apiUrl = o.apiUrl || "https://api.openai.com/v1";
     this.model = o.model || "gpt-4o";
   }
 
-  async *streamMessage(request) {
-    let OpenAI;
+  async *streamMessage(request: ApiMessageRequest): AsyncGenerator<ApiStreamEvent, void, unknown> {
+    // deliberate any: dynamic import of optional dep
+    let OpenAI: any; // eslint-disable-line @typescript-eslint/no-explicit-any
     try {
-      const mod = /** @type {any} */ (await import("openai"));
+      const mod = await import("openai") as any; // eslint-disable-line @typescript-eslint/no-explicit-any
       OpenAI = mod.default || mod;
     } catch {
       yield new ApiErrorEvent("openai package is not installed. Run: npm install openai", "MISSING_DEPENDENCY", false);
@@ -389,19 +464,20 @@ class OpenAIProviderAdapter extends ProviderAdapter {
     const maxTokens = request.maxTokens || this._maxTokens;
 
     let text = "";
-    let usage = null;
-    const toolUseMap = new Map();
-    const toolUses = [];
+    let usage: Record<string, number> | null = null;
+    const toolUseMap = new Map<number, { id: string; name: string; input: string }>();
+    const toolUses: ToolUse[] = [];
 
     try {
-      const body = {
+      // deliberate any: OpenAI SDK body has many optional fields
+      const body: any = { // eslint-disable-line @typescript-eslint/no-explicit-any
         model,
         max_completion_tokens: maxTokens,
         stream: true,
         messages: this._formatMessages(request.messages, request.system),
       };
 
-      if (request.tools?.length) {
+      if ((request.tools as unknown[])?.length) {
         body.tools = this._formatTools(request.tools);
       }
 
@@ -417,12 +493,13 @@ class OpenAIProviderAdapter extends ProviderAdapter {
 
         if (delta?.tool_calls) {
           for (const tc of delta.tool_calls) {
-            const idx = tc.index;
+            const idx: number = tc.index;
             if (!toolUseMap.has(idx)) {
-              toolUseMap.set(idx, { id: tc.id || `call_${idx}`, name: tc.function?.name || "", input: "" });
-              yield new ApiToolUseStartEvent(toolUseMap.get(idx).id, tc.function?.name || "");
+              const newEntry = { id: tc.id || `call_${idx}`, name: tc.function?.name || "", input: "" };
+              toolUseMap.set(idx, newEntry);
+              yield new ApiToolUseStartEvent(newEntry.id, tc.function?.name || "");
             }
-            const tu = toolUseMap.get(idx);
+            const tu = toolUseMap.get(idx)!;
             if (tc.id) tu.id = tc.id;
             if (tc.function?.arguments) {
               tu.input += tc.function.arguments;
@@ -431,30 +508,33 @@ class OpenAIProviderAdapter extends ProviderAdapter {
           }
         }
 
-        if (chunk.usage) usage = chunk.usage;
+        if (chunk.usage) usage = chunk.usage as Record<string, number>;
       }
 
       // Parse completed tool uses
       for (const tu of toolUseMap.values()) {
+        let parsedInput: Record<string, unknown>;
         try {
-          tu.input = JSON.parse(tu.input || "{}");
+          parsedInput = JSON.parse(tu.input || "{}") as Record<string, unknown>;
         } catch (_) {
-          tu.input = {};
+          parsedInput = {};
         }
-        toolUses.push(tu);
+        toolUses.push({ id: tu.id, name: tu.name, input: parsedInput });
       }
 
-    } catch (err) {
-      if (err.name === "AbortError") {
+    } catch (err: unknown) {
+      const e = err as { name?: string; status?: number; message?: string };
+      if (e.name === "AbortError") {
         yield new ApiErrorEvent("Request aborted", "ABORTED", false);
-      } else if (err.status === 429) {
-        yield new ApiErrorEvent(`Rate limited: ${err.message}`, "RATE_LIMITED", true);
-      } else if (err.status >= 500) {
-        yield new ApiErrorEvent(`Server error (${err.status}): ${err.message}`, "SERVER_ERROR", true);
-      } else if (err.message?.includes("context_length_exceeded") || err.message?.includes("maximum context length")) {
-        yield new ApiErrorEvent(`Context length exceeded: ${err.message}`, "CONTEXT_TOO_LONG", false);
+      } else if (e.status === 429) {
+        yield new ApiErrorEvent(`Rate limited: ${e.message}`, "RATE_LIMITED", true);
+      } else if (typeof e.status === "number" && e.status >= 500) {
+        yield new ApiErrorEvent(`Server error (${e.status}): ${e.message}`, "SERVER_ERROR", true);
+      } else if (e.message?.includes("context_length_exceeded") || e.message?.includes("maximum context length")) {
+        yield new ApiErrorEvent(`Context length exceeded: ${e.message}`, "CONTEXT_TOO_LONG", false);
       } else {
-        yield new ApiErrorEvent(err.message, "REQUEST_FAILED", err.status >= 400 && err.status < 500);
+        const retryable = typeof e.status === "number" && e.status >= 400 && e.status < 500;
+        yield new ApiErrorEvent(e.message ?? String(err), "REQUEST_FAILED", retryable);
       }
       return;
     }
@@ -471,34 +551,38 @@ class OpenAIProviderAdapter extends ProviderAdapter {
     });
   }
 
-  _formatMessages(messages, systemPrompt) {
-    const result = [];
+  _formatMessages(messages: unknown[], systemPrompt?: string | null): unknown[] {
+    const result: unknown[] = [];
     if (systemPrompt) {
       result.push({ role: "system", content: String(systemPrompt) });
     }
     for (const m of messages) {
-      if (m.toOpenAIFormat) {
-        result.push(m.toOpenAIFormat());
+      const msg = m as { toOpenAIFormat?: () => unknown; role: string; content: unknown };
+      if (msg.toOpenAIFormat) {
+        result.push(msg.toOpenAIFormat());
       } else {
-        result.push({ role: m.role, content: m.content });
+        result.push({ role: msg.role, content: msg.content });
       }
     }
     return result;
   }
 
-  _formatTools(tools) {
-    return tools.map((t) => ({
-      type: "function",
-      function: {
-        name: t.name,
-        description: t.description || "",
-        parameters: t.input_schema || t.inputSchema || { type: "object", properties: {} },
-      },
-    }));
+  _formatTools(tools: unknown[]): unknown[] {
+    return tools.map((t) => {
+      const tool = t as { name: string; description?: string; input_schema?: unknown; inputSchema?: unknown };
+      return {
+        type: "function",
+        function: {
+          name: tool.name,
+          description: tool.description || "",
+          parameters: tool.input_schema || tool.inputSchema || { type: "object", properties: {} },
+        },
+      };
+    });
   }
 
-  getMaxContextTokens() {
-    const modelTokens = {
+  getMaxContextTokens(): number {
+    const modelTokens: Record<string, number> = {
       "gpt-4o": 128000,
       "gpt-4o-mini": 128000,
       "gpt-4-turbo": 128000,
@@ -514,19 +598,19 @@ class OpenAIProviderAdapter extends ProviderAdapter {
 
 // === Provider Adapter Factory ===
 
+interface ProviderAdapterConfig {
+  provider?: string;
+  apiKey?: string;
+  apiUrl?: string;
+  model?: string;
+  maxTokens?: number;
+  name?: string;
+}
+
 /**
  * Create a provider adapter from configuration.
- *
- * @param {Object} [config]
- * @param {string} [config.provider] - provider name (anthropic, openai, deepseek, etc.); falls back to HAX_AGENT_PROVIDER env or "anthropic"
- * @param {string} [config.apiKey] - API key
- * @param {string} [config.apiUrl] - API base URL
- * @param {string} [config.model] - model name
- * @param {number} [config.maxTokens] - max completion tokens
- * @param {Object} [env] - environment variables (defaults to process.env)
- * @returns {ProviderAdapter}
  */
-function createProviderAdapter(config = {}, env = process.env) {
+function createProviderAdapter(config: ProviderAdapterConfig = {}, env: NodeJS.ProcessEnv = process.env): ProviderAdapter {
   const provider = (config.provider || env.HAX_AGENT_PROVIDER || "anthropic").toLowerCase();
 
   switch (provider) {
@@ -606,3 +690,5 @@ export {
   // Factory
   createProviderAdapter,
 };
+
+export type { ApiStreamEvent, ToolUse, UsageInfo, ApiMessageRequestOptions, ProviderAdapterOptions, ProviderAdapterConfig };

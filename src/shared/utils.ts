@@ -7,9 +7,9 @@ const ANSI = {
   red: `${CSI}31m`, green: `${CSI}32m`, yellow: `${CSI}33m`, blue: `${CSI}34m`, magenta: `${CSI}35m`, cyan: `${CSI}36m`,
   white: `${CSI}37m`, gray: `${CSI}90m`, brightRed: `${CSI}91m`, brightGreen: `${CSI}92m`,
   clearLine: `${CSI}2K`, clearScreen: `${CSI}2J${CSI}H`,
-  cursorTo: (r, c) => `${CSI}${r};${c}H`,
+  cursorTo: (r: number, c: number): string => `${CSI}${r};${c}H`,
   cursorHide: `${CSI}?25l`, cursorShow: `${CSI}?25h`,
-};
+} as const;
 
 // === Theme ===
 const THEME = {
@@ -23,21 +23,21 @@ const THEME = {
 };
 
 // === Helpers ===
-function stripAnsi(s) { return String(s || "").replace(/\x1b\[[0-9;]*[a-zA-Z]/g, ""); }
-function styled(ansi, text) { return `${ansi}${text}${ANSI.reset}`; }
-function escapeRegex(s) { return String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
-function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+function stripAnsi(s: string | null | undefined): string { return String(s || "").replace(/\x1b\[[0-9;]*[a-zA-Z]/g, ""); }
+function styled(ansi: string, text: string): string { return `${ansi}${text}${ANSI.reset}`; }
+function escapeRegex(s: string): string { return String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
+function sleep(ms: number): Promise<void> { return new Promise(r => setTimeout(r, ms)); }
 
 // === JSON helpers ===
-function safeJsonParse(s, fallback = null) { try { return JSON.parse(s); } catch (_) { return fallback; } }
-function safeJsonStringify(o) { try { return JSON.stringify(o, null, 2); } catch (_) { return String(o); } }
+function safeJsonParse<T = unknown>(s: string, fallback: T | null = null): T | null { try { return JSON.parse(s) as T; } catch (_) { return fallback; } }
+function safeJsonStringify(o: unknown): string { try { return JSON.stringify(o, null, 2); } catch (_) { return String(o); } }
 
 // === String helpers ===
-function truncate(s, len) { const t = String(s || ""); return t.length > len ? t.slice(0, len - 3) + "..." : t; }
-function pluralize(w, n) { return n === 1 ? w : w + "s"; }
+function truncate(s: string | null | undefined, len: number): string { const t = String(s || ""); return t.length > len ? t.slice(0, len - 3) + "..." : t; }
+function pluralize(w: string, n: number): string { return n === 1 ? w : w + "s"; }
 
 // === Token estimation (CJK-aware) ===
-function estimateStringTokens(s) {
+function estimateStringTokens(s: string | null | undefined): number {
   if (!s) return 0; const t = String(s);
   let cjk = 0, other = 0;
   for (let i = 0; i < t.length; i++) { const c = t.charCodeAt(i); if ((c >= 0x4E00 && c <= 0x9FFF) || (c >= 0x3040 && c <= 0x30FF) || (c >= 0xAC00 && c <= 0xD7AF)) cjk++; else other++; }

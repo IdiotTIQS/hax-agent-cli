@@ -8,9 +8,11 @@ import process from "process";
 
 const PlatformName = {
   MACOS: "macos", LINUX: "linux", WINDOWS: "windows", WSL: "wsl", UNKNOWN: "unknown",
-};
+} as const;
 
-function detectPlatform() {
+type PlatformNameValue = typeof PlatformName[keyof typeof PlatformName];
+
+function detectPlatform(): PlatformNameValue {
   const system = process.platform;
   if (system === "darwin") return PlatformName.MACOS;
   if (system === "win32") {
@@ -22,10 +24,10 @@ function detectPlatform() {
   return PlatformName.UNKNOWN;
 }
 
-let _cached = null;
-function getPlatform() { if (!_cached) _cached = detectPlatform(); return _cached; }
+let _cached: PlatformNameValue | null = null;
+function getPlatform(): PlatformNameValue { if (!_cached) _cached = detectPlatform(); return _cached; }
 
-function getPlatformCapabilities(name) {
+function getPlatformCapabilities(name?: PlatformNameValue | null): Record<string, unknown> {
   const n = name || getPlatform();
   const posix = n === PlatformName.MACOS || n === PlatformName.LINUX || n === PlatformName.WSL;
   return {
@@ -40,3 +42,4 @@ function getPlatformCapabilities(name) {
 }
 
 export { PlatformName, detectPlatform, getPlatform, getPlatformCapabilities };
+export type { PlatformNameValue };

@@ -24,21 +24,41 @@ const CompactionType = {
   FULL: "full",
   REACTIVE: "reactive",
   AUTO: "auto",
-};
+} as const;
+
+// === Message shape accepted by compaction functions ===
+
+/** Loosely typed message — covers both StandardMessage instances and plain objects */
+interface CompactMessage {
+  role?: string;
+  content?: unknown;
+  _isSummary?: boolean;
+  _isContext?: boolean;
+  estimateTokens?: () => number;
+  [key: string]: unknown;
+}
 
 // === Compaction Progress Event ===
 
+interface CompactionProgressOptions {
+  type?: string;
+  messagesBefore?: number;
+  messagesAfter?: number;
+  tokensBefore?: number;
+  tokensAfter?: number;
+  durationMs?: number;
+}
+
 class CompactionProgressEvent {
-  /**
-   * @param {Object} options
-   * @param {string} options.type - CompactionType
-   * @param {number} options.messagesBefore - message count before compaction
-   * @param {number} options.messagesAfter - message count after compaction
-   * @param {number} options.tokensBefore - estimated tokens before
-   * @param {number} options.tokensAfter - estimated tokens after
-   * @param {number} [options.durationMs] - time taken
-   */
-  constructor(o = {}) {
+  type: string;
+  compactType: string;
+  messagesBefore: number;
+  messagesAfter: number;
+  tokensBefore: number;
+  tokensAfter: number;
+  durationMs: number;
+
+  constructor(o: CompactionProgressOptions = {}) {
     this.type = "compact_progress";
     this.compactType = o.type || CompactionType.AUTO;
     this.messagesBefore = o.messagesBefore || 0;
@@ -51,8 +71,23 @@ class CompactionProgressEvent {
 
 // === Compaction State ===
 
+interface CompactionStateOptions {
+  rounds?: number;
+  lastCompactAt?: number | null;
+  autoCompactThreshold?: number;
+  microCompactThreshold?: number;
+  maxContextTokens?: number;
+}
+
 class CompactionState {
-  constructor(o = {}) {
+  rounds: number;
+  lastCompactAt: number | null;
+  autoCompactThreshold: number;
+  microCompactThreshold: number;
+  maxContextTokens: number;
+  compactionTypes: string[];
+
+  constructor(o: CompactionStateOptions = {}) {
     this.rounds = o.rounds || 0;
     this.lastCompactAt = o.lastCompactAt || null;
     this.autoCompactThreshold = o.autoCompactThreshold || 0.7; // fraction of max context
@@ -67,7 +102,7 @@ class CompactionState {
 /**
  * Estimate tokens for a single message using CJK-aware heuristic.
  */
-function estimateMessageTokenCount(msg) {
+function estimateMessageTokenCount(msg: CompactMessage): number {
   if (typeof msg.estimateTokens === "function") {
     return msg.estimateTokens();
   }
@@ -79,11 +114,11 @@ function estimateMessageTokenCount(msg) {
  * Estimate tokens with CJK awareness.
  * CJK characters ≈ 0.6 tokens, Latin ≈ 0.25 tokens, other ≈ 0.4 tokens.
  */
-function estimateCJKTokens(text) {
+function estimateCJKTokens(text: string | null | undefined): number {
   if (!text) return 0;
   let tokens = 0;
   for (const ch of text) {
-    const code = ch.codePointAt(0);
+    const code = ch.codePointAt(0) ?? 0;
     if (
       (code >= 0x4E00 && code <= 0x9FFF) ||   // CJK Unified
       (code >= 0x3400 && code <= 0x4DBF) ||   // CJK Extension A
@@ -104,11 +139,21 @@ function estimateCJKTokens(text) {
 /**
  * Estimate total tokens for a list of messages.
  */
-function estimateTotalTokens(messages) {
+function estimateTotalTokens(messages: CompactMessage[]): number {
   return messages.reduce((sum, m) => sum + estimateMessageTokenCount(m), 0);
 }
 
 // === Micro Compact ===
+
+interface MicroCompactOptions {
+  keepRecent?: number;
+}
+
+interface MicroCompactResult {
+  messages: CompactMessage[];
+  removedCount: number;
+  tokenSavings: number;
+}
 
 /**
  * Remove stale tool results while preserving conversation context.
@@ -116,12 +161,11 @@ function estimateTotalTokens(messages) {
  * Clears tool_result content for tool calls older than `keepRecent` turns,
  * replacing them with a stub result to maintain pairing integrity.
  *
- * @param {Array} messages - conversation messages
- * @param {Object} options
- * @param {number} [options.keepRecent=6] - number of most recent messages to preserve
- * @returns {Object} { messages, removedCount, tokenSavings }
+ * @param messages - conversation messages
+ * @param options
+ * @param options.keepRecent - number of most recent messages to preserve
  */
-function microCompact(messages, options = {}) {
+function microCompact(messages: CompactMessage[], options: MicroCompactOptions = {}): MicroCompactResult {
   const keepRecent = options.keepRecent || 6;
   const startTokens = estimateTotalTokens(messages);
 
@@ -142,15 +186,18 @@ function microCompact(messages, options = {}) {
     if (Array.isArray(group)) {
       // Tool pair group - clear result content, keep stubs
       return group.map((msg) => {
-        const content = Array.isArray(msg.content) ? msg.content : [msg.content];
+        const content = Array.isArray(msg.content) ? msg.content as CompactMessage[] : [msg.content as CompactMessage];
         const newContent = content.map((block) => {
-          if (typeof block === "object" && (block.type === "tool_result" || block.tool_use_id)) {
-            removedCount++;
-            return {
-              ...block,
-              content: "[result cleared by micro-compaction]",
-              is_error: false,
-            };
+          if (typeof block === "object" && block !== null) {
+            const b = block as Record<string, unknown>;
+            if (b.type === "tool_result" || b.tool_use_id) {
+              removedCount++;
+              return {
+                ...b,
+                content: "[result cleared by micro-compaction]",
+                is_error: false,
+              };
+            }
           }
           return block;
         });
@@ -172,17 +219,26 @@ function microCompact(messages, options = {}) {
 
 // === Context Collapse ===
 
+interface ContextCollapseOptions {
+  maxTokens?: number;
+  keepRecent?: number;
+}
+
+interface ContextCollapseResult {
+  messages: CompactMessage[];
+  truncated: boolean;
+}
+
 /**
  * Deterministic text truncation - truncates older messages' text content
  * to stay under a target token budget.
  *
- * @param {Array} messages
- * @param {Object} [options]
- * @param {number} [options.maxTokens=100000] - target max tokens
- * @param {number} [options.keepRecent=6] - most recent messages preserved in full
- * @returns {Object} { messages, truncated }
+ * @param messages
+ * @param options
+ * @param options.maxTokens - target max tokens
+ * @param options.keepRecent - most recent messages preserved in full
  */
-function contextCollapse(messages, options = {}) {
+function contextCollapse(messages: CompactMessage[], options: ContextCollapseOptions = {}): ContextCollapseResult {
   const maxTokens = options.maxTokens || 100000;
   const keepRecent = options.keepRecent || 6;
 
@@ -210,10 +266,12 @@ function contextCollapse(messages, options = {}) {
   // Truncate older messages proportionally
   const ratio = budget / olderTokens;
   const truncated = older.map((msg) => {
-    const content = Array.isArray(msg.content) ? msg.content : [{ type: "text", text: String(msg.content || "") }];
+    const content = Array.isArray(msg.content)
+      ? msg.content as Array<Record<string, unknown>>
+      : [{ type: "text", text: String(msg.content || "") }];
     const newContent = content.map((block) => {
       if (block.type === "text" || typeof block === "string") {
-        const text = typeof block === "string" ? block : block.text || "";
+        const text = typeof block === "string" ? block : String(block.text || "");
         const maxLen = Math.floor(text.length * ratio);
         return typeof block === "string"
           ? text.slice(0, maxLen) + "...[truncated]"
@@ -234,12 +292,9 @@ function contextCollapse(messages, options = {}) {
 
 /**
  * Group messages into "rounds" where tool_use/tool_result pairs are kept together.
- *
- * @param {Array} messages
- * @returns {Array<Object|Array>} - each element is a single message or array of paired messages
  */
-function splitPreservingToolPairs(messages) {
-  const groups = [];
+function splitPreservingToolPairs(messages: CompactMessage[]): Array<CompactMessage | CompactMessage[]> {
+  const groups: Array<CompactMessage | CompactMessage[]> = [];
   let i = 0;
 
   while (i < messages.length) {
@@ -249,20 +304,21 @@ function splitPreservingToolPairs(messages) {
     if (
       msg.role === "user" &&
       Array.isArray(msg.content) &&
-      msg.content.some((c) => c.type === "tool_result" || c.tool_use_id)
+      (msg.content as Array<Record<string, unknown>>).some((c) => c.type === "tool_result" || c.tool_use_id)
     ) {
       // This is a tool result message - find the preceding assistant message with tool_use
-      const pair = [];
       if (i > 0 && groups.length > 0) {
         const prevGroup = groups[groups.length - 1];
         const prev = Array.isArray(prevGroup) ? prevGroup[prevGroup.length - 1] : prevGroup;
         if (
           prev.role === "assistant" &&
-          (Array.isArray(prev.content) ? prev.content.some((c) => c.type === "tool_use" || c.name) : false)
+          (Array.isArray(prev.content)
+            ? (prev.content as Array<Record<string, unknown>>).some((c) => c.type === "tool_use" || c.name)
+            : false)
         ) {
           // Merge this tool result with the previous assistant tool_use message
           if (Array.isArray(prevGroup)) {
-            prevGroup.push(msg);
+            (prevGroup as CompactMessage[]).push(msg);
             i++;
             continue;
           } else {
@@ -278,17 +334,17 @@ function splitPreservingToolPairs(messages) {
     if (
       msg.role === "assistant" &&
       Array.isArray(msg.content) &&
-      msg.content.some((c) => c.type === "tool_use" || (c.name && c.input))
+      (msg.content as Array<Record<string, unknown>>).some((c) => c.type === "tool_use" || (c.name && c.input))
     ) {
       // Look ahead for tool result messages
-      const pair = [msg];
+      const pair: CompactMessage[] = [msg];
       let j = i + 1;
       while (j < messages.length) {
         const next = messages[j];
         if (
           next.role === "user" &&
           Array.isArray(next.content) &&
-          next.content.some((c) => c.type === "tool_result" || c.tool_use_id)
+          (next.content as Array<Record<string, unknown>>).some((c) => c.type === "tool_result" || c.tool_use_id)
         ) {
           pair.push(next);
           j++;
@@ -313,13 +369,10 @@ function splitPreservingToolPairs(messages) {
 /**
  * Group messages by user prompt round.
  * Each round starts with a user message (not tool_result) and includes the assistant response.
- *
- * @param {Array} messages
- * @returns {Array<Array>} - array of rounds, each round is an array of messages
  */
-function groupByPromptRound(messages) {
-  const rounds = [];
-  let currentRound = [];
+function groupByPromptRound(messages: CompactMessage[]): CompactMessage[][] {
+  const rounds: CompactMessage[][] = [];
+  let currentRound: CompactMessage[] = [];
 
   for (const msg of messages) {
     if (msg.role === "user" && !isToolResultMessage(msg)) {
@@ -339,26 +392,31 @@ function groupByPromptRound(messages) {
   return rounds;
 }
 
-function isToolResultMessage(msg) {
+function isToolResultMessage(msg: CompactMessage): boolean {
   if (!Array.isArray(msg.content)) return false;
-  return msg.content.every(
+  return (msg.content as Array<Record<string, unknown>>).every(
     (c) => c.type === "tool_result" || c.tool_use_id
   );
 }
 
 // === Full Compact (LLM-based) ===
 
+interface FullCompactOptions {
+  summarize?: (msgs: CompactMessage[], maxTokens: number) => Promise<string>;
+  keepRecent?: number;
+  maxSummaryTokens?: number;
+}
+
+interface FullCompactResult {
+  messages: CompactMessage[];
+  summary: string | null;
+  tokenSavings: number;
+}
+
 /**
  * Use LLM to summarize older messages, preserving key facts.
- *
- * @param {Array} messages
- * @param {Object} [options]
- * @param {Function} [options.summarize] - async fn(messagesToSummarize) => summary string
- * @param {number} [options.keepRecent=6] - most recent messages preserved
- * @param {number} [options.maxSummaryTokens=2000] - max tokens for the summary
- * @returns {Promise<Object>} { messages, summary, tokenSavings }
  */
-async function fullCompact(messages, options = {}) {
+async function fullCompact(messages: CompactMessage[], options: FullCompactOptions = {}): Promise<FullCompactResult> {
   const keepRecent = options.keepRecent || 6;
   const maxSummaryTokens = options.maxSummaryTokens || 2000;
 
@@ -388,7 +446,7 @@ async function fullCompact(messages, options = {}) {
     const summary = await options.summarize(toSummarize, maxSummaryTokens);
 
     // Prepend summary as a system context message
-    const summaryMsg = {
+    const summaryMsg: CompactMessage = {
       role: "user",
       content: `[Previous conversation summary]\n${summary}`,
       _isSummary: true,
@@ -402,26 +460,31 @@ async function fullCompact(messages, options = {}) {
       summary,
       tokenSavings: Math.max(0, startTokens - endTokens),
     };
-  } catch (err) {
-    // Fallback to micro compact
-    return microCompact(messages, { keepRecent });
+  } catch (_err) {
+    // Fallback to micro compact — summary is null to satisfy FullCompactResult shape
+    const fallback = microCompact(messages, { keepRecent });
+    return { messages: fallback.messages, summary: null, tokenSavings: fallback.tokenSavings };
   }
 }
 
 // === Auto Compact ===
 
+interface AutoCompactOptions {
+  state?: CompactionState;
+  summarize?: (msgs: CompactMessage[], maxTokens: number) => Promise<string>;
+  maxContextTokens?: number;
+}
+
+interface AutoCompactResult {
+  messages: CompactMessage[];
+  event: CompactionProgressEvent | null;
+}
+
 /**
  * Check if auto-compaction is needed and perform it.
  * Triggered when estimated tokens exceed a fraction of max context.
- *
- * @param {Array} messages
- * @param {Object} [options]
- * @param {CompactionState} [options.state] - compaction state
- * @param {Function} [options.summarize] - LLM summarize function (for full compact)
- * @param {number} [options.maxContextTokens=200000]
- * @returns {Promise<Object>} { messages, event: CompactionProgressEvent | null }
  */
-async function autoCompactIfNeeded(messages, options = {}) {
+async function autoCompactIfNeeded(messages: CompactMessage[], options: AutoCompactOptions = {}): Promise<AutoCompactResult> {
   const state = options.state || new CompactionState();
   const maxContextTokens = options.maxContextTokens || state.maxContextTokens || 200000;
 
@@ -435,8 +498,8 @@ async function autoCompactIfNeeded(messages, options = {}) {
   }
 
   const startedAt = Date.now();
-  let result;
-  let compactType;
+  let result: { messages: CompactMessage[] };
+  let compactType: string;
 
   if (currentTokens <= autoThreshold) {
     // Micro compact only
@@ -471,20 +534,26 @@ async function autoCompactIfNeeded(messages, options = {}) {
 
 // === Reactive Compact ===
 
+interface ReactiveCompactOptions {
+  summarize?: (msgs: CompactMessage[], maxTokens: number) => Promise<string>;
+  maxContextTokens?: number;
+}
+
+interface ReactiveCompactResult {
+  messages: CompactMessage[];
+  event: CompactionProgressEvent;
+}
+
 /**
  * Compact when API returns "context too long" error.
  * More aggressive than auto-compact.
- *
- * @param {Array} messages
- * @param {Object} options
- * @returns {Promise<Object>} { messages, event: CompactionProgressEvent }
  */
-async function reactiveCompact(messages, options = {}) {
+async function reactiveCompact(messages: CompactMessage[], options: ReactiveCompactOptions = {}): Promise<ReactiveCompactResult> {
   const startedAt = Date.now();
   const startTokens = estimateTotalTokens(messages);
 
   // Aggressive: keep only recent 4, full compact the rest
-  let result;
+  let result: { messages: CompactMessage[] };
   if (options.summarize) {
     result = await fullCompact(messages, { summarize: options.summarize, keepRecent: 4 });
   } else {
@@ -516,8 +585,8 @@ async function reactiveCompact(messages, options = {}) {
 /**
  * Get max context window tokens for a model.
  */
-function getContextWindow(model) {
-  const windows = {
+function getContextWindow(model: string | null | undefined): number {
+  const windows: Record<string, number> = {
     // Anthropic
     "claude-sonnet-4-20250514": 200000,
     "claude-opus-4-20250514": 200000,
@@ -557,29 +626,28 @@ function getContextWindow(model) {
  * Get the recommended auto-compaction threshold for a model.
  * Default: 70% of max context window.
  */
-function getAutocompactThreshold(model) {
+function getAutocompactThreshold(model: string | null | undefined): number {
   return Math.floor(getContextWindow(model) * 0.7);
 }
 
 // === Structured Context Attachment ===
 
+interface StructuredContextAttachments {
+  activeGoal?: string;
+  recentFiles?: string[];
+  memoryKeys?: string[];
+}
+
 /**
  * Attach persistent structured context across compaction boundaries.
  * Preserved data: active goal, recent files, session memory keys.
- *
- * @param {Array} messages
- * @param {Object} attachments
- * @param {string} [attachments.activeGoal]
- * @param {string[]} [attachments.recentFiles]
- * @param {string[]} [attachments.memoryKeys]
- * @returns {Array} messages with context attachment prepended
  */
-function attachStructuredContext(messages, attachments = {}) {
+function attachStructuredContext(messages: CompactMessage[], attachments: StructuredContextAttachments = {}): CompactMessage[] {
   if (!attachments.activeGoal && !attachments.recentFiles?.length && !attachments.memoryKeys?.length) {
     return messages;
   }
 
-  const parts = [];
+  const parts: string[] = [];
   if (attachments.activeGoal) {
     parts.push(`Active Goal: ${attachments.activeGoal}`);
   }
@@ -590,7 +658,7 @@ function attachStructuredContext(messages, attachments = {}) {
     parts.push(`Session Memory: ${attachments.memoryKeys.slice(0, 5).join(", ")}`);
   }
 
-  const contextMsg = {
+  const contextMsg: CompactMessage = {
     role: "user",
     content: [{ type: "text", text: `[Session Context]\n${parts.join("\n")}` }],
     _isContext: true,
@@ -630,4 +698,21 @@ export {
   estimateMessageTokenCount,
   getContextWindow,
   getAutocompactThreshold,
+};
+
+export type {
+  CompactMessage,
+  CompactionProgressOptions,
+  CompactionStateOptions,
+  MicroCompactOptions,
+  MicroCompactResult,
+  ContextCollapseOptions,
+  ContextCollapseResult,
+  FullCompactOptions,
+  FullCompactResult,
+  AutoCompactOptions,
+  AutoCompactResult,
+  ReactiveCompactOptions,
+  ReactiveCompactResult,
+  StructuredContextAttachments,
 };

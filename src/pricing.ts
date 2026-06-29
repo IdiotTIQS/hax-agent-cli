@@ -6,7 +6,14 @@
  * Local providers (ollama, vllm) are free.
  */
 
-const PRICING = {
+interface ModelPricing {
+  input: number;
+  output: number;
+  cacheWrite?: number;
+  cacheRead?: number;
+}
+
+const PRICING: Record<string, ModelPricing> = {
   // === Anthropic ===
   // 价格基于 2026-06 官方文档(per 1M tokens, USD)
   "claude-opus-4-7":           { input: 5.0,   output: 25.0,  cacheWrite: 6.25, cacheRead: 0.5 },
@@ -85,8 +92,7 @@ const PRICING = {
 };
 
 // Priority-ordered regex fallbacks for model name matching
-/** @type {Array<[RegExp, string]>} */
-const FALLBACKS = [
+const FALLBACKS: Array<[RegExp, string]> = [
   [/claude.*opus/i,              "claude-opus-4-7"],
   [/claude.*haiku/i,             "claude-haiku-4-5-20251001"],
   [/claude.*sonnet/i,            "claude-sonnet-4-6"],
@@ -132,7 +138,7 @@ const FREE_PATTERNS = [/ollama/i, /llama3/i, /vllm/i, /local/i, /default/i];
  * Look up pricing for a model. Returns { input, output, cacheWrite?, cacheRead? } or null.
  * Prices are per million tokens in USD.
  */
-function getPricing(model) {
+function getPricing(model: string | null | undefined): ModelPricing | null {
   const key = String(model || "").toLowerCase();
 
   // Exact match
@@ -145,7 +151,7 @@ function getPricing(model) {
 
   // Regex fallbacks
   for (const [pattern, pricingKey] of FALLBACKS) {
-    if (pattern.test(key)) return PRICING[pricingKey];
+    if (pattern.test(key)) return PRICING[pricingKey] ?? null;
   }
 
   return null;
@@ -154,7 +160,13 @@ function getPricing(model) {
 /**
  * Calculate cost in USD for given token counts and model.
  */
-function getCost(model, inputTokens, outputTokens, cacheWriteTokens, cacheReadTokens) {
+function getCost(
+  model: string | null | undefined,
+  inputTokens?: number,
+  outputTokens?: number,
+  cacheWriteTokens?: number,
+  cacheReadTokens?: number
+): number {
   const p = getPricing(model);
   if (!p) return 0;
   const input = ((inputTokens || 0) / 1_000_000) * p.input;
@@ -165,3 +177,4 @@ function getCost(model, inputTokens, outputTokens, cacheWriteTokens, cacheReadTo
 }
 
 export { PRICING, getPricing, getCost };
+export type { ModelPricing };
