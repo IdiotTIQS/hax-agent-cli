@@ -32,7 +32,7 @@
  * itself does NOT manage clearing — it only fires the deferred resolve.
  */
 
-import React from "react";
+import React, { useRef } from "react";
 import { Box, Text, useInput, useStdin } from "ink";
 import type { PendingApproval } from "../types.js";
 
@@ -60,6 +60,13 @@ export function ApprovalPrompt({
   // Guard useInput to avoid "Raw mode not supported" throws in non-TTY environments.
   const { isRawModeSupported } = useStdin();
 
+  // One-shot guard: only the first valid answer key resolves the approval.
+  // Without this, two fast keypresses (e.g. "y" then "a") before the parent
+  // clears pendingApproval would each enqueue a setImmediate resolve and call
+  // approval.resolve twice. A native Promise ignores the second settle, but we
+  // guard explicitly so the resolve callback itself fires exactly once.
+  const resolvedRef = useRef(false);
+
   useInput((input, key) => {
     let answer: "approve" | "always" | "deny" | null = null;
 
@@ -72,6 +79,8 @@ export function ApprovalPrompt({
     }
 
     if (answer === null) return;
+    if (resolvedRef.current) return;
+    resolvedRef.current = true;
 
     const resolved = answer; // capture for closure
 
