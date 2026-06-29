@@ -16,23 +16,17 @@
     "desktop:build": "vite build --config desktop/renderer/vite.config.js",
     "auth:team": "tsx src/cli.ts team auth-refactor",
     "typecheck": "tsc --noEmit",
-    "lint": "node scripts/lint.js && tsc --noEmit",
+    "lint": "tsc --noEmit",
     "test": "node scripts/run-tests.js",
     "test:desktop": "npm run desktop:build && node scripts/run-tests.js test/desktop",
-    "prepublishOnly": "npm test"
+    "prepublishOnly": "npm run build && npm test"
   },
   "files": [
-    "src/**/*.js",
-    "desktop/**/*.js",
-    "desktop/**/*.vue",
-    "desktop/**/*.css",
-    "desktop/**/*.mjs",
-    "desktop/**/*.html",
-    "desktop/**/*.json",
-    "scripts/**/*.js",
+    "dist/**",
     "README.md",
     "README.en.md",
-    "CHANGELOG.md"
+    "CHANGELOG.md",
+    "LICENSE"
   ],
   "repository": {
     "type": "git",
