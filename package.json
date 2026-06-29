@@ -56,10 +56,13 @@
     "@anthropic-ai/sdk": "^0.91.1",
     "@google/generative-ai": "^0.24.1",
     "dompurify": "^3.4.2",
+    "ink": "^7.1.0",
     "markdown-it": "^14.1.1",
-    "openai": "^6.35.0"
+    "openai": "^6.35.0",
+    "react": "^19.2.7"
   },
   "devDependencies": {
+    "@types/react": "^19.2.17",
     "@vitejs/plugin-vue": "^5.2.4",
     "@vue/test-utils": "^2.4.10",
     "electron": "^37.5.1",
