@@ -8,7 +8,7 @@ import { join } from "path";
 const VERSION = JSON.parse(readFileSync(join(import.meta.dirname, "../package.json"), "utf8")).version;
 
 import { ANSI, THEME, styled } from "./shared/utils.js";
-import { loadSettings, reloadSettings } from "./config/settings.js";
+import { loadSettings, reloadSettings, saveSettings } from "./config/settings.js";
 import { ProfileManager, BUILTIN } from "./config/profiles.js";
 import { createProvider } from "./api/provider.js";
 import { createDefaultRegistry } from "./tools/registry.js";
@@ -19,7 +19,6 @@ import { loadPluginRegistry } from "./plugins/registry.js";
 import { shouldRunSetup, runSetup } from "./setup.js";
 import { SandboxAdapter } from "./sandbox/adapter.js";
 import { applyTheme } from "./shared/themes.js";
-import { loadSettings as loadSettingsAlias, saveSettings } from "./config/settings.js";
 import * as commandsRegistryMod from "./commands/registry.js";
 
 // === Argument Parser ===

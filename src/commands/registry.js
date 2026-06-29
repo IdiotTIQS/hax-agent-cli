@@ -308,10 +308,9 @@ register("cost", (_, ctx) => {
 
 register("context", (_, ctx) => {
   const msgs = ctx.session.messages;
-  const { estimateMessageTokens } = require("../memory/compact");
   const tokens = estimateMessageTokens(msgs);
   const model = ctx.session.provider?.model || "?";
-  const { getContextWindow } = require("../memory/compact");
+
   const window = getContextWindow(model);
   const pct = ((tokens / window) * 100).toFixed(1);
   ctx.screen.write(`  Messages: ${msgs.length}\n`);
