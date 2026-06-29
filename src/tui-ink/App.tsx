@@ -288,6 +288,7 @@ export function App({
           onChange={handleInputChange}
           onSubmit={handleSubmit}
           disabled={state.isStreaming || !!state.pendingApproval}
+          paletteOpen={!!state.commandPalette?.open}
           completions={completions}
           promptLabel={state.isStreaming ? "… " : "> "}
         />

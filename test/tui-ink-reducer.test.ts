@@ -146,7 +146,7 @@ describe("reducer — happy-path turn", () => {
 });
 
 describe("reducer — error turn", () => {
-  it("sets currentError on turn.failed", () => {
+  it("commits the failed turn with its error and clears the active region", () => {
     const s = applyActions([
       { type: "turn_start" },
       { type: "engine_event", event: { type: "turn.started", sessionId: "s2" } },
@@ -155,7 +155,10 @@ describe("reducer — error turn", () => {
         event: { type: "turn.failed", error: { message: "API error" } },
       },
     ]);
-    assert.equal(s.currentError, "API error");
+    // Post-redesign (I1): the error is carried by the committed turn, and the
+    // active region is cleared so the failed turn does not render doubled.
+    assert.equal(s.committedTurns[s.committedTurns.length - 1].error, "API error");
+    assert.equal(s.currentError, null);
     assert.equal(s.isStreaming, false);
     assert.equal(s.isWaiting, false);
   });

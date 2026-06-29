@@ -187,7 +187,13 @@ function handleEngineEvent(state: AppState, event: AgentEvent): AppState {
       return {
         ...state,
         committedTurns: [...state.committedTurns, committed],
-        currentError: event.error.message,
+        // Clear the active region (parity with turn.completed/interrupted) so
+        // the failed turn renders once via <Static>, not doubled in the live
+        // region. The committed turn carries the error; currentError stays null.
+        currentError: null,
+        currentTurnText: "",
+        currentThinking: "",
+        currentTools: [],
         isStreaming: false,
         isWaiting: false,
       };

@@ -3,6 +3,25 @@ import test from "node:test";
 import { reducer } from "../src/tui-ink/reducer.js";
 import { createInitialState } from "../src/tui-ink/types.js";
 
+test("turn.failed commits the snapshot and clears the active region", () => {
+  let s = createInitialState();
+  s = reducer(s, { type: "submit_input", text: "go" });
+  s = reducer(s, { type: "turn_start" });
+  s = reducer(s, { type: "engine_event", event: { type: "message.delta", delta: "partial" } });
+  s = reducer(s, { type: "engine_event", event: { type: "tool.start", name: "shell.run", input: {} } });
+  s = reducer(s, { type: "engine_event", event: { type: "turn.failed", error: { message: "boom" } } });
+  // Committed once with the error...
+  assert.equal(s.committedTurns.length, 1);
+  assert.equal(s.committedTurns[0].error, "boom");
+  assert.equal(s.committedTurns[0].assistantText, "partial");
+  // ...and the active region is cleared so it does not render doubled (I1).
+  assert.equal(s.currentTurnText, "");
+  assert.equal(s.currentThinking, "");
+  assert.equal(s.currentTools.length, 0);
+  assert.equal(s.currentError, null);
+  assert.equal(s.isStreaming, false);
+});
+
 test("commit_turn snapshots active turn into committedTurns", () => {
   let s = createInitialState({ model: "m", permissionMode: "normal" });
   s = reducer(s, { type: "submit_input", text: "hello" });

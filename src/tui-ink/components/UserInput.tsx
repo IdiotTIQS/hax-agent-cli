@@ -38,13 +38,17 @@ export interface UserInputProps {
    * bypassed.
    */
   disabled?: boolean;
-  /**
-   * Completions computed by the parent (via computeCompletions).
-   * Rendered as a passive list below the input line when non-empty.
-   */
+  /** Completions computed by the parent (via computeCompletions). */
   completions?: string[];
   /** Prompt prefix shown before the text input. Defaults to "> ". */
   promptLabel?: string;
+  /**
+   * True while the command palette is open. Typing still flows (so the palette
+   * filters), but Enter and Up/Down are routed to the palette's Select instead
+   * of submitting / navigating input history — preventing double-fire where a
+   * single keypress both picks a command and submits the partial "/cmd" text.
+   */
+  paletteOpen?: boolean;
 }
 
 export function UserInput({
@@ -54,6 +58,7 @@ export function UserInput({
   disabled = false,
   completions = [],
   promptLabel = "> ",
+  paletteOpen = false,
 }: UserInputProps): React.ReactElement {
   // One InputHistory instance per mount — persists across renders.
   const historyRef = useRef<InputHistory>(new InputHistory(1000));
@@ -63,11 +68,11 @@ export function UserInput({
   const { isRawModeSupported } = useStdin();
   const inputActive = isRawModeSupported && !disabled;
 
-  // Arrow-Up/Down history navigation.
-  // useInput is always called (hooks rule), but the handler is a no-op when
-  // disabled so we don't interfere with the approval prompt or other active inputs.
+  // Arrow-Up/Down history navigation — suppressed while the palette is open
+  // (the palette's Select owns Up/Down then).
   useInput(
     (_input, key) => {
+      if (paletteOpen) return;
       if (key.upArrow) {
         const next = historyRef.current.up(value);
         onChange(next);
@@ -85,6 +90,9 @@ export function UserInput({
 
   function handleSubmit(submitted: string): void {
     if (disabled) return;
+    // While the palette is open, Enter belongs to the palette's Select (pick a
+    // command), not to message submission. Swallow it here.
+    if (paletteOpen) return;
     const trimmed = submitted.trim();
     if (trimmed) {
       historyRef.current.add(trimmed);
