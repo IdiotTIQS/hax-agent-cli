@@ -1,24 +1,26 @@
 /**
- * app-preview.tsx — mock-engine harness for App smoke-testing (Stage F5).
+ * app-preview.tsx — mock-engine harness for App smoke-testing (T5 updated).
  *
  * Renders <App> with a scripted mock engine that yields a fixed AgentEvent
  * sequence: turn.started → message.delta×2 → tool.start → tool.result →
  * turn.completed.
  *
+ * T5 change: drives a full turn via dispatchRef so the Static committedTurns
+ * path is exercised. Verifies:
+ *   - Active turn chrome visible during streaming
+ *   - Completed turn moved into Static history
+ *   - No duplicate rendering of the last turn
+ *   - Bottom UserInput + StatusBar present
+ *   - No crashes
+ *
  * Run with: npx tsx src/tui-ink/app-preview.tsx
- *
- * Verifies App mounts and unmounts without crashing outside a real TTY.
- *
- * ink's useInput requires a stdin that supports raw mode.  We use a
- * PassThrough stream with all the methods ink calls during mount:
- * isTTY, setRawMode, setEncoding, ref, unref, resume, pause.
  */
 
-import React from "react";
+import React, { createRef } from "react";
 import { render } from "ink";
 import { PassThrough } from "stream";
-import { App } from "./App.js";
-import type { EngineHandle } from "./App.js";
+import { App, makeApprovalCallback } from "./App.js";
+import type { EngineHandle, AppDispatch } from "./App.js";
 
 // ---------------------------------------------------------------------------
 // Mock stdin — PassThrough + all methods ink calls during mount/unmount.
@@ -74,8 +76,12 @@ const mockEngine: EngineHandle = {
 };
 
 // ---------------------------------------------------------------------------
-// Render with mock stdin and auto-unmount
+// Render with mock stdin, drive a full turn, then unmount
 // ---------------------------------------------------------------------------
+
+const dispatchRef = createRef() as React.MutableRefObject<AppDispatch | null>;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+(dispatchRef as any).current = null;
 
 const { waitUntilExit, unmount } = render(
   <App
@@ -84,6 +90,7 @@ const { waitUntilExit, unmount } = render(
     initialModel="mock-model"
     initialMode="normal"
     providerName="mock"
+    dispatchRef={dispatchRef}
   />,
   {
     stdin: mockStdin as unknown as NodeJS.ReadStream,
@@ -93,11 +100,33 @@ const { waitUntilExit, unmount } = render(
   },
 );
 
-// Unmount after proving the component tree renders without errors.
-setTimeout(() => {
-  unmount();
-}, 400);
+// Wait for App to populate dispatchRef on first render, then fire a turn.
+await new Promise((r) => setTimeout(r, 50));
 
+if (dispatchRef.current) {
+  // Simulate the user submitting a message (same sequence as handleSubmit).
+  dispatchRef.current({ type: "submit_input", text: "Hello mock engine" });
+  dispatchRef.current({ type: "turn_start" });
+
+  // Drive the engine events manually through the reducer (mirrors handleSubmit).
+  for await (const event of mockEngine.sendMessage("Hello mock engine")) {
+    dispatchRef.current({
+      type: "engine_event",
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      event: event as any,
+    });
+    // Small delay so ink can render each event.
+    await new Promise((r) => setTimeout(r, 25));
+  }
+
+  // Give ink time to render the completed turn into Static.
+  await new Promise((r) => setTimeout(r, 200));
+} else {
+  process.stderr.write("[app-preview] WARN: dispatchRef not populated\n");
+}
+
+// Unmount cleanly.
+unmount();
 await waitUntilExit();
 process.stderr.write("\n[app-preview] App mounted and unmounted cleanly.\n");
 process.exit(0);

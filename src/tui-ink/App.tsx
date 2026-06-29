@@ -41,7 +41,7 @@ import { Box, Text, Static } from "ink";
 
 import { reducer } from "./reducer.js";
 import { createInitialState } from "./types.js";
-import type { AppState, PendingApproval, ConversationMessage } from "./types.js";
+import type { AppState, PendingApproval } from "./types.js";
 
 import {
   StatusBar,
@@ -52,6 +52,7 @@ import {
 } from "./components/index.js";
 import { UserInput } from "./components/UserInput.js";
 import { ApprovalPrompt } from "./components/ApprovalPrompt.js";
+import { ConversationTurn } from "./components/ConversationTurn.js";
 import { useGlobalKeybindings } from "./keybindings.js";
 import { computeCompletions } from "./completions.js";
 
@@ -88,26 +89,7 @@ export interface AppProps {
   dispatchRef?: React.MutableRefObject<AppDispatch | null>;
 }
 
-// ---------------------------------------------------------------------------
-// CommittedMessage — rendered inside <Static> for perf
-// ---------------------------------------------------------------------------
-
-function CommittedMessage({ msg }: { msg: ConversationMessage }): React.ReactElement {
-  if (msg.role === "user") {
-    return (
-      <Box flexDirection="row" marginBottom={1}>
-        <Text color="cyan" bold>{"You  "}</Text>
-        <Text>{msg.text}</Text>
-      </Box>
-    );
-  }
-  // assistant — TextStream handles markdown rendering
-  return (
-    <Box flexDirection="column" marginBottom={1}>
-      <TextStream text={msg.text} />
-    </Box>
-  );
-}
+// (CommittedMessage removed in T5 — ConversationTurn renders full turn snapshots)
 
 // ---------------------------------------------------------------------------
 // App
@@ -216,84 +198,73 @@ export function App({
   // ── Render ────────────────────────────────────────────────────────────────
   return (
     <Box flexDirection="column">
-      {/* ── Committed turns (Static prevents re-rendering old messages) ── */}
-      <Static items={state.messages}>
-        {(msg, i) => <CommittedMessage key={i} msg={msg} />}
+      {/* ── Section 1: Committed turns (Static prevents re-rendering old turns) ── */}
+      <Static items={state.committedTurns}>
+        {(turn, i) => (
+          <ConversationTurn key={i} turn={turn} detail={state.detailMode} />
+        )}
       </Static>
 
-      {/* ── Active turn chrome ─────────────────────────────────────────── */}
-      {(state.isStreaming || state.isWaiting) && (
-        <Box flexDirection="column">
-          {state.currentThinking ? (
-            <ThinkingBlock text={state.currentThinking} />
-          ) : null}
+      {/* ── Section 2: Active turn chrome ─────────────────────────────────── */}
+      <Box flexDirection="column">
+        {state.currentThinking ? (
+          <ThinkingBlock text={state.currentThinking} />
+        ) : null}
 
-          {state.currentTurnText ? (
-            <TextStream text={state.currentTurnText} />
-          ) : null}
+        {state.currentTools.length > 0 ? (
+          <ToolList tools={state.currentTools} detail={state.detailMode} />
+        ) : null}
 
-          {state.currentTools.length > 0 ? (
-            <ToolList tools={state.currentTools} />
-          ) : null}
+        {state.currentTurnText ? (
+          <TextStream text={state.currentTurnText} />
+        ) : null}
 
-          {state.isWaiting && (
-            <SpinnerLine
-              startTime={spinnerStartRef.current}
-              tokenCount={state.inputTokens + state.outputTokens}
-            />
-          )}
-        </Box>
-      )}
+        {state.isWaiting ? (
+          <SpinnerLine
+            startTime={spinnerStartRef.current}
+            tokenCount={state.inputTokens + state.outputTokens}
+          />
+        ) : null}
+      </Box>
 
-      {/* ── Tool approval prompt ───────────────────────────────────────── */}
+      {/* ── Overlay: tool approval prompt ─────────────────────────────────── */}
       {state.pendingApproval ? (
         <ApprovalPrompt approval={state.pendingApproval} />
       ) : null}
 
-      {/* ── Error line ────────────────────────────────────────────────── */}
+      {/* ── Error line ────────────────────────────────────────────────────── */}
       {state.currentError ? (
         <Box marginTop={1}>
-          <Text color="red">Error: {state.currentError}</Text>
+          <Text color="red">{"Error: " + state.currentError}</Text>
         </Box>
       ) : null}
 
-      {/* ── Interrupted notice ────────────────────────────────────────── */}
-      {state.isInterrupted && !state.isStreaming ? (
-        <Box marginTop={1}>
-          <Text color="yellow" dimColor>
-            ⚡ Interrupted
-          </Text>
-        </Box>
-      ) : null}
-
-      {/* ── Transient status message ──────────────────────────────────── */}
+      {/* ── Transient status message ──────────────────────────────────────── */}
       {state.statusMessage ? (
         <Box>
-          <Text color="gray" dimColor>
-            {state.statusMessage}
-          </Text>
+          <Text dimColor>{state.statusMessage}</Text>
         </Box>
       ) : null}
 
-      {/* ── Status bar ────────────────────────────────────────────────── */}
-      <StatusBar
-        model={state.model}
-        mode={state.permissionMode}
-        inputTokens={state.inputTokens}
-        outputTokens={state.outputTokens}
-        cost={state.cost}
-        turnCount={state.turnCount}
-      />
-
-      {/* ── Chat input ────────────────────────────────────────────────── */}
-      <UserInput
-        value={inputValue}
-        onChange={setInputValue}
-        onSubmit={handleSubmit}
-        disabled={state.isStreaming || !!state.pendingApproval}
-        completions={completions}
-        promptLabel={state.isStreaming ? "… " : "> "}
-      />
+      {/* ── Section 3: Bottom bar (input + status) ────────────────────────── */}
+      <Box flexDirection="column">
+        <UserInput
+          value={inputValue}
+          onChange={setInputValue}
+          onSubmit={handleSubmit}
+          disabled={state.isStreaming || !!state.pendingApproval}
+          completions={completions}
+          promptLabel={state.isStreaming ? "… " : "> "}
+        />
+        <StatusBar
+          model={state.model}
+          mode={state.permissionMode}
+          inputTokens={state.inputTokens}
+          outputTokens={state.outputTokens}
+          cost={state.cost}
+          turnCount={state.turnCount}
+        />
+      </Box>
     </Box>
   );
 }

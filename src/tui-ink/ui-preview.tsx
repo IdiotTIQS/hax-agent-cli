@@ -1,11 +1,14 @@
 /**
- * ui-preview.tsx — Task 2 + Task 3 preview harness.
+ * ui-preview.tsx — Task 2 + Task 3 + Task 5 preview harness.
  *
  * Task 2: Renders StatusBar in multiple states (normal/yolo/plan, various
  * context usage levels) plus a CJK sample row.
  *
  * Task 3: Renders ToolList with running/done/error tools, same-name collapse,
  * and a diff-bearing tool in both detail=false and detail=true modes.
+ *
+ * Task 5: Renders ConversationTurn with mock committed turns including
+ * tools, CJK text, interrupted flag, and error state.
  *
  * Unmounts after 3 s.
  *
@@ -15,7 +18,8 @@ import React from "react";
 import { render, Box, Text } from "ink";
 import { StatusBar } from "./components/StatusBar.js";
 import { ToolList } from "./components/ToolList.js";
-import type { ToolCallState } from "./types.js";
+import { ConversationTurn } from "./components/ConversationTurn.js";
+import type { ToolCallState, CommittedTurn } from "./types.js";
 
 // ---------------------------------------------------------------------------
 // Mock tool data
@@ -73,6 +77,60 @@ const diffTool: ToolCallState = {
 };
 
 // ---------------------------------------------------------------------------
+// Mock CommittedTurn data (Task 5)
+// ---------------------------------------------------------------------------
+
+const turnNormal: CommittedTurn = {
+  userText: "请帮我读取并解释 src/cli.ts 文件",
+  assistantText: "好的，我来读取 `src/cli.ts` 文件并解释其结构。\n\n该文件是 HaxAgent 的 CLI 入口，负责解析参数和启动交互循环。",
+  thinking: "",
+  tools: [
+    {
+      name: "file.read",
+      input: { path: "src/cli.ts" },
+      status: "done",
+      durationMs: 14,
+      data: { path: "src/cli.ts", bytes: 8192 },
+    },
+  ],
+  interrupted: false,
+  error: null,
+};
+
+const turnWithThinking: CommittedTurn = {
+  userText: "What is 2 + 2?",
+  assistantText: "2 + 2 = 4.",
+  thinking: "The user is asking a simple arithmetic question. The answer is 4.",
+  tools: [],
+  interrupted: false,
+  error: null,
+};
+
+const turnInterrupted: CommittedTurn = {
+  userText: "Run a long computation",
+  assistantText: "Starting the computation…",
+  thinking: "",
+  tools: [
+    {
+      name: "shell.run",
+      input: { command: "node", args: ["heavy-script.js"] },
+      status: "running",
+    },
+  ],
+  interrupted: true,
+  error: null,
+};
+
+const turnError: CommittedTurn = {
+  userText: "Write to /etc/passwd",
+  assistantText: "",
+  thinking: "",
+  tools: [],
+  interrupted: false,
+  error: "PERMISSION_DENIED: cannot write to /etc/passwd",
+};
+
+// ---------------------------------------------------------------------------
 // Preview component
 // ---------------------------------------------------------------------------
 
@@ -123,6 +181,22 @@ function Preview(): React.ReactElement {
       {/* ── Task 3: DiffView via detail=true ───────────────────────── */}
       <Text>{"— file.edit with diff (detail=true, DiffView shown) —"}</Text>
       <ToolList tools={[diffTool]} detail />
+
+      {/* ── Task 5: ConversationTurn samples ──────────────────────── */}
+      <Text>{"— ConversationTurn: normal turn with CJK + tool —"}</Text>
+      <ConversationTurn turn={turnNormal} detail={false} />
+
+      <Text>{"— ConversationTurn: turn with thinking block —"}</Text>
+      <ConversationTurn turn={turnWithThinking} detail={false} />
+
+      <Text>{"— ConversationTurn: interrupted turn —"}</Text>
+      <ConversationTurn turn={turnInterrupted} detail={false} />
+
+      <Text>{"— ConversationTurn: error turn —"}</Text>
+      <ConversationTurn turn={turnError} detail={false} />
+
+      <Text>{"— ConversationTurn: normal turn in detail mode —"}</Text>
+      <ConversationTurn turn={turnNormal} detail />
     </Box>
   );
 }
