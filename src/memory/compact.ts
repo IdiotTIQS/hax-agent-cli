@@ -12,16 +12,40 @@ const COMPACTABLE_TOOLS = new Set([
   "web.search", "web.fetch", "file.edit", "file.write",
 ]);
 
-function microcompact(messages, keepRecent = 5) {
+interface CompactMessage {
+  role: string;
+  content: unknown;
+}
+
+interface ToolResultBlock {
+  type: string;
+  tool_use_id?: string;
+  name?: string;
+  content?: unknown;
+  is_error?: boolean;
+}
+
+interface MicrocompactResult {
+  messages: CompactMessage[];
+  cleared: number;
+}
+
+interface CompactionManagerOptions {
+  summarizeFn?: ((messages: CompactMessage[]) => Promise<string>) | null;
+  autoCompact?: boolean;
+  threshold?: number;
+}
+
+function microcompact(messages: CompactMessage[], keepRecent = 5): MicrocompactResult {
   if (!messages || !messages.length) return { messages, cleared: 0 };
 
   // Track last N compactable tool results
-  const recent = [];
+  const recent: Array<{ msgIdx: number; name: string }> = [];
   for (let i = messages.length - 1; i >= 0; i--) {
     const m = messages[i];
     if (m.role === "user" && Array.isArray(m.content)) {
-      for (const b of m.content) {
-        if (b?.type === "tool_result" && COMPACTABLE_TOOLS.has(b.name)) {
+      for (const b of m.content as ToolResultBlock[]) {
+        if (b?.type === "tool_result" && b.name && COMPACTABLE_TOOLS.has(b.name)) {
           if (recent.length < keepRecent) recent.push({ msgIdx: i, name: b.name });
         }
       }
@@ -31,8 +55,8 @@ function microcompact(messages, keepRecent = 5) {
   let cleared = 0;
   const result = messages.map((m, mi) => {
     if (m.role !== "user" || !Array.isArray(m.content)) return m;
-    const modified = m.content.map(b => {
-      if (b?.type === "tool_result" && COMPACTABLE_TOOLS.has(b.name) && !recent.some(r => r.msgIdx === mi)) {
+    const modified = (m.content as ToolResultBlock[]).map(b => {
+      if (b?.type === "tool_result" && b.name && COMPACTABLE_TOOLS.has(b.name) && !recent.some(r => r.msgIdx === mi)) {
         cleared++;
         return { type: "tool_result", tool_use_id: b.tool_use_id, name: b.name, content: "[Old tool result content cleared]", is_error: false };
       }
@@ -46,7 +70,7 @@ function microcompact(messages, keepRecent = 5) {
 
 // === Token estimation ===
 
-function estimateMessageTokens(messages) {
+function estimateMessageTokens(messages: CompactMessage[]): number {
   let total = 0;
   for (const m of messages) {
     const c = typeof m.content === "string" ? m.content : JSON.stringify(m.content);
@@ -57,17 +81,21 @@ function estimateMessageTokens(messages) {
 
 // === Full compaction ===
 
-async function fullCompact(messages, summarizeFn, keepRecent = 8) {
+async function fullCompact(
+  messages: CompactMessage[],
+  summarizeFn: (messages: CompactMessage[]) => Promise<string>,
+  keepRecent = 8
+): Promise<CompactMessage[]> {
   if (!messages || messages.length <= keepRecent) return messages;
 
   const toSummarize = messages.slice(0, -keepRecent);
   const recent = messages.slice(-keepRecent);
 
-  let summary;
+  let summary: string;
   try { summary = await summarizeFn(toSummarize); }
   catch (_) { return messages; } // Fail safe: return original
 
-  const boundary = {
+  const boundary: CompactMessage = {
     role: "user",
     content: `[CONVERSATION SUMMARY — ${toSummarize.length} earlier messages compacted]\n\n${summary}\n\nContinue the conversation using the context above.`,
   };
@@ -77,7 +105,7 @@ async function fullCompact(messages, summarizeFn, keepRecent = 8) {
 
 // === Context window helpers ===
 
-function getContextWindow(model) {
+function getContextWindow(model?: string): number {
   if (!model) return 200000;
   const m = String(model).toLowerCase();
   if (m.includes("claude-3") || m.includes("claude-")) return 200000;
@@ -87,21 +115,25 @@ function getContextWindow(model) {
   return 200000;
 }
 
-function getAutoCompactThreshold(model) {
+function getAutoCompactThreshold(model?: string): number {
   return getContextWindow(model) - 20000 - 13000; // max_output - buffer
 }
 
 // === Compaction Manager ===
 
 class CompactionManager {
-  constructor(o = {}) {
+  private _summarizeFn: ((messages: CompactMessage[]) => Promise<string>) | null;
+  private _autoCompact: boolean;
+  private _threshold: number;
+
+  constructor(o: CompactionManagerOptions = {}) {
     this._summarizeFn = o.summarizeFn || null;
     this._autoCompact = o.autoCompact !== false;
     this._threshold = o.threshold || 0.75; // fraction of context window
   }
 
   /** Check if compaction is needed */
-  needsCompaction(messages, model) {
+  needsCompaction(messages: CompactMessage[], model?: string): boolean {
     if (!this._autoCompact || !messages?.length) return false;
     const tokens = estimateMessageTokens(messages);
     const window = getContextWindow(model);
@@ -109,7 +141,7 @@ class CompactionManager {
   }
 
   /** Run micro-compact + optional full compact */
-  async compact(messages, model) {
+  async compact(messages: CompactMessage[], model?: string): Promise<CompactMessage[]> {
     // 1. Micro-compact first (cheap)
     const { messages: mc, cleared } = microcompact(messages);
     if (cleared > 0) messages = mc;

@@ -11,7 +11,14 @@ import os from "os";
 
 const PROFILES_FILE = path.join(os.homedir(), ".haxagent", "profiles.json");
 
-const BUILTIN = {
+interface ProfileConfig {
+  provider: string;
+  model: string;
+  apiUrl?: string;
+  note?: string;
+}
+
+const BUILTIN: Record<string, ProfileConfig> = {
   // Anthropic — updated 2026-05
   claude:    { provider: "anthropic",  model: "claude-sonnet-4-6",         apiUrl: "https://api.anthropic.com" },
   sonnet:    { provider: "anthropic",  model: "claude-sonnet-4-6" },
@@ -45,34 +52,51 @@ const BUILTIN = {
   vllm:      { provider: "vllm",       model: "default",                   apiUrl: "http://localhost:8000/v1",  note: "vLLM" },
 };
 
-class ProfileManager {
-  constructor(opts = {}) { this._active = opts.active || "claude"; this._custom = {}; this._load(); }
+interface ProfileManagerOptions {
+  active?: string;
+}
 
-  _load() {
-    try { if (fs.existsSync(PROFILES_FILE)) this._custom = JSON.parse(fs.readFileSync(PROFILES_FILE, "utf-8")); } catch (_) {}
+class ProfileManager {
+  private _active: string;
+  private _custom: Record<string, ProfileConfig>;
+
+  constructor(opts: ProfileManagerOptions = {}) {
+    this._active = opts.active || "claude";
+    this._custom = {};
+    this._load();
   }
 
-  _save() { fs.writeFileSync(PROFILES_FILE, JSON.stringify(this._custom, null, 2), "utf-8"); }
+  private _load(): void {
+    try {
+      if (fs.existsSync(PROFILES_FILE)) {
+        this._custom = JSON.parse(fs.readFileSync(PROFILES_FILE, "utf-8")) as Record<string, ProfileConfig>;
+      }
+    } catch (_) {}
+  }
+
+  private _save(): void {
+    fs.writeFileSync(PROFILES_FILE, JSON.stringify(this._custom, null, 2), "utf-8");
+  }
 
   /** Get the active profile config. */
-  get active() { return this.get(this._active) || BUILTIN.claude; }
+  get active(): ProfileConfig { return this.get(this._active) || BUILTIN["claude"]; }
 
   /** List all profiles (builtin + custom). */
-  list() { return { ...BUILTIN, ...this._custom }; }
+  list(): Record<string, ProfileConfig> { return { ...BUILTIN, ...this._custom }; }
 
   /** Get a specific profile. */
-  get(name) { return this._custom[name] || BUILTIN[name] || null; }
+  get(name: string): ProfileConfig | null { return this._custom[name] || BUILTIN[name] || null; }
 
   /** Switch active profile. */
-  use(name) { if (this.get(name)) { this._active = name; return true; } return false; }
+  use(name: string): boolean { if (this.get(name)) { this._active = name; return true; } return false; }
 
   /** Add/update a custom profile. */
-  set(name, cfg) { this._custom[name] = cfg; this._save(); }
+  set(name: string, cfg: ProfileConfig): void { this._custom[name] = cfg; this._save(); }
 
   /** Remove a custom profile. */
-  remove(name) { delete this._custom[name]; this._save(); }
+  remove(name: string): void { delete this._custom[name]; this._save(); }
 
-  get activeName() { return this._active; }
+  get activeName(): string { return this._active; }
 }
 
 export { ProfileManager, BUILTIN, PROFILES_FILE };
