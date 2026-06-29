@@ -1,16 +1,17 @@
 #!/usr/bin/env node
-// scripts/smoke-esm.js — CommonJS build script (runs before ESM migration completes)
+// scripts/smoke-esm.js — ESM smoke-test runner
 // Smoke-tests a batch of .js files by importing each through tsx to catch load-time errors.
 // Usage: node scripts/smoke-esm.js <dir-or-file> [...]
 // Prints: OK <file> / FAIL <file>; exits non-zero if any failed.
 
-'use strict';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import { spawnSync } from 'child_process';
+import { pathToFileURL } from 'url';
+import { fileURLToPath } from 'url';
 
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
-const { spawnSync } = require('child_process');
-const { pathToFileURL } = require('url');
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 /**
  * Recursively collect all .js files under a directory, or return [filePath] for a single file.

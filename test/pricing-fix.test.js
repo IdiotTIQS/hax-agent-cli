@@ -1,8 +1,6 @@
-"use strict";
-
-const test = require("node:test");
-const assert = require("node:assert/strict");
-const { PRICING, getPricing } = require("../src/pricing");
+import test from "node:test";
+import assert from "node:assert/strict";
+import { PRICING, getPricing } from "../src/pricing.js";
 
 test("Opus 4.7 pricing matches official $5/$25 per 1M tokens", () => {
   const p = getPricing("claude-opus-4-7");

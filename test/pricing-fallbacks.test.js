@@ -1,8 +1,6 @@
-"use strict";
-
-const test = require("node:test");
-const assert = require("node:assert/strict");
-const { getPricing, getCost } = require("../src/pricing");
+import test from "node:test";
+import assert from "node:assert/strict";
+import { getPricing, getCost } from "../src/pricing.js";
 
 // === FREE_PATTERNS: local/free models resolve to zero cost ===
 

@@ -7,10 +7,10 @@
     "checkJs": true,
     "noEmit": true,
 
-    // 匹配项目实际运行环境：Node>=18 + CommonJS，不改模块系统
+    // 匹配项目实际运行环境：Node>=18 + ESM
     "target": "ES2022",
-    "module": "CommonJS",
-    "moduleResolution": "Bundler",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
     "lib": ["ES2022"],
     "types": ["node"],
 

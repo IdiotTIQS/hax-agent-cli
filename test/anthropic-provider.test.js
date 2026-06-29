@@ -1,8 +1,6 @@
-"use strict";
-
-const test = require("node:test");
-const assert = require("node:assert/strict");
-const { AnthropicProvider } = require("../src/api/provider");
+import test from "node:test";
+import assert from "node:assert/strict";
+import { AnthropicProvider } from "../src/api/provider.js";
 
 test("无 thinking 时请求体不含 thinking/output_config", () => {
   const p = new AnthropicProvider({ apiKey: "test", model: "claude-sonnet-4-6" });

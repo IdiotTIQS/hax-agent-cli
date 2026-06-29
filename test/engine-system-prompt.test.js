@@ -1,9 +1,7 @@
-"use strict";
-
-const test = require("node:test");
-const assert = require("node:assert/strict");
-const { AgentEngine, Session } = require("../src/engine/agent");
-const { createMockProvider, createMockToolRegistry } = require("../test-helpers/mocks");
+import test from "node:test";
+import assert from "node:assert/strict";
+import { AgentEngine, Session } from "../src/engine/agent.js";
+import { createMockProvider, createMockToolRegistry } from "../test-helpers/mocks.js";
 
 function makeEngine() {
   const session = new Session({

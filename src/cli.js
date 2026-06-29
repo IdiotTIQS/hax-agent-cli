@@ -1,19 +1,26 @@
 #!/usr/bin/env node
-"use strict";
 
-const fs = require("fs");
-const readline = require("readline");
-const VERSION = require("../package.json").version;
+import fs from "fs";
+import readline from "readline";
+import { readFileSync } from "fs";
+import { join } from "path";
 
-const { ANSI, THEME, styled } = require("./shared/utils");
-const { loadSettings, reloadSettings } = require("./config/settings");
-const { ProfileManager, BUILTIN } = require("./config/profiles");
-const { createProvider } = require("./api/provider");
-const { createDefaultRegistry } = require("./tools/registry");
-const { Session, AgentEngine, PermissionChecker, HookExecutor, PermissionMode } = require("./engine/agent");
-const { loadSkillRegistry } = require("./skills/registry");
-const { ResponseRenderer, MarkdownRenderer } = require("./renderer");
-const { loadPluginRegistry } = require("./plugins/registry");
+const VERSION = JSON.parse(readFileSync(join(import.meta.dirname, "../package.json"), "utf8")).version;
+
+import { ANSI, THEME, styled } from "./shared/utils.js";
+import { loadSettings, reloadSettings } from "./config/settings.js";
+import { ProfileManager, BUILTIN } from "./config/profiles.js";
+import { createProvider } from "./api/provider.js";
+import { createDefaultRegistry } from "./tools/registry.js";
+import { Session, AgentEngine, PermissionChecker, HookExecutor, PermissionMode } from "./engine/agent.js";
+import { loadSkillRegistry } from "./skills/registry.js";
+import { ResponseRenderer, MarkdownRenderer } from "./renderer.js";
+import { loadPluginRegistry } from "./plugins/registry.js";
+import { shouldRunSetup, runSetup } from "./setup.js";
+import { SandboxAdapter } from "./sandbox/adapter.js";
+import { applyTheme } from "./shared/themes.js";
+import { loadSettings as loadSettingsAlias, saveSettings } from "./config/settings.js";
+import * as commandsRegistryMod from "./commands/registry.js";
 
 // === Argument Parser ===
 
@@ -112,8 +119,6 @@ function printHelp() {
 // === Batch Mode ===
 
 async function runBatch(flags) {
-  const { shouldRunSetup, runSetup } = require("./setup");
-
   let prompt = flags.batch;
   if (flags.input) {
     if (!fs.existsSync(flags.input)) {
@@ -200,7 +205,6 @@ async function runBatch(flags) {
 
 async function runInteractive(flags) {
   // First-run setup wizard — reload after setup saves to disk
-  var { shouldRunSetup, runSetup } = require("./setup");
   if (shouldRunSetup()) { await runSetup(); reloadSettings(); }
 
   var settings = loadSettings();
@@ -249,7 +253,6 @@ async function runInteractive(flags) {
   var explicitSandbox = !!flags.sandbox;
   var sandboxEnabled = explicitSandbox || settings.sandbox?.enabled;
   if (sandboxEnabled) {
-    var { SandboxAdapter } = require("./sandbox/adapter");
     sandbox = new SandboxAdapter({
       backend: settings.sandbox?.backend || "docker",
       image: settings.sandbox?.image || "node:18-alpine",
@@ -289,9 +292,13 @@ async function runInteractive(flags) {
   if (settings.permissions?.allowedTools) { for (var t of settings.permissions.allowedTools) pm.allowTool(t); }
   if (settings.permissions?.deniedTools) { for (var t of settings.permissions.deniedTools) pm.denyTool(t); }
   if (settings.agent?.thinking) { session._thinking = true; session._thinkIntensity = settings.agent.thinkIntensity || null; }
-  if (settings.ui?.theme) { try { require("./shared/themes").applyTheme(settings.ui.theme, THEME); } catch (_) {} }
+  if (settings.ui?.theme) { try { applyTheme(settings.ui.theme, THEME); } catch (_) {} }
 
   var isTTY = process.stdout.isTTY;
+
+  // Load commands
+  var commands = commandsRegistryMod;
+
   var rl = readline.createInterface({
     input: process.stdin, output: process.stdout, terminal: isTTY,
     completer: function (line) {
@@ -334,7 +341,7 @@ async function runInteractive(flags) {
       s.agent._activeProfile = pm.activeName;
       s.agent.provider = pm.active.provider;
       s.agent.model = pm.active.model;
-      require("./config/settings").saveSettings(s);
+      saveSettings(s);
     } catch (_) {}
   }
   var saved = getSavedProfile();
@@ -345,9 +352,6 @@ async function runInteractive(flags) {
 
   process.stdout.write(banner());
   refreshPrompt();
-
-  // Load commands and screen adapter
-  var commands = require("./commands/registry");
 
   rl.on("line", async function (line) {
     var trimmed = line.trim();
@@ -431,7 +435,7 @@ async function runInteractive(flags) {
         var modes = ["normal", "yolo", "plan", "full_auto"];
         var idx = modes.indexOf(pm.mode);
         pm.mode = modes[(idx + 1) % modes.length];
-        try { var s = require("./config/settings").loadSettings(); if (!s.permissions) s.permissions = {}; s.permissions.mode = pm.mode; require("./config/settings").saveSettings(s); } catch (_) {}
+        try { var s = loadSettings(); if (!s.permissions) s.permissions = {}; s.permissions.mode = pm.mode; saveSettings(s); } catch (_) {}
         process.stdout.write("\r" + ANSI.clearLine + styled(THEME.warning, "[" + pm.mode.toUpperCase() + "]") + " ");
         refreshPrompt();
       }
@@ -510,5 +514,10 @@ function main(argv) {
   }
 }
 
-if (require.main === module) main();
-module.exports = { main, parseArgs };
+// ESM equivalent of `if (require.main === module)`
+const isMain = process.argv[1] &&
+  (process.argv[1].replace(/\\/g, "/").endsWith("src/cli.js") ||
+   import.meta.url === new URL("file://" + process.argv[1].replace(/\\/g, "/")).href);
+if (isMain) main();
+
+export { main, parseArgs };

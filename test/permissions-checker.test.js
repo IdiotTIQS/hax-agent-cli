@@ -1,12 +1,10 @@
-"use strict";
-
-const test = require("node:test");
-const assert = require("node:assert/strict");
-const {
+import test from "node:test";
+import assert from "node:assert/strict";
+import {
   PermissionMode,
   PermissionDecision,
   PermissionChecker,
-} = require("../src/core/permissions/checker");
+} from "../src/core/permissions/checker.js";
 
 // === PermissionDecision factories ===
 

@@ -1,19 +1,36 @@
-"use strict";
+import path from "path";
+import fs from "fs";
+import { readFileSync } from "fs";
+import { join } from "path";
+import os from "os";
+import { spawn } from "child_process";
+import { execSync } from "child_process";
+import { ANSI, THEME, styled } from "../shared/utils.js";
+import { loadSettings, saveSettings, reloadSettings } from "../config/settings.js";
+import { PermissionMode } from "../engine/agent.js";
+import { ProfileManager } from "../config/profiles.js";
+import { createProvider } from "../api/provider.js";
+import { loadSkillRegistry } from "../skills/registry.js";
+import { microcompact, estimateMessageTokens, getContextWindow } from "../memory/compact.js";
+import { workspaceSearch, goToDefinition } from "../services/lsp.js";
+import { MemoryStore } from "../memory/store.js";
+import { listProviders } from "../api/provider.js";
+import { listThemes, applyTheme } from "../shared/themes.js";
+import { THEMES } from "../shared/themes.js";
+import { extractLocalRules, factsToMarkdown } from "../services/personalization.js";
+import { SandboxAdapter } from "../sandbox/adapter.js";
+import registerExtended from "./extended-commands.js";
 
-const path = require("path");
-const fs = require("fs");
-const { ANSI, THEME, styled } = require("../shared/utils");
+const VERSION = JSON.parse(readFileSync(join(import.meta.dirname, "../../package.json"), "utf8")).version;
 
 function _persist(key, val, sub) {
   try {
-    const { loadSettings, saveSettings } = require("../config/settings");
     var s = loadSettings();
     if (sub) { if (!s[key]) s[key] = {}; s[key][sub] = val; }
     else s[key] = val;
     saveSettings(s);
   } catch (_) {}
 }
-const { PermissionMode } = require("../engine/agent");
 
 const commands = {};
 
@@ -38,7 +55,6 @@ register("help", (_, ctx) => {
   }
   // Also list skills
   try {
-    const { loadSkillRegistry } = require("../skills/registry");
     const skills = loadSkillRegistry();
     if (skills.size > 0) {
       ctx.screen.write(`\n${styled(T.heading, "Skills (use /skill-name):")}\n`);
@@ -74,7 +90,6 @@ register("model", (args, ctx) => {
     ctx.session.provider.model = args[0];
     // Persist to settings
     try {
-      const { loadSettings, saveSettings } = require("../config/settings");
       const s = loadSettings();
       if (!s.agent) s.agent = {};
       s.agent.model = args[0];
@@ -87,8 +102,6 @@ register("model", (args, ctx) => {
 }, "Switch model");
 
 register("provider", async (args, ctx) => {
-  const { ProfileManager } = require("../config/profiles");
-  const { createProvider } = require("../api/provider");
   const pm = new ProfileManager();
   if (args[0] === "list") {
     const profiles = pm.list();
@@ -98,7 +111,6 @@ register("provider", async (args, ctx) => {
       ctx.session.provider = createProvider({ ...pm.active });
       // Persist to settings so it survives restart
       try {
-        const { loadSettings, saveSettings } = require("../config/settings");
         const s = loadSettings();
         if (!s.agent) s.agent = {};
         s.agent._activeProfile = args[0];
@@ -136,7 +148,6 @@ register("tools", (_, ctx) => {
 
 register("skills", (_, ctx) => {
   try {
-    const { loadSkillRegistry } = require("../skills/registry");
     const reg = loadSkillRegistry(ctx.settings?.projectRoot || process.cwd());
     const skills = reg.list();
     if (!skills.length) ctx.screen.write(`${styled(THEME.dim, "No skills found. Create .hax-agent/skills/<name>/SKILL.md")}\n`);
@@ -223,7 +234,6 @@ register("deny", (args, ctx) => {
 }, "Always deny a tool");
 
 register("config", (args, ctx) => {
-  const { loadSettings, reloadSettings, saveSettings } = require("../config/settings");
   if (args[0] === "reload") {
     const cfg = reloadSettings();
     ctx.screen.write(`${styled(THEME.success, "Configuration reloaded from disk.")}\n`);
@@ -236,13 +246,11 @@ register("config", (args, ctx) => {
 }, "Show current configuration (/config reload to re-read from disk)");
 
 register("version", (_, ctx) => {
-  const v = require("../../package.json").version;
-  ctx.screen.write(`hax-agent v${v}\nNode.js ${process.version} · ${process.platform} ${process.arch}\n`);
+  ctx.screen.write(`hax-agent v${VERSION}\nNode.js ${process.version} · ${process.platform} ${process.arch}\n`);
   ctx.rl?.prompt?.();
 }, "Show version info");
 
 register("memory", async (args, ctx) => {
-  const { MemoryStore } = require("../memory/store");
   const store = new MemoryStore();
   await store.init();
   if (args[0] === "search" && args[1]) {
@@ -258,7 +266,6 @@ register("memory", async (args, ctx) => {
 }, "Manage persistent memories (search, list)");
 
 register("compact", (_, ctx) => {
-  const { microcompact, estimateMessageTokens } = require("../memory/compact");
   const s = ctx.session;
   const { messages, cleared } = microcompact(s.messages);
   s.messages = messages;
@@ -267,7 +274,6 @@ register("compact", (_, ctx) => {
 }, "Compact conversation context");
 
 register("lsp", async (args, ctx) => {
-  const { workspaceSearch, goToDefinition } = require("../services/lsp");
   const root = ctx.settings?.projectRoot || process.cwd();
   if (args[0] === "def" && args[1]) {
     const defs = goToDefinition(root, args[1]);
@@ -315,7 +321,6 @@ register("context", (_, ctx) => {
 }, "Show context window usage");
 
 register("doctor", async (_, ctx) => {
-  const { listProviders, createProvider } = require("../api/provider");
   const providers = listProviders();
   const s = ctx.session;
   let ok = 0, warn = 0, err = 0;
@@ -338,7 +343,6 @@ register("doctor", async (_, ctx) => {
 }, "Run diagnostic check");
 
 register("api-key", (args, ctx) => {
-  const fs = require("fs"), path = require("path"), os = require("os");
   const dir = path.join(os.homedir(), ".haxagent");
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
   const cfgPath = path.join(dir, "apikeys.json");
@@ -393,7 +397,7 @@ register("export", (_, ctx) => {
   };
   const json = JSON.stringify(data, null, 2);
   const fp = `./hax-session-${s.id}.json`;
-  require("fs").writeFileSync(fp, json);
+  fs.writeFileSync(fp, json);
   ctx.screen.write(`${styled(THEME.success, `Exported to: ${fp}`)}\n`);
   ctx.rl?.prompt?.();
 }, "Export session to JSON");
@@ -402,7 +406,6 @@ register("copy", (_, ctx) => {
   const last = [...ctx.session.messages].reverse().find(m => m.role === "assistant");
   if (!last?.content) { ctx.screen.write(`${styled(THEME.dim, "No assistant response to copy.")}\n`); ctx.rl?.prompt?.(); return; }
   const text = typeof last.content === "string" ? last.content : JSON.stringify(last.content);
-  const { spawn } = require("child_process");
   const platform = process.platform;
   const cmd = platform === "win32" ? ["clip"] : platform === "darwin" ? ["pbcopy"] : ["xclip", "-selection", "clipboard"];
   const child = spawn(cmd[0], cmd.slice(1), { stdio: ["pipe", "ignore", "ignore"] });
@@ -413,12 +416,11 @@ register("copy", (_, ctx) => {
 }, "Copy last response to clipboard");
 
 register("init", (_, ctx) => {
-  const fs = require("fs"), p = require("path");
   const cwd = ctx.settings?.projectRoot || process.cwd();
-  const dir = p.join(cwd, ".hax-agent");
+  const dir = path.join(cwd, ".hax-agent");
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
   const dirs = ["skills", "plugins", "memories"];
-  for (const d of dirs) { const dp = p.join(dir, d); if (!fs.existsSync(dp)) fs.mkdirSync(dp); }
+  for (const d of dirs) { const dp = path.join(dir, d); if (!fs.existsSync(dp)) fs.mkdirSync(dp); }
   ctx.screen.write(`${styled(THEME.success, `Initialized .hax-agent/ in ${cwd}`)}\n`);
   ctx.rl?.prompt?.();
 }, "Initialize .hax-agent project directory");
@@ -444,8 +446,7 @@ register("sandbox", (args, ctx) => {
   if (args[0] === "on" || args[0] === "enable") {
     if (s.sandbox) { ctx.screen.write(`${styled(THEME.info, "Sandbox already running (" + s.sandbox.backend + ")")}\n`); }
     else {
-      const { SandboxAdapter } = require("../sandbox/adapter");
-      const settings = require("../config/settings").loadSettings();
+      const settings = loadSettings();
       s.sandbox = new SandboxAdapter({ backend: settings.sandbox?.backend || "docker", image: settings.sandbox?.image || "node:18-alpine", network: settings.sandbox?.network || "none", cpus: settings.sandbox?.cpus || 2, memory: settings.sandbox?.memory || "512m", hostDir: process.cwd() });
       s.sandbox.start().then(() => {
         ctx.screen.write(`${styled(THEME.success, "Sandbox started (" + s.sandbox.backend + ")")}\n`);
@@ -470,7 +471,6 @@ register("sandbox", (args, ctx) => {
 }, "Docker sandbox isolation for shell commands");
 
 register("providers", (_, ctx) => {
-  const { listProviders } = require("../api/provider");
   const providers = listProviders();
   ctx.screen.write(`${styled(THEME.info, `Available providers (${providers.length}):`)}\n`);
   for (const p of providers) ctx.screen.write(`  ${p.name.padEnd(12)} ${p.model}${p.envKey ? ` (env: ${p.envKey})` : ""}\n`);
@@ -478,22 +478,20 @@ register("providers", (_, ctx) => {
 }, "List all available AI providers");
 
 register("theme", (args, ctx) => {
-  const { listThemes, applyTheme } = require("../shared/themes");
   if (args[0] === "list") {
     for (const t of listThemes()) ctx.screen.write(`  ${t.name.padEnd(12)} ${t.description}\n`);
   } else if (args[0]) {
-    applyTheme(args[0], require("../shared/utils").THEME);
+    applyTheme(args[0], THEME);
     _persist("ui", args[0], "theme");
     ctx.screen.write(`${styled(THEME.success, "Theme: " + args[0])}\n`);
   } else {
     ctx.screen.write(`${styled(THEME.info, "Usage: /theme <name> | /theme list")}\n`);
-    ctx.screen.write(`  Available: ${Object.keys(require("../shared/themes").THEMES).join(", ")}\n`);
+    ctx.screen.write(`  Available: ${Object.keys(THEMES).join(", ")}\n`);
   }
   ctx.rl?.prompt?.();
 }, "Switch terminal theme");
 
 register("personalize", (_, ctx) => {
-  const { extractLocalRules, factsToMarkdown } = require("../services/personalization");
   const facts = extractLocalRules(ctx.session.messages);
   ctx.screen.write(`${styled(THEME.info, `Extracted ${facts.length} environment facts`)}\n`);
   if (facts.length > 0) {
@@ -509,6 +507,6 @@ register("personalize", (_, ctx) => {
 }, "Extract environment facts from conversation");
 
 // Load extended commands
-require("./extended-commands")(register, styled, THEME, ANSI);
+registerExtended(register, styled, THEME, ANSI);
 
-module.exports = { register, execute, commands };
+export { register, execute, commands };

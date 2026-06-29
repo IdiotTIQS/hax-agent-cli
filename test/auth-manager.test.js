@@ -1,11 +1,9 @@
-"use strict";
-
-const test = require("node:test");
-const assert = require("node:assert/strict");
-const fs = require("node:fs");
-const os = require("node:os");
-const path = require("node:path");
-const { AuthManager, KNOWN_PROVIDERS } = require("../src/auth/manager");
+import test from "node:test";
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { AuthManager, KNOWN_PROVIDERS } from "../src/auth/manager.js";
 
 // Each manager points at an isolated temp dir — never touches the real ~/.haxagent.
 function makeManager() {

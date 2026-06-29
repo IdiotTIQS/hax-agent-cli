@@ -1,19 +1,22 @@
-"use strict";
-
 /**
  * Extended Commands — session, MCP, plugin, git, and utility commands.
  * Appended to commands/registry.js for clean loading.
  */
 
-module.exports = function registerExtended(registerFn, styledFn, THEME, ANSI) {
+import fs from "fs";
+import path from "path";
+import { SessionMemoryStore } from "../services/session-memory.js";
+import { McpClientManager } from "../services/mcp.js";
+import { PluginRegistry } from "../plugins/registry.js";
+import { MemoryExtractor } from "../services/memory-extract.js";
+import { execSync } from "child_process";
+
+export default function registerExtended(registerFn, styledFn, THEME, ANSI) {
   const register = registerFn;
   const styled = styledFn;
-  const fs = require("fs");
-  const path = require("path");
 
   // Session management
   register("session", (args, ctx) => {
-    const { SessionMemoryStore } = require("../services/session-memory");
     const store = new SessionMemoryStore();
     const sid = ctx.session.id;
 
@@ -44,7 +47,6 @@ module.exports = function registerExtended(registerFn, styledFn, THEME, ANSI) {
 
   // Continue last session
   register("continue", (args, ctx) => {
-    const { SessionMemoryStore } = require("../services/session-memory");
     const store = new SessionMemoryStore();
     const sid = args[0] || ctx.session.id;
     const snap = store.getLatestSnapshot(sid);
@@ -92,7 +94,7 @@ module.exports = function registerExtended(registerFn, styledFn, THEME, ANSI) {
   register("mcp", async (args, ctx) => {
     let manager = ctx.mcpManager;
     if (!manager) {
-      try { const { McpClientManager } = require("../services/mcp"); manager = new McpClientManager(); manager.loadConfig(); ctx.mcpManager = manager; }
+      try { manager = new McpClientManager(); manager.loadConfig(); ctx.mcpManager = manager; }
       catch (err) { ctx.screen.write(`${styled(THEME.error, `MCP not available: ${err.message}`)}\n`); ctx.rl?.prompt?.(); return; }
     }
 
@@ -123,7 +125,6 @@ module.exports = function registerExtended(registerFn, styledFn, THEME, ANSI) {
   // Plugin
   register("plugin", (args, ctx) => {
     try {
-      const { PluginRegistry } = require("../plugins/registry");
       const registry = new PluginRegistry();
       if (args[0] === "list") {
         const plugins = registry.list();
@@ -155,7 +156,6 @@ module.exports = function registerExtended(registerFn, styledFn, THEME, ANSI) {
 
   // Dream / memory consolidation
   register("dream", async (args, ctx) => {
-    const { MemoryExtractor } = require("../services/memory-extract");
     const extractor = new MemoryExtractor();
 
     if (!extractor.shouldExtract(ctx.session.turnCount)) {
@@ -196,7 +196,6 @@ module.exports = function registerExtended(registerFn, styledFn, THEME, ANSI) {
 
   // Git diff
   register("diff", (args, ctx) => {
-    const { execSync } = require("child_process");
     try {
       const cwd = ctx.settings?.projectRoot || process.cwd();
       const output = execSync("git diff --stat", { cwd, encoding: "utf-8", timeout: 10000 }).trim();
@@ -208,7 +207,6 @@ module.exports = function registerExtended(registerFn, styledFn, THEME, ANSI) {
 
   // Git branch
   register("branch", (args, ctx) => {
-    const { execSync } = require("child_process");
     try {
       const cwd = ctx.settings?.projectRoot || process.cwd();
       const output = execSync("git branch", { cwd, encoding: "utf-8", timeout: 10000 });
@@ -279,7 +277,7 @@ module.exports = function registerExtended(registerFn, styledFn, THEME, ANSI) {
 
   // Release notes
   register("release-notes", (_, ctx) => {
-    const pkgPath = path.join(__dirname, "../../package.json");
+    const pkgPath = path.join(import.meta.dirname, "../../package.json");
     try {
       const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf-8"));
       ctx.screen.write(`${styled(THEME.heading, `HaxAgent v${pkg.version}`)}\n`);
@@ -291,7 +289,6 @@ module.exports = function registerExtended(registerFn, styledFn, THEME, ANSI) {
   // Reload plugins
   register("reload", (args, ctx) => {
     try {
-      const { PluginRegistry } = require("../plugins/registry");
       const registry = new PluginRegistry();
       registry.loadFromDir(path.join(ctx.settings?.projectRoot || process.cwd(), ".hax-agent", "plugins"));
       ctx.screen.write(`${styled(THEME.success, "Plugins reloaded.")}\n`);

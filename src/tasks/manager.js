@@ -1,5 +1,3 @@
-"use strict";
-
 /**
  * Background task manager.
  * Ported from OpenHarness tasks/manager.py
@@ -8,11 +6,11 @@
  * stdin forwarding, restart capability, and completion listeners.
  */
 
-const { spawn } = require("child_process");
-const fs = require("fs");
-const path = require("path");
-const { getTasksDir } = require("../config/paths");
-const { TaskRecord, TaskStatus, TaskType } = require("./types");
+import { spawn } from "child_process";
+import fs from "fs";
+import path from "path";
+import { getTasksDir } from "../config/paths.js";
+import { TaskRecord, TaskStatus, TaskType } from "./types.js";
 
 class BackgroundTaskManager {
   constructor() {
@@ -43,7 +41,7 @@ class BackgroundTaskManager {
 
   /** Start a background agent task. */
   createAgentTask(opts = {}) {
-    const argv = opts.argv || ["node", path.join(__dirname, "..", "cli.js"), "--batch", opts.prompt || ""];
+    const argv = opts.argv || ["node", path.join(import.meta.dirname, "..", "cli.js"), "--batch", opts.prompt || ""];
     const record = this.createShellTask({
       taskType: opts.taskType || TaskType.LOCAL_AGENT,
       description: opts.description || "",
@@ -159,4 +157,4 @@ function _taskId(taskType) {
   return `${prefixes[taskType] || "b"}${suffix}`;
 }
 
-module.exports = { BackgroundTaskManager };
+export { BackgroundTaskManager };

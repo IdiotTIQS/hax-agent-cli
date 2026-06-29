@@ -1,8 +1,6 @@
-"use strict";
-
-const test = require("node:test");
-const assert = require("node:assert/strict");
-const { Session, AgentEngine } = require("../src/engine/agent");
+import test from "node:test";
+import assert from "node:assert/strict";
+import { Session, AgentEngine } from "../src/engine/agent.js";
 
 // 内联 mock provider: 发出一次 tool_use 后结束
 function makeStubProvider() {

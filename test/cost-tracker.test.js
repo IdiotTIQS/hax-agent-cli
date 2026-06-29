@@ -1,9 +1,7 @@
-"use strict";
-
-const test = require("node:test");
-const assert = require("node:assert/strict");
-const { CostTracker } = require("../src/engine/cost-tracker");
-const { getCost } = require("../src/pricing");
+import test from "node:test";
+import assert from "node:assert/strict";
+import { CostTracker } from "../src/engine/cost-tracker.js";
+import { getCost } from "../src/pricing.js";
 
 test("fresh tracker has zero totals", () => {
   const t = new CostTracker();

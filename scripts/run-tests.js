@@ -1,9 +1,4 @@
-'use strict';
-
-// Simple test runner: node --test test/smoke-test.test.js test/public-api.test.js
-// Usage: node scripts/run-tests.js
-
-const { spawn } = require('node:child_process');
+import { spawn } from 'node:child_process';
 
 const nodeArgs = ['--test', 'test/smoke-test.test.js', 'test/public-api.test.js', 'test/pricing-fix.test.js', 'test/pricing-fallbacks.test.js', 'test/permissions-checker.test.js', 'test/cost-tracker.test.js', 'test/lsp.test.js', 'test/auth-manager.test.js', 'test/anthropic-provider.test.js', 'test/engine-system-prompt.test.js', 'test/engine-tool-result.test.js'];
 

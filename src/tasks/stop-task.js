@@ -1,7 +1,5 @@
 /** Stop task command. Ported from OpenHarness tasks/stop_task.py */
-// default-import-destructure: tasks/manager.js is still CJS until B5 (ESM named-import of CJS fails under plain node)
-import taskManagerMod from "./manager.js";
-const { BackgroundTaskManager } = taskManagerMod;
+import { BackgroundTaskManager } from "./manager.js";
 
 function stopTask(taskId, mgr) {
   const manager = mgr || (global.__backgroundTaskManager || null);

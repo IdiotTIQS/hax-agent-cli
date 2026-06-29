@@ -5,10 +5,9 @@
  * without repeating setup boilerplate. All mocks are plain objects or
  * lightweight classes — they do not depend on the real implementation.
  */
-"use strict";
 
-const path = require("node:path");
-const os = require("node:os");
+import path from "node:path";
+import os from "node:os";
 
 // ---------------------------------------------------------------------------
 // createMockProvider
@@ -704,7 +703,7 @@ function deepMerge(base, override) {
 // Exports
 // ---------------------------------------------------------------------------
 
-module.exports = {
+export {
   createMockProvider,
   createMockSession,
   createMockTool,

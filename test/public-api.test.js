@@ -1,7 +1,7 @@
-const assert = require('node:assert/strict');
-const test = require('node:test');
+import assert from 'node:assert/strict';
+import test from 'node:test';
 
-const api = require('../src');
+import api from '../src/index.js';
 
 test('public API exposes core namespaces', () => {
   for (const ns of ['engine', 'tools', 'api', 'config', 'skills', 'memory', 'tui', 'commands']) {
