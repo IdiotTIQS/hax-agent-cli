@@ -202,6 +202,8 @@ class AnthropicProvider {
   apiUrl: string;
   model: string;
   maxTokens: number;
+  /** Sanitized→original tool-name map, set per request in _buildRequestBody. */
+  _toolNameMap: Record<string, string> | null = null;
 
   constructor(o: AnthropicProviderOptions = {}) {
     this.apiKey = o.apiKey || process.env["ANTHROPIC_API_KEY"];
@@ -271,10 +273,13 @@ class AnthropicProvider {
     };
 
     // Prefer native tool_use; fall back to DSML when text contains DSML invokes
+    const nameMap = this._toolNameMap || {};
     const nativeUses = Object.values(nativeToolUses).map(t => {
       let input: unknown = {};
       try { input = JSON.parse(t.input_acc || "{}"); } catch (_) {}
-      return { id: t.id, name: t.name, input };
+      // Reverse the sanitized name (file_write → file.write) so the engine
+      // finds the tool in the registry.
+      return { id: t.id, name: nameMap[t.name] || t.name, input };
     });
 
     const toolUses = nativeUses.length > 0 ? nativeUses : this._parseDsml(text);
@@ -299,7 +304,18 @@ class AnthropicProvider {
         body["system"] = String(req.system);
       }
     }
-    if (req.tools?.length) body["tools"] = req.tools;
+    if (req.tools?.length) {
+      // Anthropic tool names must match ^[a-zA-Z0-9_-]{1,64}$ — dots are
+      // rejected, so "file.write" → "file_write". Keep a reverse map so the
+      // tool_use that comes back can be resolved to the registry's real name.
+      const nameMap: Record<string, string> = {};
+      body["tools"] = req.tools.map((t) => {
+        const sanitized = (t.name || "").replace(/\./g, "_");
+        if (sanitized !== t.name) nameMap[sanitized] = t.name as string;
+        return { name: sanitized, description: t.description, input_schema: t.input_schema };
+      });
+      this._toolNameMap = nameMap;
+    }
     if (req.thinking) {
       body["thinking"] = { type: "adaptive" };
       const intensity = req.thinkIntensity;
@@ -333,7 +349,9 @@ class AnthropicProvider {
         const blocks: Array<Record<string, unknown>> = [];
         if (m.content) blocks.push({ type: "text", text: m.content });
         for (const tu of m.tool_uses) {
-          blocks.push({ type: "tool_use", id: tu.id, name: tu.name, input: tu.input });
+          // Sanitize the name to match what was sent in the tools list
+          // (file.write → file_write); Anthropic validates tool_use names too.
+          blocks.push({ type: "tool_use", id: tu.id, name: (tu.name || "").replace(/\./g, "_"), input: tu.input });
         }
         return { role: "assistant", content: blocks };
       }

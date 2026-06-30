@@ -4,6 +4,7 @@ const nodeArgs = [
   '--import', 'tsx',
   '--test',
   'test/smoke-test.test.ts',
+  'test/anthropic-tool-names.test.ts',
   'test/public-api.test.ts',
   'test/pricing-fix.test.ts',
   'test/pricing-fallbacks.test.ts',
