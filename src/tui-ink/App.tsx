@@ -119,6 +119,12 @@ export interface AppProps {
     stopAll(): void;
     discoverTools(name?: string | null): Promise<Array<{ name: string }>>;
   } | null;
+  /**
+   * Look up a skill by name (no leading /). Returns its content + description
+   * so a "/skill-name [extra prompt]" submission runs the skill through the
+   * engine (not the command system). Returns null when the name is not a skill.
+   */
+  getSkill?: (name: string) => { name: string; content: string; description?: string } | null;
 }
 
 // (CommittedMessage removed in T5 — ConversationTurn renders full turn snapshots)
@@ -140,6 +146,7 @@ export function App({
   session,
   settings,
   mcpManager,
+  getSkill,
 }: AppProps): React.ReactElement {
   // ── Reducer ───────────────────────────────────────────────────────────────
   const [state, dispatch] = useReducer(
@@ -214,41 +221,19 @@ export function App({
     [commands, session, settings, pm, mcpManager],
   );
 
-  // ── Submit handler ────────────────────────────────────────────────────────
-  const handleSubmit = useCallback(
-    async (text: string) => {
-      const trimmed = text.trim();
-      if (!trimmed) return;
-      if (isStreamingRef.current) return;
-
-      setInputValue("");
-      // Close the palette if it was open when the user pressed Enter.
-      if (state.commandPalette?.open) {
-        dispatch({ type: "close_palette" });
-      }
-
-      // ── Slash command branch ────────────────────────────────────────────
-      // Any input starting with "/" is treated as a slash command.  We check
-      // whether the commands module is available and execute via it.  Unknown
-      // commands are still sent through execute() so its "Unknown command"
-      // message appears in history.
-      if (trimmed.startsWith("/") && commands) {
-        await runSlashCommand(trimmed);
-        return;
-      }
-
+  // ── Engine turn runner ──────────────────────────────────────────────────
+  // Drives one engine turn. `promptText` is what's sent to the engine;
+  // `displayText` is what's shown as the user's message (they differ for
+  // skills, where the display is "/skill-name …" but the prompt is the
+  // expanded skill content + user request).
+  const runEngineTurn = useCallback(
+    async (promptText: string, displayText: string) => {
       spinnerStartRef.current = Date.now();
-
-      // Optimistic: push user message + start spinner immediately.
-      dispatch({ type: "submit_input", text: trimmed });
+      dispatch({ type: "submit_input", text: displayText });
       dispatch({ type: "turn_start" });
-
       isStreamingRef.current = true;
-
       try {
-        for await (const event of engine.sendMessage(trimmed)) {
-          // Cast via unknown to satisfy the discriminated union.
-          // The engine yields objects matching AgentEvent shapes exactly.
+        for await (const event of engine.sendMessage(promptText)) {
           dispatch({
             type: "engine_event",
             event: event as unknown as Parameters<typeof reducer>[1] extends
@@ -267,7 +252,51 @@ export function App({
         isStreamingRef.current = false;
       }
     },
-    [engine, commands, runSlashCommand, state.commandPalette],
+    [engine],
+  );
+
+  // ── Submit handler ────────────────────────────────────────────────────────
+  const handleSubmit = useCallback(
+    async (text: string) => {
+      const trimmed = text.trim();
+      if (!trimmed) return;
+      if (isStreamingRef.current) return;
+
+      setInputValue("");
+      // Close the palette if it was open when the user pressed Enter.
+      if (state.commandPalette?.open) {
+        dispatch({ type: "close_palette" });
+      }
+
+      // ── Slash branch: command, then skill, then unknown ──────────────────
+      if (trimmed.startsWith("/")) {
+        const slashName = trimmed.slice(1).split(/\s+/)[0]?.toLowerCase() ?? "";
+        // 1) Registered command → execute via the command system.
+        if (commands && commands.commands?.[slashName]) {
+          await runSlashCommand(trimmed);
+          return;
+        }
+        // 2) Skill → expand to a skill prompt + any extra user text, run on engine.
+        const skill = getSkill?.(slashName) ?? null;
+        if (skill) {
+          const userArgs = trimmed.replace(/^\/\S+\s*/, "").trim();
+          const skillPrompt =
+            'Execute skill "' + skill.name + '".\n\n' + skill.content +
+            (userArgs ? "\n\n---\nUser request:\n" + userArgs : "");
+          await runEngineTurn(skillPrompt, trimmed);
+          return;
+        }
+        // 3) Unknown slash → let the command system surface "Unknown command".
+        if (commands) {
+          await runSlashCommand(trimmed);
+          return;
+        }
+      }
+
+      // ── Normal chat ──────────────────────────────────────────────────────
+      await runEngineTurn(trimmed, trimmed);
+    },
+    [commands, getSkill, runSlashCommand, runEngineTurn, state.commandPalette],
   );
 
   // ── Global keybindings ────────────────────────────────────────────────────

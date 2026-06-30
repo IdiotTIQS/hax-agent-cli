@@ -415,7 +415,11 @@ async function runInteractive(flags: ParsedFlags) {
         const skill = skills.get(cmdName);
         if (skill) {
           process.stdout.write("\n" + styled(THEME.heading, "Skill: " + skill.name) + "\n" + styled(THEME.dim, skill.description || "") + "\n\n");
-          const skillPrompt = "Execute skill \"" + skill.name + "\".\n\n" + skill.content;
+          // Preserve any text the user typed after the skill name, e.g.
+          // "/frontend-design build a login page" → userArgs = "build a login page".
+          const userArgs = trimmed.replace(/^\/\S+\s*/, "").trim();
+          const skillPrompt = "Execute skill \"" + skill.name + "\".\n\n" + skill.content
+            + (userArgs ? "\n\n---\nUser request:\n" + userArgs : "");
           try {
             for await (const event of engine.sendMessage(skillPrompt)) {
               switch (event.type) {

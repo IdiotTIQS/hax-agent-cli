@@ -262,6 +262,10 @@ export async function runInteractiveInk(flags: InkFlags): Promise<void> {
       session={session as unknown as Parameters<typeof App>[0]["session"]}
       settings={settings}
       mcpManager={mcpManager}
+      getSkill={(name: string) => {
+        const s = skills.get(name);
+        return s ? { name: s.name, content: s.content, description: s.description } : null;
+      }}
     />,
   );
 
