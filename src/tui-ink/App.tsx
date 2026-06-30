@@ -108,6 +108,17 @@ export interface AppProps {
    * Settings object passed through to CommandContext.
    */
   settings?: Record<string, unknown> | null;
+  /**
+   * Shared MCP manager — passed to CommandContext so /mcp commands use the
+   * same already-started manager instead of creating a new one.
+   */
+  mcpManager?: {
+    getStatus(name?: string | null): unknown;
+    loadConfig(filePath?: string | null): void;
+    startAll(): Promise<unknown>;
+    stopAll(): void;
+    discoverTools(name?: string | null): Promise<Array<{ name: string }>>;
+  } | null;
 }
 
 // (CommittedMessage removed in T5 — ConversationTurn renders full turn snapshots)
@@ -128,6 +139,7 @@ export function App({
   commands,
   session,
   settings,
+  mcpManager,
 }: AppProps): React.ReactElement {
   // ── Reducer ───────────────────────────────────────────────────────────────
   const [state, dispatch] = useReducer(
@@ -179,6 +191,7 @@ export function App({
           session: session as Parameters<typeof commands.execute>[1]["session"],
           rl: undefined,
           settings: settings ?? undefined,
+          mcpManager: mcpManager ?? undefined,
         });
       } catch (err) {
         buf += `\nError: ${(err as Error).message ?? String(err)}`;
@@ -198,7 +211,7 @@ export function App({
         dispatch({ type: "clear" });
       }
     },
-    [commands, session, settings, pm],
+    [commands, session, settings, pm, mcpManager],
   );
 
   // ── Submit handler ────────────────────────────────────────────────────────

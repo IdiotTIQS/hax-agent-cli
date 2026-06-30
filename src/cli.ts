@@ -21,6 +21,7 @@ import { shouldRunSetup, runSetup } from "./setup.js";
 import { SandboxAdapter } from "./sandbox/adapter.js";
 import { applyTheme } from "./shared/themes.js";
 import * as commandsRegistryMod from "./commands/registry.js";
+import { bootstrapMcp } from "./services/mcp-bootstrap.js";
 
 // === Argument Parser ===
 
@@ -273,6 +274,10 @@ async function runInteractive(flags: ParsedFlags) {
   const toolRegistry = createDefaultRegistry(process.cwd());
   const skills = loadSkillRegistry();
 
+  // Bootstrap MCP: load config, start servers, register tools into toolRegistry.
+  // Failures are caught inside bootstrapMcp — CLI always continues.
+  const mcpManager = await bootstrapMcp(toolRegistry);
+
   // Wire plugin system
   const pluginRegistry = loadPluginRegistry(process.cwd());
   const pluginHooks = (pluginRegistry.getAllHooks() as Array<{ event?: string; matcher?: string; priority?: number }>);
@@ -303,7 +308,7 @@ async function runInteractive(flags: ParsedFlags) {
     }
   }
 
-  const session = new Session({ provider: provider as SessionProvider, toolRegistry, permissionManager: pm, hookExecutor: hooks, pluginRegistry: pluginRegistry as PluginRegistry, sandbox: sandbox as Sandbox | null });
+  const session = new Session({ provider: provider as SessionProvider, toolRegistry, permissionManager: pm, hookExecutor: hooks, pluginRegistry: pluginRegistry as PluginRegistry, sandbox: sandbox as Sandbox | null, mcpManager });
 
   // Approval callback — uses readline.question for non-YOLO confirmations
   const approvalCallback = function(toolName: string, toolInput: Record<string, unknown>) {
@@ -404,7 +409,7 @@ async function runInteractive(flags: ParsedFlags) {
       const cmdName = trimmed.slice(1).trim().split(/\s+/)[0].toLowerCase();
       // Check if it's a known command
       if (commands.commands[cmdName]) {
-        await commands.execute(trimmed, { screen: { write: function(t: string) { process.stdout.write(t); } }, session: session as Parameters<typeof commands.execute>[1]["session"], rl: rl, settings: settings });
+        await commands.execute(trimmed, { screen: { write: function(t: string) { process.stdout.write(t); } }, session: session as Parameters<typeof commands.execute>[1]["session"], rl: rl, settings: settings, mcpManager });
       } else {
         // Check if it's a skill
         const skill = skills.get(cmdName);
@@ -427,7 +432,7 @@ async function runInteractive(flags: ParsedFlags) {
             }
           } catch (err) { process.stdout.write(styled(THEME.error, "Error: " + (err as Error).message) + "\n"); }
         } else {
-          await commands.execute(trimmed, { screen: { write: function(t: string) { process.stdout.write(t); } }, session: session as Parameters<typeof commands.execute>[1]["session"], rl: rl, settings: settings });
+          await commands.execute(trimmed, { screen: { write: function(t: string) { process.stdout.write(t); } }, session: session as Parameters<typeof commands.execute>[1]["session"], rl: rl, settings: settings, mcpManager });
         }
       }
       refreshPrompt();
@@ -483,6 +488,7 @@ async function runInteractive(flags: ParsedFlags) {
 
   rl.on("close", function () {
     if (sandbox) { try { sandbox.stop(); } catch (_) {} }
+    try { mcpManager.stopAll(); } catch (_) {}
     const costTracker = (session as unknown as { costTracker?: { getCost(m: string): number } }).costTracker;
     const cost = costTracker ? "$" + costTracker.getCost(session.provider?.model ?? "").toFixed(4) : "$0";
     process.stdout.write("\n" + ANSI.dim + "Session: " + session.turnCount + " turns / " + session.toolCallCount + " tools / " + cost + " / " + (session.inputTokens + session.outputTokens).toLocaleString() + " tokens" + ANSI.reset + "\n");

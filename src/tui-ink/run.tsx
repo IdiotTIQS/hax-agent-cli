@@ -43,6 +43,7 @@ import { loadPluginRegistry } from "../plugins/registry.js";
 import { SandboxAdapter } from "../sandbox/adapter.js";
 import { applyTheme } from "../shared/themes.js";
 import * as commandsRegistryMod from "../commands/registry.js";
+import { bootstrapMcp } from "../services/mcp-bootstrap.js";
 
 import { App, makeApprovalCallback } from "./App.js";
 import type { AppDispatch } from "./App.js";
@@ -123,6 +124,10 @@ export async function runInteractiveInk(flags: InkFlags): Promise<void> {
   const toolRegistry = createDefaultRegistry(process.cwd());
   const skills = loadSkillRegistry();
 
+  // Bootstrap MCP: load config, start servers, register tools into toolRegistry.
+  // Failures are caught inside bootstrapMcp — CLI always continues.
+  const mcpManager = await bootstrapMcp(toolRegistry);
+
   // ── Plugin system ────────────────────────────────────────────────────────
   const pluginRegistry = loadPluginRegistry(process.cwd());
   const pluginHooks = pluginRegistry.getAllHooks() as Array<{
@@ -176,6 +181,7 @@ export async function runInteractiveInk(flags: InkFlags): Promise<void> {
     hookExecutor: hooks,
     pluginRegistry: pluginRegistry as PluginRegistry,
     sandbox: sandbox as Sandbox | null,
+    mcpManager,
   });
 
   // ── Restore saved permissions / thinking / theme ─────────────────────────
@@ -255,6 +261,7 @@ export async function runInteractiveInk(flags: InkFlags): Promise<void> {
       commands={commandsRegistryMod}
       session={session as unknown as Parameters<typeof App>[0]["session"]}
       settings={settings}
+      mcpManager={mcpManager}
     />,
   );
 
@@ -265,5 +272,6 @@ export async function runInteractiveInk(flags: InkFlags): Promise<void> {
       sandbox.stop();
     } catch (_) {}
   }
+  try { mcpManager.stopAll(); } catch (_) {}
   process.exit(0);
 }

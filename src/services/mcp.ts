@@ -247,24 +247,46 @@ class McpClientManager extends EventEmitter {
     if (!cfg.command) throw new Error("stdio server requires 'command'");
 
     const env = { ...process.env, ...cfg.env };
-    const child = spawn(cfg.command, cfg.args, {
+    // On Windows, bare "npx"/"npm" are .cmd batch files — resolve to the .cmd
+    // variant so spawn() can find them without shell:true.
+    let command = cfg.command;
+    if (process.platform === "win32") {
+      const winCmds = ["npx", "npm", "node", "yarn", "pnpm"];
+      if (winCmds.includes(command) && !command.endsWith(".cmd") && !command.endsWith(".exe")) {
+        command = command + ".cmd";
+      }
+    }
+    // On Windows, batch files (.cmd/.bat) require shell:true to be spawnable.
+    const needsShell = process.platform === "win32" &&
+      (command.endsWith(".cmd") || command.endsWith(".bat"));
+    const child = spawn(command, cfg.args, {
       cwd: cfg.cwd || process.cwd(),
       env,
       stdio: ["pipe", "pipe", "pipe"],
+      shell: needsShell,
     });
 
     info.process = child;
 
+    // Attach error listener immediately so spawn failures (e.g. ENOENT on
+    // Windows) surface as caught errors rather than unhandled 'error' events.
+    const spawnError = new Promise<never>((_, reject) => {
+      child.on("error", (err) => reject(err));
+    });
+
     // Initialize MCP protocol
-    const initResult = await this._sendMCPRequest(child, {
-      jsonrpc: "2.0", id: 1,
-      method: "initialize",
-      params: {
-        protocolVersion: "2024-11-05",
-        capabilities: { tools: {} },
-        clientInfo: { name: "hax-agent", version: "1.0.0" },
-      },
-    }) as JsonRpcResponse;
+    const initResult = await Promise.race([
+      this._sendMCPRequest(child, {
+        jsonrpc: "2.0", id: 1,
+        method: "initialize",
+        params: {
+          protocolVersion: "2024-11-05",
+          capabilities: { tools: {} },
+          clientInfo: { name: "hax-agent", version: "1.0.0" },
+        },
+      }),
+      spawnError,
+    ]) as JsonRpcResponse;
 
     if (!initResult || initResult.error) {
       child.kill();
@@ -314,7 +336,12 @@ class McpClientManager extends EventEmitter {
         jsonrpc: "2.0", id: Date.now(),
         method: "tools/list",
       }) as JsonRpcResponse;
-      return ((result?.tools || []) as Array<{ name: string; description?: string; inputSchema?: Record<string, unknown> }>).map(t => ({
+      // JSON-RPC 2.0: response is { result: { tools: [...] } }
+      // Fallback: some servers send { tools: [...] } at top level
+      const toolsArray = (result?.result as { tools?: unknown[] } | undefined)?.tools
+        || (result?.tools as unknown[])
+        || [];
+      return (toolsArray as Array<{ name: string; description?: string; inputSchema?: Record<string, unknown> }>).map(t => ({
         name: `mcp.${name}.${t.name}`,
         description: t.description || `MCP tool: ${t.name}`,
         inputSchema: t.inputSchema || { type: "object", properties: {} },
@@ -328,7 +355,10 @@ class McpClientManager extends EventEmitter {
         body: JSON.stringify({ jsonrpc: "2.0", id: Date.now(), method: "tools/list" }),
       });
       const data = await r.json() as JsonRpcResponse;
-      return ((data?.tools || []) as Array<{ name: string; description?: string; inputSchema?: Record<string, unknown> }>).map(t => ({
+      const toolsArray = (data?.result as { tools?: unknown[] } | undefined)?.tools
+        || (data?.tools as unknown[])
+        || [];
+      return (toolsArray as Array<{ name: string; description?: string; inputSchema?: Record<string, unknown> }>).map(t => ({
         name: `mcp.${name}.${t.name}`,
         description: t.description || `MCP tool: ${t.name}`,
         inputSchema: t.inputSchema || { type: "object", properties: {} },
@@ -351,7 +381,9 @@ class McpClientManager extends EventEmitter {
         if (info.process) {
           const result = await this._sendMCPRequest(info.process, callParams) as JsonRpcResponse;
           if (result?.error) throw new Error(result.error.message);
-          return { ok: true, data: result?.content || result };
+          // JSON-RPC 2.0: data is under result.content; fall back to top-level content
+          const data = (result?.result as JsonRpcResponse | undefined) || result;
+          return { ok: true, data: data?.content || data };
         }
         if (info._httpClient) {
           const r = await fetch(info._httpClient.url, {
@@ -361,7 +393,8 @@ class McpClientManager extends EventEmitter {
           });
           const data = await r.json() as JsonRpcResponse;
           if (data?.error) throw new Error(data.error.message);
-          return { ok: true, data: data?.content || data };
+          const inner = (data?.result as JsonRpcResponse | undefined) || data;
+          return { ok: true, data: inner?.content || inner };
         }
         throw new Error("Server not running");
       } catch (err) {

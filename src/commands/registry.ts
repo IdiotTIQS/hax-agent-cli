@@ -50,7 +50,7 @@ interface CommandContext {
   };
   rl?: { prompt?(): void; close?(): void; question?(q: string, cb: (a: string) => void): void } | null;
   settings?: { projectRoot?: string; [key: string]: unknown } | null;
-  mcpManager?: { getStatus(): Record<string, { status: string; tools: number }>; loadConfig(): void; startAll(): Promise<void>; stopAll(): void; discoverTools(): Promise<Array<{ name: string }>> } | null;
+  mcpManager?: { getStatus(name?: string | null): unknown; loadConfig(filePath?: string | null): void; startAll(): Promise<unknown>; stopAll(): void; discoverTools(name?: string | null): Promise<Array<{ name: string }>> } | null;
   engine?: { maxToolTurns?: number } | null;
 }
 

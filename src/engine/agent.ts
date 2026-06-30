@@ -28,6 +28,16 @@ interface SessionOptions {
   pluginRegistry?: PluginRegistry | null;
   sandbox?: Sandbox | null;
   goal?: SessionGoal | null;
+  mcpManager?: McpManagerHandle | null;
+}
+
+/** Minimal interface for McpClientManager — avoids a hard import cycle. */
+interface McpManagerHandle {
+  getStatus(name?: string | null): unknown;
+  loadConfig(filePath?: string | null): void;
+  startAll(): Promise<unknown>;
+  stopAll(): void;
+  discoverTools(name?: string | null): Promise<Array<{ name: string; _mcpServer: string }>>;
 }
 
 interface SessionProvider {
@@ -106,6 +116,7 @@ class Session {
   hookExecutor: HookExecutor | null;
   pluginRegistry: PluginRegistry | null;
   sandbox: Sandbox | null;
+  mcpManager: McpManagerHandle | null;
   messages: Array<AssistantMessage | { role: string; content: unknown; internal?: boolean }>;
   isStreaming: boolean;
   responseInterrupted: boolean;
@@ -129,6 +140,7 @@ class Session {
     this.hookExecutor = o.hookExecutor || null;
     this.pluginRegistry = o.pluginRegistry || null;
     this.sandbox = o.sandbox || null;
+    this.mcpManager = o.mcpManager || null;
     this.messages = [];
     this.isStreaming = false;
     this.responseInterrupted = false;
@@ -468,7 +480,7 @@ class AgentEngine extends EventEmitter {
         yield { type: "tool.start", name, input };
         let execResult: AgentToolResult;
         try {
-          execResult = await registry!.execute(name, input, { root: this.projectRoot, session: s as unknown as Record<string, unknown> }) as AgentToolResult;
+          execResult = await registry!.execute(name, input, { root: this.projectRoot, session: s as unknown as Record<string, unknown>, mcpManager: s.mcpManager }) as AgentToolResult;
           s.toolCallCount++;
         } catch (err) {
           execResult = { ok: false, error: { code: "EXECUTION_ERROR", message: (err as Error).message } };
