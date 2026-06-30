@@ -273,6 +273,11 @@ class McpClientManager extends EventEmitter {
     const spawnError = new Promise<never>((_, reject) => {
       child.on("error", (err) => reject(err));
     });
+    // If the child emits 'error' AFTER the race below has already settled
+    // (init succeeded, then a late failure), the rejected spawnError promise
+    // would otherwise surface as an unhandledRejection. Attach a no-op catch so
+    // a late rejection is observed and silently dropped.
+    spawnError.catch(() => {});
 
     // Initialize MCP protocol
     const initResult = await Promise.race([
