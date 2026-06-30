@@ -252,6 +252,9 @@ export async function runInteractiveInk(flags: InkFlags): Promise<void> {
       commandNames={commandNames}
       skillNames={skillNames}
       dispatchRef={dispatchRef}
+      commands={commandsRegistryMod}
+      session={session as unknown as Parameters<typeof App>[0]["session"]}
+      settings={settings}
     />,
   );
 

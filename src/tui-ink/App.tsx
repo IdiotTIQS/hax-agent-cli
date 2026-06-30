@@ -38,6 +38,7 @@
 
 import React, { useReducer, useState, useRef, useCallback } from "react";
 import { Box, Text, Static } from "ink";
+import type * as CommandsRegistryMod from "../commands/registry.js";
 
 import { reducer } from "./reducer.js";
 import { createInitialState } from "./types.js";
@@ -88,6 +89,25 @@ export interface AppProps {
    * into the reducer after first render.
    */
   dispatchRef?: React.MutableRefObject<AppDispatch | null>;
+  /**
+   * The commands registry module (from run.tsx) — used to execute slash
+   * commands without sending them to the LLM (fixes M1).
+   */
+  commands?: typeof CommandsRegistryMod;
+  /**
+   * Live session object — mutated by commands like /model, /provider, /clear.
+   * After command execution, App reads session.provider to sync the status bar.
+   */
+  session?: {
+    messages: unknown[];
+    provider?: { name?: string; model?: string } | null;
+    permissionManager?: { mode: string } | null;
+    [key: string]: unknown;
+  };
+  /**
+   * Settings object passed through to CommandContext.
+   */
+  settings?: Record<string, unknown> | null;
 }
 
 // (CommittedMessage removed in T5 — ConversationTurn renders full turn snapshots)
@@ -105,6 +125,9 @@ export function App({
   commandNames = [],
   skillNames = [],
   dispatchRef,
+  commands,
+  session,
+  settings,
 }: AppProps): React.ReactElement {
   // ── Reducer ───────────────────────────────────────────────────────────────
   const [state, dispatch] = useReducer(
@@ -141,6 +164,43 @@ export function App({
     dispatch({ type: "set_mode", mode: next });
   }, [state.permissionMode, pm]);
 
+  // ── Slash command runner ──────────────────────────────────────────────────
+  // Executes a slash command via the commands registry, collects its screen
+  // output, commits it as a turn in the Static history, and syncs any state
+  // mutations (model, mode, provider) back to the ink reducer.
+  const runSlashCommand = useCallback(
+    async (line: string) => {
+      if (!commands) return;
+      let buf = "";
+      const screen = { write: (s: string) => { buf += s; } };
+      try {
+        await commands.execute(line, {
+          screen,
+          session: session as Parameters<typeof commands.execute>[1]["session"],
+          rl: undefined,
+          settings: settings ?? undefined,
+        });
+      } catch (err) {
+        buf += `\nError: ${(err as Error).message ?? String(err)}`;
+      }
+      // Commit the command + its output as a turn in history.
+      dispatch({ type: "command_output", command: line, output: buf });
+      // Sync any side-effect mutations back to the reducer's state.
+      dispatch({
+        type: "update_meta",
+        model: (session?.provider as { model?: string } | null | undefined)?.model,
+        providerName: (session?.provider as { name?: string } | null | undefined)?.name,
+        permissionMode: pm.mode,
+      });
+      // /clear also wipes the ink committed history.
+      const cmdName = line.slice(1).split(/\s+/)[0];
+      if (cmdName === "clear") {
+        dispatch({ type: "clear" });
+      }
+    },
+    [commands, session, settings, pm],
+  );
+
   // ── Submit handler ────────────────────────────────────────────────────────
   const handleSubmit = useCallback(
     async (text: string) => {
@@ -149,6 +209,21 @@ export function App({
       if (isStreamingRef.current) return;
 
       setInputValue("");
+      // Close the palette if it was open when the user pressed Enter.
+      if (state.commandPalette?.open) {
+        dispatch({ type: "close_palette" });
+      }
+
+      // ── Slash command branch ────────────────────────────────────────────
+      // Any input starting with "/" is treated as a slash command.  We check
+      // whether the commands module is available and execute via it.  Unknown
+      // commands are still sent through execute() so its "Unknown command"
+      // message appears in history.
+      if (trimmed.startsWith("/") && commands) {
+        await runSlashCommand(trimmed);
+        return;
+      }
+
       spinnerStartRef.current = Date.now();
 
       // Optimistic: push user message + start spinner immediately.
@@ -179,7 +254,7 @@ export function App({
         isStreamingRef.current = false;
       }
     },
-    [engine],
+    [engine, commands, runSlashCommand, state.commandPalette],
   );
 
   // ── Global keybindings ────────────────────────────────────────────────────

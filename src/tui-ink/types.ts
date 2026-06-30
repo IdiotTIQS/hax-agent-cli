@@ -350,6 +350,17 @@ export interface ClosePaletteAction {
 }
 
 /**
+ * A slash command was executed; its output is committed as a turn in history.
+ * userText = the original command line (e.g. "/help");
+ * output   = the collected screen.write() text (may contain ANSI codes).
+ */
+export interface CommandOutputAction {
+  type: "command_output";
+  command: string;
+  output: string;
+}
+
+/**
  * All actions the ink reducer handles.
  * Discriminated on the `type` field — exhaustive switches required.
  */
@@ -366,7 +377,8 @@ export type AppAction =
   | ToggleDetailAction
   | OpenPaletteAction
   | UpdatePaletteAction
-  | ClosePaletteAction;
+  | ClosePaletteAction
+  | CommandOutputAction;
 
 // ---------------------------------------------------------------------------
 // createInitialState helper

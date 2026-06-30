@@ -71,3 +71,18 @@ test("interrupted turn commits with interrupted flag", () => {
   assert.equal(s.committedTurns[0].interrupted, true);
   assert.equal(s.committedTurns[0].assistantText, "partial");
 });
+
+test("command_output pushes a committed turn with command as userText and output as assistantText", () => {
+  let s = createInitialState();
+  s = reducer(s, { type: "command_output", command: "/help", output: "Help text here" });
+  assert.equal(s.committedTurns.length, 1);
+  assert.equal(s.committedTurns[0].userText, "/help");
+  assert.equal(s.committedTurns[0].assistantText, "Help text here");
+  assert.equal(s.committedTurns[0].thinking, "");
+  assert.equal(s.committedTurns[0].tools.length, 0);
+  assert.equal(s.committedTurns[0].interrupted, false);
+  assert.equal(s.committedTurns[0].error, null);
+  // command_output does not mutate other state fields
+  assert.equal(s.isStreaming, false);
+  assert.equal(s.pendingUserText, "");
+});

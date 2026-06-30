@@ -326,6 +326,24 @@ export function reducer(state: AppState, action: AppAction): AppState {
     case "close_palette":
       return { ...state, commandPalette: null };
 
+    // ── Slash command output ─────────────────────────────────────────────────
+    // Commits a slash command execution as a turn in the Static history.
+    // No engine interaction — purely a UI record of what ran and what it output.
+    case "command_output": {
+      const committed: CommittedTurn = {
+        userText: action.command,
+        assistantText: action.output,
+        thinking: "",
+        tools: [],
+        interrupted: false,
+        error: null,
+      };
+      return {
+        ...state,
+        committedTurns: [...state.committedTurns, committed],
+      };
+    }
+
     default: {
       const _exhaustive: never = action;
       void _exhaustive;
