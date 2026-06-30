@@ -319,19 +319,24 @@ export function App({
   const handleInputChange = useCallback(
     (value: string) => {
       setInputValue(value);
-      if (value.startsWith("/")) {
-        // Open or update the palette query as the user types.
+      // The palette is a single-token picker: show it only while the user is
+      // typing the command name itself (a leading "/" with no space yet) AND
+      // there are matching commands/skills. Once a space is typed (args begin)
+      // or nothing matches, close it so Enter submits/executes normally instead
+      // of being swallowed by UserInput's palette Enter-guard.
+      const isSingleToken = value.startsWith("/") && !/\s/.test(value);
+      const hasMatches = isSingleToken && computeCompletions(value, commandNames, skillNames).length > 0;
+      if (hasMatches) {
         if (state.commandPalette?.open) {
           dispatch({ type: "update_palette", query: value });
         } else {
           dispatch({ type: "open_palette", query: value });
         }
       } else if (state.commandPalette?.open) {
-        // User cleared the "/" prefix — close the palette.
         dispatch({ type: "close_palette" });
       }
     },
-    [state.commandPalette],
+    [state.commandPalette, commandNames, skillNames],
   );
 
   // ── Render ────────────────────────────────────────────────────────────────
@@ -394,8 +399,12 @@ export function App({
             commandNames={commandNames}
             skillNames={skillNames}
             onPick={(value) => {
-              setInputValue(value + " ");
+              // Enter on a palette item executes it immediately (not just
+              // fill-then-require-a-second-Enter). Close the palette first so
+              // UserInput's paletteOpen Enter-guard no longer applies, then run.
               dispatch({ type: "close_palette" });
+              setInputValue("");
+              void handleSubmit(value);
             }}
             onClose={() => dispatch({ type: "close_palette" })}
           />
